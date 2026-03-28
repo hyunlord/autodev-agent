@@ -1,5 +1,5 @@
 import { chromium, type Browser, type Page } from 'playwright';
-import { execa, type ResultPromise } from 'execa';
+import type { ResultPromise } from 'execa';
 import waitOn from 'wait-on';
 import treeKill from 'tree-kill';
 import { nanoid } from 'nanoid';
@@ -24,6 +24,8 @@ export interface WebVerifyContext {
 }
 
 export async function startWebApp(opts: WebVerifyOptions): Promise<WebVerifyContext> {
+  const { execa } = await import('execa');
+
   if (!existsSync(opts.screenshotDir)) {
     mkdirSync(opts.screenshotDir, { recursive: true });
   }

@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { execa } from 'execa';
 import type { ProjectConfig } from '../lib/detection/project-type';
 import type { PlanningMode } from '../lib/types';
 
@@ -67,6 +66,7 @@ Respond with ONLY a valid JSON object (no markdown, no explanation) with this st
 Verification step types: build_check, file_check, port_check, http_check, dom_check, vlm_check.
 Order from cheapest to most expensive. Always include build_check first.`;
 
+  const { execa } = await import('execa');
   const result = await execa('claude', [
     '-p', planPrompt,
     '--output-format', 'text',

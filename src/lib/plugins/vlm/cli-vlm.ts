@@ -1,6 +1,3 @@
-import { execa } from 'execa';
-import sharp from 'sharp';
-
 export interface CLIVLMResult {
   pass: boolean;
   confidence: number;
@@ -13,6 +10,7 @@ export async function verifyScreenshotViaCli(
   agentCli: string = 'claude',
 ): Promise<CLIVLMResult> {
   // Resize screenshot to reduce token cost
+  const sharp = (await import('sharp')).default;
   await sharp(screenshotPath)
     .resize(1280, 720, { fit: 'inside' })
     .png()
@@ -29,6 +27,7 @@ Respond with ONLY a JSON object (no markdown, no explanation):
 {"pass": true/false, "confidence": 0.0-1.0, "reasoning": "brief explanation"}`;
 
   try {
+    const { execa } = await import('execa');
     const result = await execa(agentCli, [
       '-p', vlmPrompt,
       '--output-format', 'text',

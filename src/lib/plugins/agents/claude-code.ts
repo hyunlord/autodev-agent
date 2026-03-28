@@ -1,5 +1,9 @@
 import type { ICodingAgent, CodingAgentOptions, CodingAgentResult } from '../interfaces';
-import { execa } from 'execa';
+
+async function getExeca() {
+  const mod = await import('execa');
+  return mod.execa;
+}
 
 export class ClaudeCodeAgent implements ICodingAgent {
   readonly id = 'claude-code';
@@ -7,6 +11,7 @@ export class ClaudeCodeAgent implements ICodingAgent {
 
   async isAvailable(): Promise<boolean> {
     try {
+      const execa = await getExeca();
       const { stdout } = await execa('claude', ['--version'], { reject: false });
       return stdout.includes('claude');
     } catch {
@@ -90,6 +95,7 @@ export class ClaudeCodeAgent implements ICodingAgent {
       message: `[Claude Code CLI] Running with max ${opts.maxTurns ?? 20} turns...`,
     });
 
+    const execa = await getExeca();
     const result = await execa('claude', args, {
       cwd: opts.projectDir,
       timeout: opts.timeoutMs ?? 300_000,
@@ -130,6 +136,7 @@ export class ClaudeCodeAgent implements ICodingAgent {
 
   private async getModifiedFiles(cwd: string): Promise<string[]> {
     try {
+      const execa = await getExeca();
       const { stdout } = await execa('git', ['diff', '--name-only'], { cwd, reject: false });
       const staged = await execa('git', ['diff', '--name-only', '--cached'], { cwd, reject: false });
       const files = [...stdout.split('\n'), ...staged.stdout.split('\n')]
