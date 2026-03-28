@@ -11,6 +11,7 @@ import { RetryController } from './retry';
 import { generateEscalationReport } from './escalation';
 import { loadConfig } from '../lib/config';
 import type { PipelineEvent, TaskStatus, PlanningMode } from '../lib/types';
+import type { ICodingAgent } from '../lib/plugins/interfaces';
 
 type EmitFn = (event: PipelineEvent) => void;
 
@@ -69,14 +70,7 @@ export async function runPipeline(taskId: string, emit: EmitFn): Promise<void> {
     recordEvent(taskId, 'plan_complete', { summary: plan.summary, files: plan.estimatedFiles });
 
     // ─── 3. Code → Verify retry loop ─────────────────────
-    const agent = PluginRegistry.instance.getAgent('claude-code');
-    if (!agent) {
-      throw new Error('No coding agent available. Is Claude Code CLI installed?');
-    }
-    const available = await agent.isAvailable();
-    if (!available) {
-      throw new Error('Claude Code CLI is not installed or not accessible. Install it with: npm install -g @anthropic-ai/claude-code');
-    }
+    let { agent, agentId } = await selectAgent((task as any).agentId ?? 'claude-code', emit);
 
     const retryCtrl = new RetryController({
       maxAttempts: config.maxRetries,
@@ -98,7 +92,7 @@ export async function runPipeline(taskId: string, emit: EmitFn): Promise<void> {
       }
 
       emit({ type: 'status_change', status: 'coding', message: isRetry ? `Retrying with error context (attempt ${attempt})...` : 'Sending task to Claude Code...' });
-      emit({ type: 'attempt_start', attemptNum: attempt, agentId: 'claude-code' });
+      emit({ type: 'attempt_start', attemptNum: attempt, agentId });
 
       let codingPrompt = plan.codingPrompt;
       if (isRetry && lastFailedChecks.length > 0) {
@@ -120,7 +114,7 @@ export async function runPipeline(taskId: string, emit: EmitFn): Promise<void> {
         id: codingAttemptId,
         taskId,
         attemptNum: attempt,
-        agentId: 'claude-code',
+        agentId,
         phase: 'coding',
         status: codeResult.success ? 'success' : 'error',
         input: JSON.stringify({ codingPrompt: codingPrompt.slice(0, 5000) }),
@@ -162,6 +156,18 @@ export async function runPipeline(taskId: string, emit: EmitFn): Promise<void> {
         }
 
         lastFailedChecks = [{ id: 'coding', description: 'Coding agent returned error', actual: errorMsg }];
+        const errorTier = retryCtrl.classifyError(errorMsg);
+        if (errorTier === 'strategy_change') {
+          const allAgents = PluginRegistry.instance.listAgents();
+          for (const alt of allAgents) {
+            if (alt.id !== agentId && await alt.isAvailable()) {
+              emit({ type: 'log', level: 'info', message: `Strategy change: switching from ${agent.name} to ${alt.name}` });
+              agent = alt;
+              agentId = alt.id;
+              break;
+            }
+          }
+        }
         continue;
       }
 
@@ -290,6 +296,32 @@ async function escalate(
   emit({ type: 'log', level: 'error', message: `Escalating: ${stopReason} after ${retrySummary.attempts} attempt(s)` });
   emit({ type: 'escalation', report });
   emit({ type: 'task_complete', success: false, summary: `Escalated (${stopReason}): ${summary}. ${retrySummary.attempts} attempt(s), $${totalCostUsd.toFixed(4)} spent.` });
+}
+
+async function selectAgent(
+  preferredId: string,
+  emit: EmitFn,
+): Promise<{ agent: ICodingAgent; agentId: string }> {
+  const preferred = PluginRegistry.instance.getAgent(preferredId);
+  if (preferred && await preferred.isAvailable()) {
+    emit({ type: 'log', level: 'info', message: `Using agent: ${preferred.name}` });
+    return { agent: preferred, agentId: preferred.id };
+  }
+
+  emit({ type: 'log', level: 'warn', message: `Agent '${preferredId}' not available, trying fallback...` });
+
+  const allAgents = PluginRegistry.instance.listAgents();
+  for (const fallback of allAgents) {
+    if (fallback.id === preferredId) continue;
+    if (await fallback.isAvailable()) {
+      emit({ type: 'log', level: 'info', message: `Fallback: using ${fallback.name}` });
+      return { agent: fallback, agentId: fallback.id };
+    }
+  }
+
+  throw new Error(
+    'No coding agent available. Install at least one of: Claude Code, Codex CLI, Gemini CLI, Aider, Cline CLI'
+  );
 }
 
 async function resolveProjectDir(taskId: string, userDir: string | null): Promise<string> {

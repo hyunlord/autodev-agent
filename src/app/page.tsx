@@ -28,7 +28,8 @@ export default function Dashboard() {
   const [planningMode, setPlanningMode] = useState<'auto' | 'manual' | 'api'>('auto');
   const [codingPrompt, setCodingPrompt] = useState('');
   const [verificationChecklist, setVerificationChecklist] = useState('');
-  const [agentStatus, setAgentStatus] = useState<string>('checking...');
+  const [agents, setAgents] = useState<Array<{ id: string; name: string; available: boolean; path: string | null }>>([]);
+  const [selectedAgent, setSelectedAgent] = useState('claude-code');
 
   const fetchTasks = async () => {
     const res = await fetch('/api/tasks');
@@ -43,7 +44,11 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => {
-    fetch('/api/status').then(r => r.json()).then(d => setAgentStatus(d.claudeCode ? `Claude Code available (${d.claudeCodePath})` : 'Claude Code not found')).catch(() => setAgentStatus('status unknown'));
+    fetch('/api/status').then(r => r.json()).then(data => {
+      setAgents(data.agents ?? []);
+      const firstAvailable = (data.agents ?? []).find((a: any) => a.available);
+      if (firstAvailable) setSelectedAgent(firstAvailable.id);
+    }).catch(() => {});
   }, []);
 
   const handleSubmit = async () => {
@@ -75,9 +80,13 @@ export default function Dashboard() {
         <p className="text-gray-400 mt-1">Universal AI Development Orchestrator</p>
       </header>
 
-      <p className={`text-sm mb-4 ${agentStatus.includes('available') ? 'text-green-400' : 'text-yellow-400'}`}>
-        Agent: {agentStatus}
-      </p>
+      <div className="flex flex-wrap gap-2 mb-4">
+        {agents.map(a => (
+          <span key={a.id} className={`text-xs px-2 py-1 rounded ${a.available ? 'bg-green-900/50 text-green-400' : 'bg-gray-800 text-gray-600'}`}>
+            {a.available ? '\u25CF' : '\u25CB'} {a.name}
+          </span>
+        ))}
+      </div>
 
       <section className="mb-8 p-6 bg-gray-900 rounded-xl border border-gray-800">
         <h2 className="text-lg font-semibold mb-4">New Task</h2>
@@ -134,6 +143,20 @@ export default function Dashboard() {
             </div>
           </div>
         )}
+        <div className="mt-3">
+          <label className="block text-sm text-gray-400 mb-1">Coding Agent</label>
+          <select
+            value={selectedAgent}
+            onChange={(e) => setSelectedAgent(e.target.value)}
+            className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-100 focus:outline-none focus:border-indigo-500"
+          >
+            {agents.map(a => (
+              <option key={a.id} value={a.id} disabled={!a.available}>
+                {a.name} {a.available ? '' : '(not installed)'}
+              </option>
+            ))}
+          </select>
+        </div>
         <div className="mt-3 flex gap-3">
           <input
             type="text"

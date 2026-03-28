@@ -1,0 +1,1 @@
+ALTER TABLE `tasks` ADD `agent_id` text DEFAULT 'claude-code' NOT NULL;

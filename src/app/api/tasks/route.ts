@@ -28,6 +28,7 @@ export async function POST(req: Request) {
     prompt,
     status: 'pending' as const,
     planningMode: body.planningMode ?? 'auto',
+    agentId: body.agentId ?? 'claude-code',
     projectDir: projectDir ?? null,
     projectType: null,
     config: JSON.stringify({

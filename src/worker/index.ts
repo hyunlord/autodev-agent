@@ -2,6 +2,10 @@ import type { WorkerMessage } from '../lib/worker-manager';
 import { runPipeline } from './pipeline';
 import { PluginRegistry } from '../lib/plugins/registry';
 import { ClaudeCodeAgent } from '../lib/plugins/agents/claude-code';
+import { CodexCliAgent } from '../lib/plugins/agents/codex-cli';
+import { GeminiCliAgent } from '../lib/plugins/agents/gemini-cli';
+import { AiderAgent } from '../lib/plugins/agents/aider';
+import { ClineCliAgent } from '../lib/plugins/agents/cline-cli';
 import { runMigrations } from '../lib/db/migrate';
 import type { PipelineEvent } from '../lib/types';
 
@@ -18,9 +22,17 @@ try {
 }
 
 // Register built-in plugins
-const claudeCode = new ClaudeCodeAgent();
-PluginRegistry.instance.registerAgent(claudeCode);
-console.log('[Worker] Registered agent: claude-code');
+const agents = [
+  new ClaudeCodeAgent(),
+  new CodexCliAgent(),
+  new GeminiCliAgent(),
+  new AiderAgent(),
+  new ClineCliAgent(),
+];
+for (const agent of agents) {
+  PluginRegistry.instance.registerAgent(agent);
+}
+console.log(`[Worker] Registered ${agents.length} agents: ${agents.map(a => a.id).join(', ')}`);
 
 // ─── Message Handler ───────────────────────────────────────────
 

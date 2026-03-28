@@ -9,6 +9,7 @@ export const tasks = sqliteTable('tasks', {
   planningMode: text('planning_mode', {
     enum: ['auto', 'manual', 'api'],
   }).notNull().default('auto'),
+  agentId:     text('agent_id').notNull().default('claude-code'),
   projectDir:  text('project_dir'),
   projectType: text('project_type'),
   config:      text('config', { mode: 'json' }),
