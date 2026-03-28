@@ -15,11 +15,12 @@ export type WorkerEvent = {
 class WorkerManager extends EventEmitter {
   private worker: ChildProcess | null = null;
   private restartAttempts = 0;
-  private static _instance: WorkerManager;
-
   static get instance(): WorkerManager {
-    if (!this._instance) this._instance = new WorkerManager();
-    return this._instance;
+    const key = '__autodev_worker_manager__';
+    if (!(globalThis as any)[key]) {
+      (globalThis as any)[key] = new WorkerManager();
+    }
+    return (globalThis as any)[key];
   }
 
   ensureRunning(): void {

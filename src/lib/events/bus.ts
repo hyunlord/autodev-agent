@@ -1,13 +1,14 @@
 import { EventEmitter } from 'events';
 
 class PipelineEventBus extends EventEmitter {
-  private static _instance: PipelineEventBus;
   static get instance(): PipelineEventBus {
-    if (!this._instance) {
-      this._instance = new PipelineEventBus();
-      this._instance.setMaxListeners(100);
+    const key = '__autodev_event_bus__';
+    if (!(globalThis as any)[key]) {
+      const bus = new PipelineEventBus();
+      bus.setMaxListeners(100);
+      (globalThis as any)[key] = bus;
     }
-    return this._instance;
+    return (globalThis as any)[key];
   }
 }
 
