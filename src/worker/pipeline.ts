@@ -1,5 +1,6 @@
 import { db } from '../lib/db/client';
-import { tasks, attempts, events } from '../lib/db/schema';
+import { tasks, attempts, events, verifications } from '../lib/db/schema';
+import { join } from 'path';
 import { eq } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import { detectProjectType } from '../lib/detection/project-type';
@@ -78,20 +79,29 @@ export async function runPipeline(taskId: string, emit: EmitFn): Promise<void> {
       onProgress: (event) => emit(event),
     });
 
-    recordAttempt(taskId, 1, 'claude-code', 'coding', codeResult.success ? 'success' : 'error', {
-      input: { codingPrompt: plan.codingPrompt },
-      output: {
+    const codingAttemptId = nanoid();
+    db.insert(attempts).values({
+      id: codingAttemptId,
+      taskId,
+      attemptNum: 1,
+      agentId: 'claude-code',
+      phase: 'coding',
+      status: codeResult.success ? 'success' : 'error',
+      input: JSON.stringify({ codingPrompt: plan.codingPrompt }),
+      output: JSON.stringify({
         text: codeResult.text.slice(0, 5000),
         modifiedFiles: codeResult.modifiedFiles,
         costUsd: codeResult.costUsd,
-      },
-      errorLog: codeResult.success ? undefined : codeResult.text,
-      costUsd: codeResult.costUsd,
+      }),
+      errorLog: codeResult.success ? null : codeResult.text,
+      errorHash: null,
+      costUsd: codeResult.costUsd ?? null,
       tokenCount: codeResult.tokenUsage
         ? codeResult.tokenUsage.inputTokens + codeResult.tokenUsage.outputTokens
-        : undefined,
+        : null,
       durationMs: codeResult.durationMs,
-    });
+      createdAt: new Date().toISOString(),
+    }).run();
 
     if (!codeResult.success) {
       throw new Error(`Coding failed: ${codeResult.text.slice(0, 500)}`);
@@ -103,22 +113,63 @@ export async function runPipeline(taskId: string, emit: EmitFn): Promise<void> {
     }
     emit({ type: 'attempt_complete', attemptNum: 1, success: true });
 
-    // 5. Verification phase (STUB for Phase 1c)
+    // 5. Verification phase
     updateTaskStatus(taskId, 'verifying');
-    emit({ type: 'status_change', status: 'verifying', message: 'Verification will be implemented in Phase 1c. Skipping...' });
-    emit({ type: 'log', level: 'warn', message: 'Verification not yet implemented — marking as completed without verification' });
+    emit({ type: 'status_change', status: 'verifying', message: 'Running verification checks...' });
 
-    recordEvent(taskId, 'verification_spec', { spec: plan.verificationSpec });
+    const screenshotDir = join(process.cwd(), '.autodev', 'screenshots', taskId);
+    const { runVerification } = await import('./verification');
 
-    // 6. Complete
-    updateTaskStatus(taskId, 'completed', {
-      summary: plan.summary,
-      modifiedFiles: codeResult.modifiedFiles,
-      costUsd: codeResult.costUsd,
-      verificationSkipped: true,
-    });
+    const verifyResult = await runVerification(
+      plan.verificationSpec,
+      projectDir,
+      projectConfig,
+      screenshotDir,
+      emit,
+    );
 
-    emit({ type: 'task_complete', success: true, summary: `Completed: ${plan.summary}. ${codeResult.modifiedFiles.length} files modified. Verification pending (Phase 1c).` });
+    // Record verification results in DB
+    for (const r of verifyResult.results) {
+      db.insert(verifications).values({
+        id: nanoid(),
+        attemptId: codingAttemptId,
+        checkId: r.checkId,
+        type: r.type,
+        status: r.status,
+        expected: r.expected ?? null,
+        actual: r.actual ?? null,
+        screenshotPath: r.screenshotPath ?? null,
+        vlmFeedback: r.vlmFeedback ?? null,
+        vlmConfidence: r.vlmConfidence ?? null,
+        durationMs: r.durationMs,
+        createdAt: new Date().toISOString(),
+      }).run();
+    }
+
+    if (verifyResult.consoleErrors.length > 0) {
+      emit({ type: 'log', level: 'warn', message: `Console errors detected: ${verifyResult.consoleErrors.length}` });
+    }
+
+    // 6. Complete based on verification results
+    if (verifyResult.allPassed) {
+      updateTaskStatus(taskId, 'completed', {
+        summary: plan.summary,
+        modifiedFiles: codeResult.modifiedFiles,
+        costUsd: codeResult.costUsd,
+        verificationPassed: true,
+        verificationResults: verifyResult.results.map(r => ({ id: r.checkId, status: r.status })),
+      });
+      emit({ type: 'task_complete', success: true, summary: `Completed: ${plan.summary}. All ${verifyResult.results.length} checks passed.` });
+    } else {
+      const failedChecks = verifyResult.results.filter(r => r.status === 'fail');
+      updateTaskStatus(taskId, 'failed', {
+        summary: plan.summary,
+        modifiedFiles: codeResult.modifiedFiles,
+        verificationFailed: true,
+        failedChecks: failedChecks.map(r => ({ id: r.checkId, description: r.description, actual: r.actual })),
+      });
+      emit({ type: 'task_complete', success: false, summary: `Verification failed: ${failedChecks.length} check(s) failed. ${failedChecks.map(c => c.description).join('; ')}` });
+    }
 
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);

@@ -58,6 +58,7 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
   const { id } = use(params);
   const [task, setTask] = useState<TaskDetail | null>(null);
   const [liveEvents, setLiveEvents] = useState<PipelineEvent[]>([]);
+  const [screenshots, setScreenshots] = useState<Array<{ path: string; checkId: string }>>([]);
   const [currentStatus, setCurrentStatus] = useState('pending');
 
   useEffect(() => {
@@ -79,6 +80,9 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
       }
       if (event.type === 'task_complete') {
         setCurrentStatus(event.success ? 'completed' : 'failed');
+      }
+      if (event.type === 'screenshot') {
+        setScreenshots((prev) => [...prev, { path: event.path, checkId: event.checkId }]);
       }
     };
     return () => es.close();
@@ -151,7 +155,22 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
       <section>
         <h2 className="text-lg font-semibold mb-3">Screenshots</h2>
         <div className="bg-gray-900 rounded-lg border border-gray-800 p-4">
-          <p className="text-gray-500 text-sm">Screenshots will appear here during verification (Phase 1c)</p>
+          {screenshots.length === 0 ? (
+            <p className="text-gray-500 text-sm">No screenshots captured yet.</p>
+          ) : (
+            <div className="grid grid-cols-1 gap-4">
+              {screenshots.map((ss, i) => (
+                <div key={i} className="space-y-1">
+                  <p className="text-xs text-gray-400">Check: {ss.checkId}</p>
+                  <img
+                    src={`/api/screenshots/${encodeURIComponent(ss.path)}`}
+                    alt={`Screenshot for ${ss.checkId}`}
+                    className="w-full rounded-lg border border-gray-700"
+                  />
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </section>
     </div>
