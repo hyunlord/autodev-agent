@@ -21,7 +21,7 @@ export default function SetupPage() {
     <div className="min-h-screen flex items-center justify-center bg-gray-950 text-gray-100">
       <div className="w-full max-w-md p-8 space-y-6">
         <h1 className="text-2xl font-bold">AutoDev Setup</h1>
-        <p className="text-gray-400">Enter your API keys to get started.</p>
+        <p className="text-gray-400">API key is optional — only needed for &apos;API&apos; planning mode.</p>
         <div>
           <label className="block text-sm text-gray-400 mb-1">Anthropic API Key *</label>
           <input
@@ -34,11 +34,14 @@ export default function SetupPage() {
         </div>
         <button
           onClick={handleSave}
-          disabled={!anthropicKey || saving}
+          disabled={saving}
           className="w-full py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 rounded-lg font-medium transition-colors"
         >
           {saving ? 'Saving...' : 'Save & Continue'}
         </button>
+        <a href="/" className="block text-center text-sm text-gray-500 hover:text-gray-300 mt-3">
+          Skip — I&apos;ll use Auto or Manual planning mode
+        </a>
       </div>
     </div>
   );

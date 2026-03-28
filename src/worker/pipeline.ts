@@ -5,7 +5,7 @@ import { nanoid } from 'nanoid';
 import { detectProjectType } from '../lib/detection/project-type';
 import { generatePlan, type Plan } from './planning';
 import { PluginRegistry } from '../lib/plugins/registry';
-import type { PipelineEvent, TaskStatus } from '../lib/types';
+import type { PipelineEvent, TaskStatus, PlanningMode } from '../lib/types';
 
 type EmitFn = (event: PipelineEvent) => void;
 
@@ -33,9 +33,15 @@ export async function runPipeline(taskId: string, emit: EmitFn): Promise<void> {
     }
 
     // 3. Planning phase
+    const taskConfig = task.config ? (typeof task.config === 'string' ? JSON.parse(task.config) : task.config) as Record<string, any> : {};
     const plan = await generatePlan(
       task.prompt,
       projectConfig,
+      (task.planningMode ?? 'auto') as PlanningMode,
+      taskConfig.codingPrompt ? {
+        codingPrompt: taskConfig.codingPrompt,
+        verificationChecklist: taskConfig.verificationChecklist ?? '',
+      } : undefined,
       (msg) => emit({ type: 'log', level: 'info', message: msg }),
     );
 

@@ -1,5 +1,7 @@
 export type TaskStatus = 'pending' | 'planning' | 'coding' | 'verifying' | 'retrying' | 'completed' | 'failed' | 'escalated';
 
+export type PlanningMode = 'auto' | 'manual' | 'api';
+
 export type PipelineEvent =
   | { type: 'status_change'; status: TaskStatus; message: string }
   | { type: 'log'; level: 'info' | 'warn' | 'error'; message: string; timestamp?: string }

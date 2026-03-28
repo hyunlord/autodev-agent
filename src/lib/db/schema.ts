@@ -6,6 +6,9 @@ export const tasks = sqliteTable('tasks', {
   status:      text('status', {
     enum: ['pending', 'planning', 'coding', 'verifying', 'retrying', 'completed', 'failed', 'escalated'],
   }).notNull().default('pending'),
+  planningMode: text('planning_mode', {
+    enum: ['auto', 'manual', 'api'],
+  }).notNull().default('auto'),
   projectDir:  text('project_dir'),
   projectType: text('project_type'),
   config:      text('config', { mode: 'json' }),

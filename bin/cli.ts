@@ -62,11 +62,8 @@ async function runSetupWizard(): Promise<void> {
   intro('AutoDev Agent — First Run Setup');
 
   const anthropicKey = await text({
-    message: 'Anthropic API Key (required for Claude Code + VLM):',
-    placeholder: 'sk-ant-...',
-    validate: (v) => {
-      if (!v || !v.startsWith('sk-ant-')) return 'Must start with sk-ant-';
-    },
+    message: 'Anthropic API Key (optional, only for API planning mode):',
+    placeholder: 'sk-ant-... (press Enter to skip)',
   });
   if (isCancel(anthropicKey)) process.exit(0);
 
@@ -81,7 +78,10 @@ async function runSetupWizard(): Promise<void> {
     initialValue: process.cwd(),
   });
 
-  let envContent = `ANTHROPIC_API_KEY=${anthropicKey}\n`;
+  let envContent = '';
+  if (anthropicKey && !isCancel(anthropicKey) && String(anthropicKey).trim()) {
+    envContent += `ANTHROPIC_API_KEY=${anthropicKey}\n`;
+  }
   if (openaiKey && !isCancel(openaiKey)) {
     envContent += `OPENAI_API_KEY=${openaiKey}\n`;
   }

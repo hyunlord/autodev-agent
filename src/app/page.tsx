@@ -25,6 +25,9 @@ export default function Dashboard() {
   const [prompt, setPrompt] = useState('');
   const [projectDir, setProjectDir] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [planningMode, setPlanningMode] = useState<'auto' | 'manual' | 'api'>('auto');
+  const [codingPrompt, setCodingPrompt] = useState('');
+  const [verificationChecklist, setVerificationChecklist] = useState('');
   const [agentStatus, setAgentStatus] = useState<string>('checking...');
 
   const fetchTasks = async () => {
@@ -49,10 +52,17 @@ export default function Dashboard() {
     const res = await fetch('/api/tasks', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt, projectDir: projectDir || undefined }),
+      body: JSON.stringify({
+        prompt,
+        projectDir: projectDir || undefined,
+        planningMode,
+        ...(planningMode === 'manual' ? { codingPrompt, verificationChecklist } : {}),
+      }),
     });
     if (res.ok) {
       setPrompt('');
+      setCodingPrompt('');
+      setVerificationChecklist('');
       await fetchTasks();
     }
     setSubmitting(false);
@@ -78,6 +88,52 @@ export default function Dashboard() {
           rows={3}
           className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-gray-100 placeholder-gray-500 focus:outline-none focus:border-indigo-500 resize-none"
         />
+        <div className="mt-3 flex gap-2">
+          {(['auto', 'manual', 'api'] as const).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => setPlanningMode(mode)}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                planningMode === mode
+                  ? 'bg-indigo-600 text-white'
+                  : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+              }`}
+            >
+              {mode === 'auto' ? 'Auto (CLI)' : mode === 'manual' ? 'Manual' : 'API'}
+            </button>
+          ))}
+        </div>
+        {planningMode === 'auto' && (
+          <p className="mt-2 text-xs text-gray-500">Uses claude CLI (OAuth) — run &apos;claude login&apos; first</p>
+        )}
+        {planningMode === 'api' && (
+          <p className="mt-2 text-xs text-yellow-500">Requires ANTHROPIC_API_KEY in .autodev/.env</p>
+        )}
+        {planningMode === 'manual' && (
+          <div className="mt-3 space-y-3">
+            <div>
+              <label className="block text-sm text-gray-400 mb-1">Coding Prompt *</label>
+              <textarea
+                value={codingPrompt}
+                onChange={(e) => setCodingPrompt(e.target.value)}
+                placeholder="Detailed instruction for the coding agent..."
+                rows={4}
+                className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-gray-100 placeholder-gray-500 focus:outline-none focus:border-indigo-500 resize-none"
+              />
+            </div>
+            <div>
+              <label className="block text-sm text-gray-400 mb-1">Verification Checklist</label>
+              <textarea
+                value={verificationChecklist}
+                onChange={(e) => setVerificationChecklist(e.target.value)}
+                placeholder={"1. Button visible on page\n2. Click toggles state\n3. Persists after refresh"}
+                rows={3}
+                className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-gray-100 placeholder-gray-500 focus:outline-none focus:border-indigo-500 resize-none"
+              />
+            </div>
+          </div>
+        )}
         <div className="mt-3 flex gap-3">
           <input
             type="text"
@@ -88,7 +144,7 @@ export default function Dashboard() {
           />
           <button
             onClick={handleSubmit}
-            disabled={!prompt.trim() || submitting}
+            disabled={!prompt.trim() || submitting || (planningMode === 'manual' && !codingPrompt.trim())}
             className="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg font-medium transition-colors"
           >
             {submitting ? 'Submitting...' : 'Run'}

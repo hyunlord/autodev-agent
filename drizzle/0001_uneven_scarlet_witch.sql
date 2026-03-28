@@ -1,0 +1,1 @@
+ALTER TABLE `tasks` ADD `planning_mode` text DEFAULT 'auto' NOT NULL;

@@ -1,6 +1,9 @@
-import Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
+import { execa } from 'execa';
 import type { ProjectConfig } from '../lib/detection/project-type';
+import type { PlanningMode } from '../lib/types';
+
+// ─── Schemas (unchanged) ──────────────────────────────────────
 
 export const VerificationStepSchema = z.object({
   id: z.string(),
@@ -30,14 +33,136 @@ export const PlanSchema = z.object({
 
 export type Plan = z.infer<typeof PlanSchema>;
 
-export async function generatePlan(
+// ─── Mode A: Auto Planning via CLI ────────────────────────────
+
+async function planViaCliAgent(
   userPrompt: string,
   projectConfig: ProjectConfig | null,
   onProgress?: (msg: string) => void,
 ): Promise<Plan> {
+  onProgress?.('Generating plan via coding agent CLI...');
+
+  const projectContext = projectConfig
+    ? `Project: ${projectConfig.displayName} (${projectConfig.language}), build: ${projectConfig.buildCmd ?? 'none'}, dev: ${projectConfig.devCmd}, port: ${projectConfig.defaultPort ?? 'none'}`
+    : 'Project type: unknown';
+
+  const planPrompt = `You are a development planning assistant. Analyze this task and generate a JSON plan.
+
+Task: ${userPrompt}
+
+${projectContext}
+
+Respond with ONLY a valid JSON object (no markdown, no explanation) with this structure:
+{
+  "summary": "One-line summary",
+  "codingPrompt": "Detailed instruction for a coding agent including exact file paths and implementation details",
+  "estimatedFiles": ["file1.ts", "file2.ts"],
+  "verificationSpec": {
+    "steps": [
+      { "id": "v1", "description": "Build succeeds", "type": "build_check", "command": "npm run build" }
+    ]
+  }
+}
+
+Verification step types: build_check, file_check, port_check, http_check, dom_check, vlm_check.
+Order from cheapest to most expensive. Always include build_check first.`;
+
+  const result = await execa('claude', [
+    '-p', planPrompt,
+    '--output-format', 'text',
+    '--max-turns', '3',
+    '--dangerously-skip-permissions',
+  ], {
+    timeout: 120_000,
+    reject: false,
+    env: { ...process.env },
+  });
+
+  if (result.exitCode !== 0) {
+    throw new Error(`CLI planning failed (exit ${result.exitCode}): ${result.stderr.slice(0, 500)}`);
+  }
+
+  const cleaned = result.stdout.replace(/^```(?:json)?\n?/m, '').replace(/\n?```$/m, '').trim();
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch {
+    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      parsed = JSON.parse(jsonMatch[0]);
+    } else {
+      throw new Error(`CLI returned non-JSON output: ${cleaned.slice(0, 500)}`);
+    }
+  }
+
+  const plan = PlanSchema.parse(parsed);
+  onProgress?.(`Plan ready: ${plan.summary}`);
+  return plan;
+}
+
+// ─── Mode B: Manual Planning ──────────────────────────────────
+
+function planFromManualInput(
+  codingPrompt: string,
+  verificationChecklist: string,
+  onProgress?: (msg: string) => void,
+): Plan {
+  onProgress?.('Using manually provided plan...');
+
+  const lines = verificationChecklist
+    .split('\n')
+    .map(l => l.replace(/^\d+[\.\)]\s*/, '').trim())
+    .filter(Boolean);
+
+  const steps = lines.map((line, i) => ({
+    id: `v${i + 1}`,
+    description: line,
+    type: guessVerificationType(line),
+    vlmPrompt: line,
+  }));
+
+  if (!steps.some(s => s.type === 'build_check')) {
+    steps.unshift({
+      id: 'v0',
+      description: 'Project builds without errors',
+      type: 'build_check' as const,
+      vlmPrompt: undefined as any,
+    });
+  }
+
+  const plan: Plan = {
+    summary: codingPrompt.slice(0, 100) + (codingPrompt.length > 100 ? '...' : ''),
+    codingPrompt,
+    estimatedFiles: [],
+    verificationSpec: { steps: steps as any },
+  };
+
+  onProgress?.('Manual plan loaded');
+  return plan;
+}
+
+function guessVerificationType(description: string): string {
+  const lower = description.toLowerCase();
+  if (lower.includes('build') || lower.includes('compile') || lower.includes('error')) return 'build_check';
+  if (lower.includes('file') || lower.includes('exist') || lower.includes('create')) return 'file_check';
+  if (lower.includes('port') || lower.includes('server') || lower.includes('start')) return 'port_check';
+  if (lower.includes('http') || lower.includes('200') || lower.includes('load')) return 'http_check';
+  if (lower.includes('button') || lower.includes('text') || lower.includes('element') || lower.includes('selector')) return 'dom_check';
+  return 'vlm_check';
+}
+
+// ─── Mode C: API Planning ─────────────────────────────────────
+
+async function planViaApi(
+  userPrompt: string,
+  projectConfig: ProjectConfig | null,
+  onProgress?: (msg: string) => void,
+): Promise<Plan> {
+  const Anthropic = (await import('@anthropic-ai/sdk')).default;
   const anthropic = new Anthropic();
 
-  onProgress?.('Analyzing task and generating plan...');
+  onProgress?.('Generating plan via Claude API...');
 
   const projectContext = projectConfig
     ? `Project type: ${projectConfig.displayName} (${projectConfig.language})
@@ -94,7 +219,6 @@ Respond with ONLY the JSON object, no markdown code fences, no explanation.`,
   });
 
   const text = response.content[0].type === 'text' ? response.content[0].text : '';
-
   let parsed: unknown;
   try {
     const cleaned = text.replace(/^```(?:json)?\n?/m, '').replace(/\n?```$/m, '').trim();
@@ -106,4 +230,35 @@ Respond with ONLY the JSON object, no markdown code fences, no explanation.`,
   const plan = PlanSchema.parse(parsed);
   onProgress?.(`Plan ready: ${plan.summary}`);
   return plan;
+}
+
+// ─── Main Entry Point ──────────────────────────────────────────
+
+export async function generatePlan(
+  userPrompt: string,
+  projectConfig: ProjectConfig | null,
+  mode: PlanningMode,
+  manualInput?: { codingPrompt: string; verificationChecklist: string },
+  onProgress?: (msg: string) => void,
+): Promise<Plan> {
+  switch (mode) {
+    case 'auto':
+      return planViaCliAgent(userPrompt, projectConfig, onProgress);
+
+    case 'manual':
+      if (!manualInput?.codingPrompt) {
+        throw new Error('Manual mode requires codingPrompt');
+      }
+      return planFromManualInput(
+        manualInput.codingPrompt,
+        manualInput.verificationChecklist ?? '',
+        onProgress,
+      );
+
+    case 'api':
+      return planViaApi(userPrompt, projectConfig, onProgress);
+
+    default:
+      throw new Error(`Unknown planning mode: ${mode}`);
+  }
 }
