@@ -1,6 +1,7 @@
 import { db } from '../lib/db/client';
 import { tasks, attempts, events, verifications } from '../lib/db/schema';
-import { join } from 'path';
+import { join, resolve } from 'path';
+import { existsSync, mkdirSync } from 'fs';
 import { eq } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import { detectProjectType } from '../lib/detection/project-type';
@@ -20,7 +21,17 @@ export async function runPipeline(taskId: string, emit: EmitFn): Promise<void> {
     return;
   }
 
-  const projectDir = task.projectDir ?? process.cwd();
+  const projectDir = await resolveProjectDir(taskId, task.projectDir);
+  emit({ type: 'log', level: 'info', message: `Working directory: ${projectDir}` });
+
+  // Save auto-created workspace path back to DB
+  if (!task.projectDir) {
+    db.update(tasks).set({
+      projectDir: projectDir,
+      updatedAt: new Date().toISOString(),
+    }).where(eq(tasks.id, taskId)).run();
+  }
+
   const config = await loadConfig(projectDir);
 
   try {
@@ -279,6 +290,34 @@ async function escalate(
   emit({ type: 'log', level: 'error', message: `Escalating: ${stopReason} after ${retrySummary.attempts} attempt(s)` });
   emit({ type: 'escalation', report });
   emit({ type: 'task_complete', success: false, summary: `Escalated (${stopReason}): ${summary}. ${retrySummary.attempts} attempt(s), $${totalCostUsd.toFixed(4)} spent.` });
+}
+
+async function resolveProjectDir(taskId: string, userDir: string | null): Promise<string> {
+  if (userDir && userDir.trim()) {
+    const resolved = resolve(userDir);
+    const selfDir = resolve(process.cwd());
+    if (resolved === selfDir || resolved.startsWith(selfDir + '/src') || resolved.startsWith(selfDir + '/bin')) {
+      throw new Error(
+        'Cannot use autodev-agent\'s own directory as project directory. ' +
+        'Please specify a different directory or leave it empty to auto-create a workspace.'
+      );
+    }
+    if (!existsSync(resolved)) {
+      mkdirSync(resolved, { recursive: true });
+    }
+    return resolved;
+  }
+
+  const workspaceDir = join(process.cwd(), '.autodev', 'workspaces', taskId);
+  mkdirSync(workspaceDir, { recursive: true });
+
+  const { execa } = await import('execa');
+  try {
+    await execa('git', ['init'], { cwd: workspaceDir, reject: false });
+    await execa('git', ['commit', '--allow-empty', '-m', 'initial'], { cwd: workspaceDir, reject: false });
+  } catch { /* git not available */ }
+
+  return workspaceDir;
 }
 
 function updateTaskStatus(taskId: string, status: TaskStatus, result?: Record<string, unknown>): void {

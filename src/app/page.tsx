@@ -139,7 +139,7 @@ export default function Dashboard() {
             type="text"
             value={projectDir}
             onChange={(e) => setProjectDir(e.target.value)}
-            placeholder="Project directory (optional)"
+            placeholder="Project directory (leave empty to auto-create workspace)"
             className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-100 placeholder-gray-500 focus:outline-none focus:border-indigo-500"
           />
           <button
