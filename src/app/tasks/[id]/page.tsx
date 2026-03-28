@@ -60,6 +60,9 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
   const [liveEvents, setLiveEvents] = useState<PipelineEvent[]>([]);
   const [screenshots, setScreenshots] = useState<Array<{ path: string; checkId: string }>>([]);
   const [currentStatus, setCurrentStatus] = useState('pending');
+  const [verificationResults, setVerificationResults] = useState<Array<{ checkId: string; status: string; detail: string }>>([]);
+  const [escalationReport, setEscalationReport] = useState<string | null>(null);
+  const [attemptCount, setAttemptCount] = useState(1);
 
   useEffect(() => {
     fetch(`/api/tasks/${id}`)
@@ -80,9 +83,19 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
       }
       if (event.type === 'task_complete') {
         setCurrentStatus(event.success ? 'completed' : 'failed');
+        fetch(`/api/tasks/${id}`).then((r) => r.json()).then(setTask);
       }
       if (event.type === 'screenshot') {
         setScreenshots((prev) => [...prev, { path: event.path, checkId: event.checkId }]);
+      }
+      if (event.type === 'verification_result') {
+        setVerificationResults((prev) => [...prev, { checkId: event.checkId as string, status: (event.status ?? 'skip') as string, detail: event.detail as string }]);
+      }
+      if (event.type === 'escalation') {
+        setEscalationReport(event.report);
+      }
+      if (event.type === 'attempt_start') {
+        setAttemptCount(event.attemptNum);
       }
     };
     return () => es.close();
@@ -107,6 +120,12 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
 
       {task.projectDir && (
         <p className="text-gray-500 text-sm mb-4">Project: {task.projectDir}</p>
+      )}
+
+      {attemptCount > 1 && (
+        <p className="text-sm text-yellow-400 mb-2">
+          Attempt {attemptCount} of 3
+        </p>
       )}
 
       <StageIndicator currentStatus={currentStatus} />
@@ -151,6 +170,36 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
           )}
         </div>
       </section>
+
+      <section className="mb-6">
+        <h2 className="text-lg font-semibold mb-3">Verification Results</h2>
+        <div className="bg-gray-900 rounded-lg border border-gray-800 p-4 space-y-2">
+          {verificationResults.length === 0 ? (
+            <p className="text-gray-500 text-sm">No verification results yet.</p>
+          ) : (
+            verificationResults.map((vr, i) => (
+              <div key={i} className="flex items-start gap-3 p-2 rounded-lg bg-gray-800/50">
+                <span className={`mt-0.5 text-sm ${vr.status === 'pass' ? 'text-green-400' : vr.status === 'fail' ? 'text-red-400' : 'text-gray-500'}`}>
+                  {vr.status === 'pass' ? '\u2713' : vr.status === 'fail' ? '\u2717' : '\u25CB'}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-gray-200">{vr.detail}</p>
+                  <p className="text-xs text-gray-500 mt-0.5">{vr.checkId}</p>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </section>
+
+      {escalationReport && (
+        <section className="mb-6">
+          <h2 className="text-lg font-semibold mb-3 text-red-400">Escalation Report</h2>
+          <div className="bg-red-950/30 rounded-lg border border-red-900/50 p-4">
+            <pre className="text-sm text-gray-300 whitespace-pre-wrap font-mono">{escalationReport}</pre>
+          </div>
+        </section>
+      )}
 
       <section>
         <h2 className="text-lg font-semibold mb-3">Screenshots</h2>
