@@ -1,0 +1,53 @@
+{
+  "name": "autodev-agent",
+  "version": "0.1.0",
+  "description": "Universal AI Development Agent Orchestrator",
+  "license": "MIT",
+  "bin": {
+    "autodev-agent": "./bin/cli.ts"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "db:generate": "drizzle-kit generate",
+    "db:push": "drizzle-kit push",
+    "db:studio": "drizzle-kit studio"
+  },
+  "dependencies": {
+    "@clack/prompts": "^0.10.1",
+    "@tailwindcss/postcss": "^4.2.2",
+    "better-sqlite3": "^11.10.0",
+    "commander": "^13.1.0",
+    "cosmiconfig": "^9.0.1",
+    "drizzle-orm": "^0.39.3",
+    "execa": "^9.6.1",
+    "js-yaml": "^4.1.1",
+    "nanoid": "^5.1.7",
+    "next": "^15.5.14",
+    "p-queue": "^8.1.1",
+    "pino": "^9.14.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "sharp": "^0.33.5",
+    "tailwindcss": "^4.2.2",
+    "tree-kill": "^1.2.2",
+    "wait-on": "^9.0.4",
+    "zod": "^3.25.76"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "sharp"
+    ]
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^25.5.0",
+    "@types/react": "19.2.14",
+    "drizzle-kit": "^0.30.6",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  }
+}
