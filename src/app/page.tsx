@@ -25,6 +25,7 @@ export default function Dashboard() {
   const [prompt, setPrompt] = useState('');
   const [projectDir, setProjectDir] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [agentStatus, setAgentStatus] = useState<string>('checking...');
 
   const fetchTasks = async () => {
     const res = await fetch('/api/tasks');
@@ -36,6 +37,10 @@ export default function Dashboard() {
     fetchTasks();
     const interval = setInterval(fetchTasks, 3000);
     return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    fetch('/api/status').then(r => r.json()).then(d => setAgentStatus(d.claudeCode ? 'Claude Code available' : 'Claude Code not found')).catch(() => setAgentStatus('status unknown'));
   }, []);
 
   const handleSubmit = async () => {
@@ -59,6 +64,10 @@ export default function Dashboard() {
         <h1 className="text-3xl font-bold">AutoDev Agent</h1>
         <p className="text-gray-400 mt-1">Universal AI Development Orchestrator</p>
       </header>
+
+      <p className={`text-sm mb-4 ${agentStatus.includes('available') ? 'text-green-400' : 'text-yellow-400'}`}>
+        Agent: {agentStatus}
+      </p>
 
       <section className="mb-8 p-6 bg-gray-900 rounded-xl border border-gray-800">
         <h2 className="text-lg font-semibold mb-4">New Task</h2>

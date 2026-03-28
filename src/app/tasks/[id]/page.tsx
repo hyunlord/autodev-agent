@@ -128,7 +128,18 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
                     [complete] {event.summary}
                   </span>
                 )}
-                {!['status_change', 'log', 'task_complete'].includes(event.type) && (
+                {event.type === 'attempt_start' && (
+                  <span className="text-purple-400">
+                    [coding] Starting attempt #{event.attemptNum} with {event.agentId}
+                  </span>
+                )}
+                {event.type === 'attempt_complete' && (
+                  <span className={event.success ? 'text-green-400' : 'text-red-400'}>
+                    [attempt] #{event.attemptNum} {event.success ? 'succeeded' : 'failed'}
+                    {event.error ? `: ${event.error}` : ''}
+                  </span>
+                )}
+                {!['status_change', 'log', 'task_complete', 'attempt_start', 'attempt_complete'].includes(event.type) && (
                   <span className="text-gray-400">[{event.type}] {JSON.stringify(event)}</span>
                 )}
               </div>
