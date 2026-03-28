@@ -1,0 +1,21 @@
+services:
+  autodev:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      # Persist data between restarts
+      - autodev-data:/app/.autodev
+      # Mount source code for live reload (dev mode)
+      - .:/app
+      - /app/node_modules    # Don't override container's node_modules
+      - /app/.next           # Don't override container's .next
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+    # For Claude Code CLI to work inside container (optional)
+    # Uncomment and mount your claude config if needed:
+    # - ~/.claude:/root/.claude:ro
+
+volumes:
+  autodev-data:
