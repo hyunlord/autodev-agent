@@ -1,15 +1,12 @@
 import { NextResponse } from 'next/server';
-import { execa } from 'execa';
+import { resolveCli } from '@/lib/cli-resolver';
 
 export async function GET() {
-  let claudeCode = false;
-  try {
-    const { stdout } = await execa('claude', ['--version'], { reject: false, timeout: 5000 });
-    claudeCode = stdout.includes('claude');
-  } catch {}
+  const claudePath = await resolveCli('claude');
 
   return NextResponse.json({
-    claudeCode,
+    claudeCode: !!claudePath,
+    claudeCodePath: claudePath,
     timestamp: new Date().toISOString(),
   });
 }

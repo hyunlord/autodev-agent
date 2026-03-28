@@ -1,3 +1,5 @@
+import { resolveCli } from '../../cli-resolver';
+
 export interface CLIVLMResult {
   pass: boolean;
   confidence: number;
@@ -26,9 +28,18 @@ Determine if the criteria is met based on what you see in the screenshot.
 Respond with ONLY a JSON object (no markdown, no explanation):
 {"pass": true/false, "confidence": 0.0-1.0, "reasoning": "brief explanation"}`;
 
+  const cliPath = await resolveCli(agentCli);
+  if (!cliPath) {
+    return {
+      pass: false,
+      confidence: 0,
+      reasoning: `CLI '${agentCli}' not found on this system`,
+    };
+  }
+
   try {
     const { execa } = await import('execa');
-    const result = await execa(agentCli, [
+    const result = await execa(cliPath, [
       '-p', vlmPrompt,
       '--output-format', 'text',
       '--max-turns', '2',

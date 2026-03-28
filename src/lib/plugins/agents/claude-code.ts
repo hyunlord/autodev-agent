@@ -1,4 +1,5 @@
 import type { ICodingAgent, CodingAgentOptions, CodingAgentResult } from '../interfaces';
+import { resolveCli } from '../../cli-resolver';
 
 async function getExeca() {
   const mod = await import('execa');
@@ -8,15 +9,11 @@ async function getExeca() {
 export class ClaudeCodeAgent implements ICodingAgent {
   readonly id = 'claude-code';
   readonly name = 'Claude Code';
+  private resolvedPath: string | null = null;
 
   async isAvailable(): Promise<boolean> {
-    try {
-      const execa = await getExeca();
-      const { stdout } = await execa('claude', ['--version'], { reject: false });
-      return stdout.includes('claude');
-    } catch {
-      return false;
-    }
+    this.resolvedPath = await resolveCli('claude');
+    return this.resolvedPath !== null;
   }
 
   async invoke(opts: CodingAgentOptions): Promise<CodingAgentResult> {
@@ -95,8 +92,10 @@ export class ClaudeCodeAgent implements ICodingAgent {
       message: `[Claude Code CLI] Running with max ${opts.maxTurns ?? 20} turns...`,
     });
 
+    const cliPath = this.resolvedPath ?? await resolveCli('claude');
+    if (!cliPath) throw new Error('Claude CLI not found');
     const execa = await getExeca();
-    const result = await execa('claude', args, {
+    const result = await execa(cliPath, args, {
       cwd: opts.projectDir,
       timeout: opts.timeoutMs ?? 300_000,
       reject: false,

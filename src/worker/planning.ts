@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { ProjectConfig } from '../lib/detection/project-type';
 import type { PlanningMode } from '../lib/types';
+import { resolveCli } from '../lib/cli-resolver';
 
 // ─── Schemas (unchanged) ──────────────────────────────────────
 
@@ -67,7 +68,11 @@ Verification step types: build_check, file_check, port_check, http_check, dom_ch
 Order from cheapest to most expensive. Always include build_check first.`;
 
   const { execa } = await import('execa');
-  const result = await execa('claude', [
+  const claudePath = await resolveCli('claude');
+  if (!claudePath) {
+    throw new Error('Claude CLI not found. Install with: npm install -g @anthropic-ai/claude-code');
+  }
+  const result = await execa(claudePath, [
     '-p', planPrompt,
     '--output-format', 'text',
     '--max-turns', '3',

@@ -43,7 +43,7 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => {
-    fetch('/api/status').then(r => r.json()).then(d => setAgentStatus(d.claudeCode ? 'Claude Code available' : 'Claude Code not found')).catch(() => setAgentStatus('status unknown'));
+    fetch('/api/status').then(r => r.json()).then(d => setAgentStatus(d.claudeCode ? `Claude Code available (${d.claudeCodePath})` : 'Claude Code not found')).catch(() => setAgentStatus('status unknown'));
   }, []);
 
   const handleSubmit = async () => {
