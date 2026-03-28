@@ -8,13 +8,18 @@ import { resolveCli } from '../lib/cli-resolver';
 export const VerificationStepSchema = z.object({
   id: z.string(),
   description: z.string(),
-  type: z.enum(['build_check', 'port_check', 'http_check', 'file_check', 'dom_check', 'vlm_check']),
+  type: z.enum(['build_check', 'port_check', 'http_check', 'file_check', 'dom_check', 'vlm_check', 'desktop_check', 'cli_output_check']),
   command: z.string().optional(),
   url: z.string().optional(),
   filePath: z.string().optional(),
   selector: z.string().optional(),
   expectedText: z.string().optional(),
   vlmPrompt: z.string().optional(),
+  runCmd: z.string().optional(),
+  waitMs: z.number().optional(),
+  expectedStdout: z.string().optional(),
+  expectedExitCode: z.number().optional(),
+  notExpectedStdout: z.string().optional(),
 });
 
 export const VerificationSpecSchema = z.object({
@@ -65,7 +70,9 @@ Respond with ONLY a valid JSON object (no markdown, no explanation) with this st
 }
 
 Verification step types: build_check, file_check, port_check, http_check, dom_check, vlm_check.
-Order from cheapest to most expensive. Always include build_check first.`;
+Order from cheapest to most expensive. Always include build_check first.
+7. desktop_check — launch a desktop/GUI app, wait for rendering, take a screenshot (for Godot, Electron, native apps). Use runCmd and optional vlmPrompt.
+8. cli_output_check — run a command and verify stdout/stderr/exit code (for CLI tools, scripts). Use command, expectedStdout, expectedExitCode.`;
 
   const { execa } = await import('execa');
   const claudePath = await resolveCli('claude');
@@ -154,6 +161,8 @@ function guessVerificationType(description: string): string {
   if (lower.includes('port') || lower.includes('server') || lower.includes('start')) return 'port_check';
   if (lower.includes('http') || lower.includes('200') || lower.includes('load')) return 'http_check';
   if (lower.includes('button') || lower.includes('text') || lower.includes('element') || lower.includes('selector')) return 'dom_check';
+  if (lower.includes('launch') || lower.includes('window') || lower.includes('render') || lower.includes('display') || lower.includes('gui') || lower.includes('game')) return 'desktop_check';
+  if (lower.includes('output') || lower.includes('stdout') || lower.includes('print') || lower.includes('exit code') || lower.includes('return') || lower.includes('run')) return 'cli_output_check';
   return 'vlm_check';
 }
 
@@ -211,6 +220,8 @@ Verification steps should be ordered from cheapest to most expensive:
 4. http_check — does the page load with HTTP 200?
 5. dom_check — does the page contain expected elements/text?
 6. vlm_check — does the page visually match the expectation? (natural language)
+7. desktop_check — launch a desktop/GUI app, wait for rendering, take a screenshot (for Godot, Electron, native apps). Use runCmd and optional vlmPrompt.
+8. cli_output_check — run a command and verify stdout/stderr/exit code (for CLI tools, scripts). Use command, expectedStdout, expectedExitCode.
 
 Always include at least a build_check. Include vlm_check only when there's a visual aspect to verify.
 

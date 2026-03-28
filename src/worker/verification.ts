@@ -13,6 +13,8 @@ import {
   type WebVerifyContext,
 } from '../lib/plugins/verifiers/web-playwright';
 import { verifyScreenshotViaCli } from '../lib/plugins/vlm/cli-vlm';
+import { captureDesktopApp } from '../lib/plugins/verifiers/desktop-screenshot';
+import { runCliOutputCheck } from '../lib/plugins/verifiers/cli-output';
 
 export interface VerificationResult {
   allPassed: boolean;
@@ -241,6 +243,51 @@ export async function runVerification(
                 durationMs: Date.now() - startTime,
               });
             }
+            break;
+          }
+
+          case 'desktop_check': {
+            const runCmd = step.runCmd ?? projectConfig?.devCmd ?? '';
+            if (!runCmd) {
+              results.push({ checkId: step.id, type: step.type, status: 'skip', description: step.description, actual: 'Skipped: no run command specified', durationMs: Date.now() - startTime });
+              break;
+            }
+            emit({ type: 'log', level: 'info', message: `[Verify] Launching desktop app: ${runCmd}` });
+            const desktopResult = await captureDesktopApp({ projectDir, runCmd, screenshotDir, waitMs: step.waitMs ?? 5000, timeoutMs: 30_000 });
+            if (desktopResult.error) {
+              results.push({ checkId: step.id, type: step.type, status: 'fail', description: step.description, actual: desktopResult.error, durationMs: Date.now() - startTime });
+              emit({ type: 'verification_result', checkId: step.id, status: 'fail', detail: desktopResult.error });
+              break;
+            }
+            if (desktopResult.screenshotPath && step.vlmPrompt) {
+              emit({ type: 'screenshot', path: desktopResult.screenshotPath, checkId: step.id });
+              const vlmResult = await verifyScreenshotViaCli(desktopResult.screenshotPath, step.vlmPrompt);
+              results.push({ checkId: step.id, type: step.type, status: vlmResult.pass ? 'pass' : 'fail', description: step.description, expected: step.vlmPrompt, actual: vlmResult.reasoning, screenshotPath: desktopResult.screenshotPath, vlmFeedback: vlmResult.reasoning, vlmConfidence: vlmResult.confidence, durationMs: Date.now() - startTime });
+              emit({ type: 'verification_result', checkId: step.id, status: vlmResult.pass ? 'pass' : 'fail', detail: vlmResult.reasoning });
+            } else if (desktopResult.screenshotPath) {
+              emit({ type: 'screenshot', path: desktopResult.screenshotPath, checkId: step.id });
+              results.push({ checkId: step.id, type: step.type, status: 'pass', description: step.description, actual: `App launched and screenshot captured. Exit code: ${desktopResult.processExitCode}`, screenshotPath: desktopResult.screenshotPath, durationMs: Date.now() - startTime });
+              emit({ type: 'verification_result', checkId: step.id, status: 'pass', detail: 'Screenshot captured' });
+            } else {
+              results.push({ checkId: step.id, type: step.type, status: desktopResult.processExitCode === 0 ? 'pass' : 'fail', description: step.description, actual: `App ran (exit ${desktopResult.processExitCode}), screenshot unavailable`, durationMs: Date.now() - startTime });
+              emit({ type: 'verification_result', checkId: step.id, status: desktopResult.processExitCode === 0 ? 'pass' : 'fail', detail: `Exit code: ${desktopResult.processExitCode}` });
+            }
+            break;
+          }
+
+          case 'cli_output_check': {
+            const command = step.command ?? step.runCmd ?? '';
+            if (!command) {
+              results.push({ checkId: step.id, type: step.type, status: 'skip', description: step.description, actual: 'Skipped: no command specified', durationMs: Date.now() - startTime });
+              break;
+            }
+            const cliResult = await runCliOutputCheck({ command, cwd: projectDir, expectedExitCode: step.expectedExitCode, expectedStdout: step.expectedStdout ?? step.expectedText, notExpectedStdout: step.notExpectedStdout });
+            results.push({
+              checkId: step.id, type: step.type, status: cliResult.passed ? 'pass' : 'fail', description: step.description,
+              expected: [step.expectedExitCode !== undefined ? `exit ${step.expectedExitCode}` : 'exit 0', step.expectedStdout ? `stdout contains "${step.expectedStdout}"` : null, step.notExpectedStdout ? `stdout not contains "${step.notExpectedStdout}"` : null].filter(Boolean).join(', '),
+              actual: cliResult.actual, durationMs: cliResult.durationMs,
+            });
+            emit({ type: 'verification_result', checkId: step.id, status: cliResult.passed ? 'pass' : 'fail', detail: cliResult.actual });
             break;
           }
 
