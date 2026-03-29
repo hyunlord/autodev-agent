@@ -83,7 +83,7 @@ Order from cheapest to most expensive. Always include build_check first.
   const result = await execa(claudePath, [
     '-p', planPrompt,
     '--output-format', 'text',
-    '--max-turns', '3',
+    '--max-turns', '10',
     '--dangerously-skip-permissions',
   ], {
     timeout: 120_000,
