@@ -74,7 +74,8 @@ Order from cheapest to most expensive. Always include build_check first.
 7. desktop_check — launch a desktop/GUI app, wait for rendering, take a screenshot (for Godot, Electron, native apps). Use runCmd and optional vlmPrompt.
 8. cli_output_check — run a command and verify stdout/stderr/exit code (for CLI tools, scripts). Use command, expectedStdout, expectedExitCode.`;
 
-  const { execa } = await import('execa');
+  const { getExeca } = await import('../lib/execa');
+  const execa = await getExeca();
   const claudePath = await resolveCli('claude');
   if (!claudePath) {
     throw new Error('Claude CLI not found. Install with: npm install -g @anthropic-ai/claude-code');

@@ -1,9 +1,7 @@
 import type { ICodingAgent, CodingAgentOptions, CodingAgentResult } from '../interfaces';
 import { resolveCli } from '../../cli-resolver';
-
-async function getExeca() {
-  return (await import('execa')).execa;
-}
+import { getExeca } from '../../execa';
+import { getModifiedFiles } from '../../git-utils';
 
 export class AiderAgent implements ICodingAgent {
   readonly id = 'aider';
@@ -27,17 +25,7 @@ export class AiderAgent implements ICodingAgent {
     const result = await execa(cliPath, args, {
       cwd: opts.projectDir, timeout: opts.timeoutMs ?? 300_000, reject: false, env: { ...process.env },
     });
-    const modifiedFiles = await this.getModifiedFiles(opts.projectDir);
+    const modifiedFiles = await getModifiedFiles(opts.projectDir, 'HEAD~1');
     return { success: result.exitCode === 0, text: result.stdout, modifiedFiles, durationMs: Date.now() - startTime, rawOutput: result.stdout };
-  }
-
-  private async getModifiedFiles(cwd: string): Promise<string[]> {
-    try {
-      const execa = await getExeca();
-      const { stdout } = await execa('git', ['diff', '--name-only', 'HEAD~1'], { cwd, reject: false });
-      if (stdout.trim()) return stdout.split('\n').filter(Boolean);
-      const unstaged = await execa('git', ['diff', '--name-only'], { cwd, reject: false });
-      return unstaged.stdout.split('\n').filter(Boolean);
-    } catch { return []; }
   }
 }

@@ -24,7 +24,8 @@ export interface WebVerifyContext {
 }
 
 export async function startWebApp(opts: WebVerifyOptions): Promise<WebVerifyContext> {
-  const { execa } = await import('execa');
+  const { getExeca } = await import('../../execa');
+  const execa = await getExeca();
 
   if (!existsSync(opts.screenshotDir)) {
     mkdirSync(opts.screenshotDir, { recursive: true });

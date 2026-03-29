@@ -1,6 +1,4 @@
-async function getExeca() {
-  return (await import('execa')).execa;
-}
+import { getExeca } from '../../execa';
 
 export interface CliOutputCheckOptions {
   command: string;

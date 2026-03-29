@@ -1,4 +1,5 @@
 import { resolveCli } from '../../cli-resolver';
+import { getExeca } from '../../execa';
 
 export interface CLIVLMResult {
   pass: boolean;
@@ -38,7 +39,7 @@ Respond with ONLY a JSON object (no markdown, no explanation):
   }
 
   try {
-    const { execa } = await import('execa');
+    const execa = await getExeca();
     const result = await execa(cliPath, [
       '-p', vlmPrompt,
       '--output-format', 'text',

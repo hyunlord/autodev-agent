@@ -1,10 +1,7 @@
 import type { ICodingAgent, CodingAgentOptions, CodingAgentResult } from '../interfaces';
 import { resolveCli } from '../../cli-resolver';
-
-async function getExeca() {
-  const mod = await import('execa');
-  return mod.execa;
-}
+import { getExeca } from '../../execa';
+import { getModifiedFiles } from '../../git-utils';
 
 export class ClaudeCodeAgent implements ICodingAgent {
   readonly id = 'claude-code';
@@ -60,7 +57,7 @@ export class ClaudeCodeAgent implements ICodingAgent {
       }
     }
 
-    const modifiedFiles = await this.getModifiedFiles(opts.projectDir);
+    const modifiedFiles = await getModifiedFiles(opts.projectDir);
 
     return {
       success: true,
@@ -120,7 +117,7 @@ export class ClaudeCodeAgent implements ICodingAgent {
       // stdout was not JSON, use raw text
     }
 
-    const modifiedFiles = await this.getModifiedFiles(opts.projectDir);
+    const modifiedFiles = await getModifiedFiles(opts.projectDir);
 
     return {
       success: result.exitCode === 0,
@@ -131,19 +128,5 @@ export class ClaudeCodeAgent implements ICodingAgent {
       durationMs: Date.now() - startTime,
       rawOutput: result.stdout,
     };
-  }
-
-  private async getModifiedFiles(cwd: string): Promise<string[]> {
-    try {
-      const execa = await getExeca();
-      const { stdout } = await execa('git', ['diff', '--name-only'], { cwd, reject: false });
-      const staged = await execa('git', ['diff', '--name-only', '--cached'], { cwd, reject: false });
-      const files = [...stdout.split('\n'), ...staged.stdout.split('\n')]
-        .filter(Boolean)
-        .filter((f, i, arr) => arr.indexOf(f) === i);
-      return files;
-    } catch {
-      return [];
-    }
   }
 }

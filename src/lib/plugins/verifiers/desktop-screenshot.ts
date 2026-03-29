@@ -1,10 +1,7 @@
 import { join } from 'path';
 import { mkdirSync, existsSync, writeFileSync } from 'fs';
 import { nanoid } from 'nanoid';
-
-async function getExeca() {
-  return (await import('execa')).execa;
-}
+import { getExeca } from '../../execa';
 
 export interface DesktopVerifyOptions {
   projectDir: string;

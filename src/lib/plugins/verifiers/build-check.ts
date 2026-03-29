@@ -1,8 +1,10 @@
+import { getExeca } from '../../execa';
+
 export async function runBuildCheck(
   command: string,
   cwd: string,
 ): Promise<{ passed: boolean; stdout: string; stderr: string; durationMs: number }> {
-  const { execa } = await import('execa');
+  const execa = await getExeca();
   const start = Date.now();
   const result = await execa('sh', ['-c', command], {
     cwd,

@@ -72,7 +72,8 @@ export async function resolveCli(name: string): Promise<string | null> {
   }
 
   try {
-    const { execa } = await import('execa');
+    const { getExeca } = await import('./execa');
+    const execa = await getExeca();
     const cmd = process.platform === 'win32' ? 'where' : 'which';
     const { stdout } = await execa(cmd, [name], {
       reject: false,
