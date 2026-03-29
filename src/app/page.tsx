@@ -186,6 +186,21 @@ export default function Dashboard() {
             className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-100 placeholder-gray-500 focus:outline-none focus:border-indigo-500"
           />
           <button
+            type="button"
+            onClick={async () => {
+              try {
+                const res = await fetch('/api/workspace/browse', { method: 'POST' });
+                if (res.ok) {
+                  const data = await res.json();
+                  if (data.path) setProjectDir(data.path);
+                }
+              } catch {}
+            }}
+            className="px-3 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg transition-colors text-sm whitespace-nowrap"
+          >
+            Browse
+          </button>
+          <button
             onClick={handleSubmit}
             disabled={!prompt.trim() || submitting || (planningMode === 'manual' && !codingPrompt.trim())}
             className="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg font-medium transition-colors"
