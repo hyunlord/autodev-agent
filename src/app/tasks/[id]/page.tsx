@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect, use } from 'react';
+import { useState, useEffect, use, useRef } from 'react';
 import Link from 'next/link';
 
 interface TaskDetail {
@@ -7,6 +7,7 @@ interface TaskDetail {
   prompt: string;
   status: string;
   projectDir: string | null;
+  result?: string | object;
   createdAt: string;
   updatedAt: string;
   attempts: any[];
@@ -63,6 +64,7 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
   const [verificationResults, setVerificationResults] = useState<Array<{ checkId: string; status: string; detail: string }>>([]);
   const [escalationReport, setEscalationReport] = useState<string | null>(null);
   const [attemptCount, setAttemptCount] = useState(1);
+  const eventsEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     fetch(`/api/tasks/${id}`)
@@ -101,6 +103,14 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
     return () => es.close();
   }, [id]);
 
+  useEffect(() => {
+    eventsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [liveEvents]);
+
+  const parsedResult = task?.result
+    ? (() => { try { return typeof task.result === 'string' ? JSON.parse(task.result) : task.result; } catch { return null; } })()
+    : null;
+
   if (!task) {
     return (
       <div className="min-h-screen p-8 max-w-4xl mx-auto">
@@ -129,6 +139,62 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
       )}
 
       <StageIndicator currentStatus={currentStatus} />
+
+      {(currentStatus === 'completed' || currentStatus === 'failed' || currentStatus === 'escalated') && task.result && (
+        <div className={`mb-6 p-4 rounded-lg border ${
+          currentStatus === 'completed'
+            ? 'bg-green-950/20 border-green-900/50'
+            : 'bg-red-950/20 border-red-900/50'
+        }`}>
+          <div className="flex items-center gap-3 mb-3">
+            <span className="text-2xl">{currentStatus === 'completed' ? '✅' : '❌'}</span>
+            <div>
+              <h3 className="font-semibold text-gray-100">
+                {currentStatus === 'completed' ? 'Task Completed' : currentStatus === 'escalated' ? 'Task Escalated' : 'Task Failed'}
+              </h3>
+              <p className="text-sm text-gray-400">{parsedResult?.summary ?? ''}</p>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {parsedResult?.attempts !== undefined && (
+              <div className="bg-gray-900/50 rounded-lg p-3">
+                <p className="text-xs text-gray-500">Attempts</p>
+                <p className="text-lg font-bold text-gray-200">{parsedResult.attempts}</p>
+              </div>
+            )}
+            {parsedResult?.costUsd !== undefined && (
+              <div className="bg-gray-900/50 rounded-lg p-3">
+                <p className="text-xs text-gray-500">Cost</p>
+                <p className="text-lg font-bold text-gray-200">${Number(parsedResult.costUsd).toFixed(4)}</p>
+              </div>
+            )}
+            {parsedResult?.modifiedFiles && (
+              <div className="bg-gray-900/50 rounded-lg p-3">
+                <p className="text-xs text-gray-500">Files Modified</p>
+                <p className="text-lg font-bold text-gray-200">{parsedResult.modifiedFiles.length}</p>
+              </div>
+            )}
+            {task.updatedAt && task.createdAt && (
+              <div className="bg-gray-900/50 rounded-lg p-3">
+                <p className="text-xs text-gray-500">Duration</p>
+                <p className="text-lg font-bold text-gray-200">
+                  {Math.round((new Date(task.updatedAt).getTime() - new Date(task.createdAt).getTime()) / 1000)}s
+                </p>
+              </div>
+            )}
+          </div>
+          {parsedResult?.modifiedFiles?.length > 0 && (
+            <div className="mt-3 pt-3 border-t border-gray-800">
+              <p className="text-xs text-gray-500 mb-1">Modified Files</p>
+              <div className="flex flex-wrap gap-1">
+                {parsedResult.modifiedFiles.map((f: string, i: number) => (
+                  <code key={i} className="text-xs bg-gray-800 text-gray-300 px-1.5 py-0.5 rounded">{f}</code>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       <section className="mb-6">
         <h2 className="text-lg font-semibold mb-3">Live Events</h2>
@@ -162,12 +228,28 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
                     {event.error ? `: ${event.error}` : ''}
                   </span>
                 )}
-                {!['status_change', 'log', 'task_complete', 'attempt_start', 'attempt_complete'].includes(event.type) && (
-                  <span className="text-gray-400">[{event.type}] {JSON.stringify(event)}</span>
+                {event.type === 'verification_result' && (
+                  <span className={event.status === 'pass' ? 'text-green-400' : event.status === 'fail' ? 'text-red-400' : 'text-gray-500'}>
+                    [{event.status === 'pass' ? '✓' : event.status === 'fail' ? '✗' : '○'}] {event.detail}
+                  </span>
+                )}
+                {event.type === 'screenshot' && (
+                  <span className="text-cyan-400">
+                    [📸] Screenshot captured for {event.checkId}
+                  </span>
+                )}
+                {event.type === 'escalation' && (
+                  <span className="text-red-400">
+                    [⚠] Task escalated — see report below
+                  </span>
+                )}
+                {!['status_change', 'log', 'task_complete', 'attempt_start', 'attempt_complete', 'verification_result', 'screenshot', 'escalation'].includes(event.type) && (
+                  <span className="text-gray-500">[{event.type}] {JSON.stringify(event)}</span>
                 )}
               </div>
             ))
           )}
+          <div ref={eventsEndRef} />
         </div>
       </section>
 
@@ -191,6 +273,51 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
           )}
         </div>
       </section>
+
+      {task.attempts && task.attempts.length > 0 && (
+        <section className="mb-6">
+          <h2 className="text-lg font-semibold mb-3">Attempts ({task.attempts.length})</h2>
+          <div className="space-y-3">
+            {task.attempts.map((attempt: any, i: number) => (
+              <div key={i} className="bg-gray-900 rounded-lg border border-gray-800 p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <span className={`w-2 h-2 rounded-full ${attempt.status === 'success' ? 'bg-green-400' : 'bg-red-400'}`} />
+                    <span className="text-sm font-medium text-gray-200">
+                      Attempt #{attempt.attemptNum} — {attempt.agentId}
+                    </span>
+                    <span className={`text-xs px-1.5 py-0.5 rounded ${attempt.status === 'success' ? 'bg-green-900/50 text-green-400' : 'bg-red-900/50 text-red-400'}`}>
+                      {attempt.status}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3 text-xs text-gray-500">
+                    {attempt.costUsd && <span>${Number(attempt.costUsd).toFixed(4)}</span>}
+                    {attempt.durationMs && <span>{(attempt.durationMs / 1000).toFixed(1)}s</span>}
+                    {attempt.tokenCount && <span>{attempt.tokenCount.toLocaleString()} tokens</span>}
+                  </div>
+                </div>
+                {attempt.errorLog && (
+                  <pre className="text-xs text-red-400 bg-red-950/20 p-2 rounded mt-2 max-h-24 overflow-y-auto whitespace-pre-wrap">
+                    {attempt.errorLog.slice(0, 500)}
+                  </pre>
+                )}
+                {attempt.verifications && attempt.verifications.length > 0 && (
+                  <div className="mt-2 pt-2 border-t border-gray-800">
+                    <p className="text-xs text-gray-500 mb-1">Verification ({attempt.verifications.filter((v: any) => v.status === 'pass').length}/{attempt.verifications.length} passed)</p>
+                    <div className="flex flex-wrap gap-1">
+                      {attempt.verifications.map((v: any, vi: number) => (
+                        <span key={vi} className={`text-xs px-1.5 py-0.5 rounded ${v.status === 'pass' ? 'bg-green-900/30 text-green-400' : v.status === 'fail' ? 'bg-red-900/30 text-red-400' : 'bg-gray-800 text-gray-500'}`}>
+                          {v.status === 'pass' ? '✓' : v.status === 'fail' ? '✗' : '○'} {v.checkId}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {escalationReport && (
         <section className="mb-6">

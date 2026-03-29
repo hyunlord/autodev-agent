@@ -1,12 +1,17 @@
 'use client';
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 
 interface Task {
   id: string;
   prompt: string;
   status: string;
+  agentId?: string;
+  projectDir?: string;
+  result?: string;
   createdAt: string;
+  updatedAt: string;
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -21,6 +26,7 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 export default function Dashboard() {
+  const router = useRouter();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [prompt, setPrompt] = useState('');
   const [projectDir, setProjectDir] = useState('');
@@ -65,10 +71,13 @@ export default function Dashboard() {
       }),
     });
     if (res.ok) {
+      const newTask = await res.json();
       setPrompt('');
       setCodingPrompt('');
       setVerificationChecklist('');
-      await fetchTasks();
+      setSubmitting(false);
+      router.push(`/tasks/${newTask.id}`);
+      return;
     }
     setSubmitting(false);
   };
@@ -181,23 +190,34 @@ export default function Dashboard() {
           <p className="text-gray-500">No tasks yet. Create one above.</p>
         ) : (
           <div className="space-y-3">
-            {tasks.map((task) => (
-              <Link
-                key={task.id}
-                href={`/tasks/${task.id}`}
-                className="block p-4 bg-gray-900 rounded-lg border border-gray-800 hover:border-gray-600 transition-colors"
-              >
-                <div className="flex items-center justify-between">
-                  <p className="text-gray-100 truncate flex-1 mr-4">{task.prompt}</p>
-                  <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[task.status] ?? 'bg-gray-700 text-gray-300'}`}>
-                    {task.status}
-                  </span>
-                </div>
-                <p className="text-gray-500 text-sm mt-1">
-                  {new Date(task.createdAt).toLocaleString()}
-                </p>
-              </Link>
-            ))}
+            {tasks.map((task) => {
+              const result = task.result ? (typeof task.result === 'string' ? (() => { try { return JSON.parse(task.result); } catch { return null; } })() : task.result) : null;
+              const duration = task.updatedAt && task.createdAt
+                ? Math.round((new Date(task.updatedAt).getTime() - new Date(task.createdAt).getTime()) / 1000)
+                : null;
+
+              return (
+                <Link
+                  key={task.id}
+                  href={`/tasks/${task.id}`}
+                  className="block p-4 bg-gray-900 rounded-lg border border-gray-800 hover:border-gray-600 transition-colors"
+                >
+                  <div className="flex items-center justify-between">
+                    <p className="text-gray-100 truncate flex-1 mr-4">{task.prompt}</p>
+                    <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[task.status] ?? 'bg-gray-700 text-gray-300'}`}>
+                      {task.status}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3 mt-1.5 text-xs text-gray-500">
+                    <span>{new Date(task.createdAt).toLocaleString()}</span>
+                    {task.agentId && <span>· {task.agentId}</span>}
+                    {duration !== null && duration > 0 && <span>· {duration}s</span>}
+                    {result?.costUsd && <span>· ${Number(result.costUsd).toFixed(4)}</span>}
+                    {result?.modifiedFiles?.length > 0 && <span>· {result.modifiedFiles.length} files</span>}
+                  </div>
+                </Link>
+              );
+            })}
           </div>
         )}
       </section>
