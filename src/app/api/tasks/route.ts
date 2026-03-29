@@ -2,15 +2,20 @@ import { db } from '@/lib/db/client';
 import { tasks } from '@/lib/db/schema';
 import { WorkerManager } from '@/lib/worker-manager';
 import { nanoid } from 'nanoid';
-import { desc } from 'drizzle-orm';
+import { desc, eq } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const limit = parseInt(url.searchParams.get('limit') ?? '20', 10);
   const offset = parseInt(url.searchParams.get('offset') ?? '0', 10);
+  const projectDir = url.searchParams.get('projectDir');
 
-  const result = await db.select().from(tasks).orderBy(desc(tasks.createdAt)).limit(limit).offset(offset);
+  const result = await db.select().from(tasks)
+    .where(projectDir ? eq(tasks.projectDir, projectDir) : undefined)
+    .orderBy(desc(tasks.createdAt))
+    .limit(limit)
+    .offset(offset);
   return NextResponse.json(result);
 }
 

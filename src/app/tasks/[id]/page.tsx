@@ -65,6 +65,7 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
   const [escalationReport, setEscalationReport] = useState<string | null>(null);
   const [attemptCount, setAttemptCount] = useState(1);
   const [previewFile, setPreviewFile] = useState<{ path: string; content: string; language: string } | null>(null);
+  const [projectTasks, setProjectTasks] = useState<Array<{ id: string; prompt: string; status: string; createdAt: string }>>([]);
   const eventsEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -75,6 +76,15 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
         setCurrentStatus(data.status);
       });
   }, [id]);
+
+  useEffect(() => {
+    if (task?.projectDir) {
+      fetch(`/api/tasks?projectDir=${encodeURIComponent(task.projectDir)}&limit=10`)
+        .then(r => r.json())
+        .then(data => setProjectTasks(data.filter((t: any) => t.id !== id)))
+        .catch(() => {});
+    }
+  }, [task?.projectDir, id]);
 
   useEffect(() => {
     const es = new EventSource(`/api/events?taskId=${id}`);
@@ -375,6 +385,33 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
           <h2 className="text-lg font-semibold mb-3 text-red-400">Escalation Report</h2>
           <div className="bg-red-950/30 rounded-lg border border-red-900/50 p-4">
             <pre className="text-sm text-gray-300 whitespace-pre-wrap font-mono">{escalationReport}</pre>
+          </div>
+        </section>
+      )}
+
+      {projectTasks.length > 0 && (
+        <section className="mb-6">
+          <h2 className="text-lg font-semibold mb-3">Project History</h2>
+          <div className="space-y-2">
+            {projectTasks.map((pt) => (
+              <Link
+                key={pt.id}
+                href={`/tasks/${pt.id}`}
+                className="block p-3 bg-gray-900 rounded-lg border border-gray-800 hover:border-gray-600 transition-colors"
+              >
+                <div className="flex items-center justify-between">
+                  <p className="text-sm text-gray-300 truncate flex-1 mr-3">{pt.prompt}</p>
+                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                    pt.status === 'completed' ? 'bg-green-900 text-green-300' :
+                    pt.status === 'failed' ? 'bg-red-900 text-red-300' :
+                    'bg-gray-700 text-gray-300'
+                  }`}>
+                    {pt.status}
+                  </span>
+                </div>
+                <p className="text-xs text-gray-500 mt-1">{new Date(pt.createdAt).toLocaleString()}</p>
+              </Link>
+            ))}
           </div>
         </section>
       )}

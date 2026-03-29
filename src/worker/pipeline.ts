@@ -2,7 +2,7 @@ import { db } from '../lib/db/client';
 import { tasks, attempts, events, verifications } from '../lib/db/schema';
 import { join, resolve } from 'path';
 import { existsSync, mkdirSync } from 'fs';
-import { eq } from 'drizzle-orm';
+import { eq, and, not, desc } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import { detectProjectType } from '../lib/detection/project-type';
 import { generatePlan } from './planning';
@@ -34,6 +34,26 @@ export async function runPipeline(taskId: string, emit: EmitFn): Promise<void> {
   }
 
   const config = await loadConfig(projectDir);
+
+  // Fetch project history for context (completed tasks in same projectDir)
+  const projectHistory = db
+    .select({
+      prompt: tasks.prompt,
+      status: tasks.status,
+      result: tasks.result,
+      createdAt: tasks.createdAt,
+    })
+    .from(tasks)
+    .where(
+      and(
+        eq(tasks.projectDir, projectDir),
+        not(eq(tasks.id, taskId)),
+        eq(tasks.status, 'completed'),
+      )
+    )
+    .orderBy(desc(tasks.createdAt))
+    .limit(10)
+    .all();
 
   try {
     // ─── 1. Detect project type ──────────────────────────
@@ -95,6 +115,18 @@ export async function runPipeline(taskId: string, emit: EmitFn): Promise<void> {
       emit({ type: 'attempt_start', attemptNum: attempt, agentId });
 
       let codingPrompt = plan.codingPrompt;
+      if (!isRetry && projectHistory.length > 0) {
+        const historyContext = projectHistory.map(h => {
+          try {
+            const result = h.result ? (typeof h.result === 'string' ? JSON.parse(h.result) : h.result) : {};
+            return `- "${h.prompt}" → ${(result as any).summary ?? 'completed'}`;
+          } catch {
+            return `- "${h.prompt}" → completed`;
+          }
+        }).join('\n');
+        codingPrompt = `## Previous work on this project:\n${historyContext}\n\n## Current task:\n${codingPrompt}`;
+        emit({ type: 'log', level: 'info', message: `Project history: ${projectHistory.length} previous task(s) found` });
+      }
       if (isRetry && lastFailedChecks.length > 0) {
         const retryContext = retryCtrl.buildRetryContext(lastFailedChecks);
         codingPrompt = `${plan.codingPrompt}\n\n---\n\n${retryContext}`;
