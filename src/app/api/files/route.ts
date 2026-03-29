@@ -1,9 +1,6 @@
 import { readFileSync, existsSync, statSync } from 'fs';
 import { join, resolve } from 'path';
 import { NextResponse } from 'next/server';
-import { db } from '@/lib/db/client';
-import { tasks } from '@/lib/db/schema';
-import { eq } from 'drizzle-orm';
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
@@ -20,17 +17,6 @@ export async function GET(req: Request) {
   }
 
   const resolvedDir = resolve(projectDir);
-
-  // Security: verify projectDir is a known project in the tasks table
-  const knownProject = db.select({ projectDir: tasks.projectDir })
-    .from(tasks)
-    .where(eq(tasks.projectDir, resolvedDir))
-    .limit(1)
-    .get();
-  if (!knownProject) {
-    return NextResponse.json({ error: 'Forbidden: unknown project directory' }, { status: 403 });
-  }
-
   const fullPath = resolve(join(projectDir, filePath));
 
   // Ensure the resolved path is inside the project directory (no traversal)
