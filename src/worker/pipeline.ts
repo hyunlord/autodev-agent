@@ -372,7 +372,8 @@ async function resolveProjectDir(taskId: string, userDir: string | null): Promis
     return resolved;
   }
 
-  const workspaceDir = join(process.cwd(), '.autodev', 'workspaces', taskId);
+  const homeDir = process.env.HOME ?? process.env.USERPROFILE ?? process.cwd();
+  const workspaceDir = join(homeDir, '.autodev', 'workspaces', taskId);
   mkdirSync(workspaceDir, { recursive: true });
 
   const { execa } = await import('execa');

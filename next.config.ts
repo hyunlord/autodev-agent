@@ -9,7 +9,7 @@ const nextConfig: NextConfig = {
       ...config.watchOptions,
       ignored: [
         ...(Array.isArray(config.watchOptions?.ignored) ? config.watchOptions.ignored : []),
-        '**/.autodev/**',
+        '**/\\.autodev/**',
       ],
     };
     return config;
