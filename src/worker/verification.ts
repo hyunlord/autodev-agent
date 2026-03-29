@@ -91,53 +91,93 @@ export async function runVerification(
 
           case 'port_check': {
             const port = projectConfig?.defaultPort ?? 3000;
-            if (!webCtx && projectConfig) {
-              webCtx = await startWebApp({
-                projectDir,
-                devCmd: projectConfig.devCmd,
-                port,
-                screenshotDir,
-                installCmd: projectConfig.installCmd ?? undefined,
-              });
-              emit({ type: 'log', level: 'info', message: `Dev server started on port ${port}` });
+            if (!webCtx && projectConfig && projectConfig.devCmd) {
+              try {
+                webCtx = await startWebApp({
+                  projectDir,
+                  devCmd: projectConfig.devCmd,
+                  port,
+                  screenshotDir,
+                  installCmd: projectConfig.installCmd ?? undefined,
+                });
+                emit({ type: 'log', level: 'info', message: `Dev server started on port ${port}` });
+              } catch (e) {
+                results.push({
+                  checkId: step.id, type: step.type, status: 'skip',
+                  description: step.description,
+                  actual: `Could not start dev server: ${e instanceof Error ? e.message : String(e)}`,
+                  durationMs: Date.now() - startTime,
+                });
+                emit({ type: 'verification_result', checkId: step.id, status: 'skip', detail: 'Dev server failed to start' });
+                break;
+              }
             }
-            const result = await runPortCheck(port);
-            results.push({
-              checkId: step.id,
-              type: step.type,
-              status: result.passed ? 'pass' : 'fail',
-              description: step.description,
-              expected: `Port ${port} listening`,
-              actual: result.actual,
-              durationMs: result.durationMs,
-            });
-            emit({ type: 'verification_result', checkId: step.id, status: result.passed ? 'pass' : 'fail', detail: result.actual });
+            if (webCtx) {
+              const result = await runPortCheck(port);
+              results.push({
+                checkId: step.id, type: step.type,
+                status: result.passed ? 'pass' : 'fail',
+                description: step.description,
+                expected: `Port ${port} listening`,
+                actual: result.actual,
+                durationMs: result.durationMs,
+              });
+              emit({ type: 'verification_result', checkId: step.id, status: result.passed ? 'pass' : 'fail', detail: result.actual });
+            } else {
+              results.push({
+                checkId: step.id, type: step.type, status: 'skip',
+                description: step.description,
+                actual: 'Skipped: no dev server configured for this project type',
+                durationMs: Date.now() - startTime,
+              });
+              emit({ type: 'verification_result', checkId: step.id, status: 'skip', detail: 'No dev server to check' });
+            }
             break;
           }
 
           case 'http_check': {
             const port = projectConfig?.defaultPort ?? 3000;
             const url = step.url ?? `http://localhost:${port}`;
-            if (!webCtx && projectConfig) {
-              webCtx = await startWebApp({
-                projectDir,
-                devCmd: projectConfig.devCmd,
-                port,
-                screenshotDir,
-                installCmd: projectConfig.installCmd ?? undefined,
-              });
+            if (!webCtx && projectConfig && projectConfig.devCmd) {
+              try {
+                webCtx = await startWebApp({
+                  projectDir,
+                  devCmd: projectConfig.devCmd,
+                  port,
+                  screenshotDir,
+                  installCmd: projectConfig.installCmd ?? undefined,
+                });
+              } catch {
+                results.push({
+                  checkId: step.id, type: step.type, status: 'skip',
+                  description: step.description,
+                  actual: 'Skipped: could not start dev server',
+                  durationMs: Date.now() - startTime,
+                });
+                emit({ type: 'verification_result', checkId: step.id, status: 'skip', detail: 'Dev server failed to start' });
+                break;
+              }
             }
-            const result = await runHttpCheck(url);
-            results.push({
-              checkId: step.id,
-              type: step.type,
-              status: result.passed ? 'pass' : 'fail',
-              description: step.description,
-              expected: 'HTTP 2xx/3xx',
-              actual: result.actual,
-              durationMs: result.durationMs,
-            });
-            emit({ type: 'verification_result', checkId: step.id, status: result.passed ? 'pass' : 'fail', detail: result.actual });
+            if (webCtx) {
+              const result = await runHttpCheck(url);
+              results.push({
+                checkId: step.id, type: step.type,
+                status: result.passed ? 'pass' : 'fail',
+                description: step.description,
+                expected: 'HTTP 2xx/3xx',
+                actual: result.actual,
+                durationMs: result.durationMs,
+              });
+              emit({ type: 'verification_result', checkId: step.id, status: result.passed ? 'pass' : 'fail', detail: result.actual });
+            } else {
+              results.push({
+                checkId: step.id, type: step.type, status: 'skip',
+                description: step.description,
+                actual: 'Skipped: no dev server running',
+                durationMs: Date.now() - startTime,
+              });
+              emit({ type: 'verification_result', checkId: step.id, status: 'skip', detail: 'No dev server to check' });
+            }
             break;
           }
 

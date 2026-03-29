@@ -75,26 +75,44 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
         setTask(data);
         setCurrentStatus(data.status);
 
-        // Seed live events from DB so previously stored events show on reload
-        if (Array.isArray(data.events) && data.events.length > 0) {
-          const parsed: PipelineEvent[] = data.events.map((e: any) => {
-            try { return typeof e === 'string' ? JSON.parse(e) : e; } catch { return e; }
-          });
-          setLiveEvents(parsed);
-          for (const ev of parsed) {
-            if (ev.type === 'screenshot') {
-              setScreenshots((prev) => [...prev, { path: ev.path, checkId: ev.checkId }]);
-            }
-            if (ev.type === 'verification_result') {
-              setVerificationResults((prev) => [...prev, { checkId: ev.checkId, status: ev.status ?? 'skip', detail: ev.detail }]);
-            }
-            if (ev.type === 'escalation') {
-              setEscalationReport(ev.report);
-            }
-            if (ev.type === 'attempt_start') {
-              setAttemptCount(ev.attemptNum);
-            }
+        // Hydrate events from DB (each has { type, data, createdAt } where data is JSON string)
+        if (data.events && Array.isArray(data.events) && data.events.length > 0) {
+          const storedEvents: PipelineEvent[] = [];
+          const storedVerifications: Array<{ checkId: string; status: string; detail: string }> = [];
+          const storedScreenshots: Array<{ path: string; checkId: string }> = [];
+          let storedEscalation: string | null = null;
+          let maxAttempt = 1;
+
+          for (const evt of data.events) {
+            try {
+              const parsed: PipelineEvent = typeof evt.data === 'string' ? JSON.parse(evt.data) : evt.data;
+              if (!parsed.type) continue;
+              storedEvents.push(parsed);
+
+              if (parsed.type === 'verification_result') {
+                storedVerifications.push({
+                  checkId: parsed.checkId as string,
+                  status: (parsed.status ?? 'skip') as string,
+                  detail: parsed.detail as string,
+                });
+              }
+              if (parsed.type === 'screenshot') {
+                storedScreenshots.push({ path: parsed.path as string, checkId: parsed.checkId as string });
+              }
+              if (parsed.type === 'escalation') {
+                storedEscalation = parsed.report as string;
+              }
+              if (parsed.type === 'attempt_start' && typeof parsed.attemptNum === 'number') {
+                maxAttempt = Math.max(maxAttempt, parsed.attemptNum);
+              }
+            } catch { /* skip unparseable events */ }
           }
+
+          setLiveEvents(storedEvents);
+          setVerificationResults(storedVerifications);
+          setScreenshots(storedScreenshots);
+          if (storedEscalation) setEscalationReport(storedEscalation);
+          setAttemptCount(maxAttempt);
         }
       });
   }, [id]);

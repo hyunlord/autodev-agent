@@ -15,7 +15,21 @@ import type { ICodingAgent } from '../lib/plugins/interfaces';
 
 type EmitFn = (event: PipelineEvent) => void;
 
-export async function runPipeline(taskId: string, emit: EmitFn): Promise<void> {
+export async function runPipeline(taskId: string, rawEmit: EmitFn): Promise<void> {
+  // Wrap emit to persist all events to DB for later retrieval
+  const emit: EmitFn = (event) => {
+    rawEmit(event);
+    try {
+        db.insert(events).values({
+          id: nanoid(),
+          taskId,
+          type: event.type,
+          data: JSON.stringify(event),
+          createdAt: new Date().toISOString(),
+        }).run();
+    } catch { /* DB write failed — non-critical */ }
+  };
+
   const task = db.select().from(tasks).where(eq(tasks.id, taskId)).get();
   if (!task) {
     emit({ type: 'log', level: 'error', message: `Task ${taskId} not found` });
@@ -74,6 +88,41 @@ export async function runPipeline(taskId: string, emit: EmitFn): Promise<void> {
       ? (typeof task.config === 'string' ? JSON.parse(task.config) : task.config) as Record<string, any>
       : {};
 
+    // Scan workspace files for planner + coding agent context
+    let workspaceContext = '';
+    try {
+      const { getExeca } = await import('../lib/execa');
+      const ex = await getExeca();
+      const { stdout } = await ex('find', [
+        projectDir, '-maxdepth', '3',
+        '-not', '-path', '*/.git/*',
+        '-not', '-path', '*/node_modules/*',
+        '-not', '-path', '*/.next/*',
+        '-not', '-path', '*/.autodev/*',
+        '-type', 'f',
+      ], { reject: false, timeout: 5_000 });
+
+      if (stdout.trim()) {
+        const files = stdout.trim().split('\n')
+          .map((f: string) => f.replace(projectDir + '/', '').replace(projectDir, ''))
+          .filter((f: string) => f && !f.startsWith('.'));
+        if (files.length > 0 && files.length <= 50) {
+          workspaceContext = `\nExisting files in project:\n${files.map((f: string) => `- ${f}`).join('\n')}`;
+          const { readFileSync, statSync } = await import('fs');
+          for (const f of files.slice(0, 5)) {
+            try {
+              const fullPath = join(projectDir, f);
+              const stat = statSync(fullPath);
+              if (stat.size < 10_000) {
+                const content = readFileSync(fullPath, 'utf-8');
+                workspaceContext += `\n\nFile: ${f}\n\`\`\`\n${content.slice(0, 3000)}\n\`\`\``;
+              }
+            } catch { /* file read failed — skip */ }
+          }
+        }
+      }
+    } catch { /* workspace scan failed — ok */ }
+
     const plan = await generatePlan(
       task.prompt,
       projectConfig,
@@ -83,6 +132,7 @@ export async function runPipeline(taskId: string, emit: EmitFn): Promise<void> {
         verificationChecklist: taskConfig.verificationChecklist ?? '',
       } : undefined,
       (msg) => emit({ type: 'log', level: 'info', message: msg }),
+      workspaceContext,
     );
 
     emit({ type: 'log', level: 'info', message: `Plan: ${plan.summary}` });
@@ -115,6 +165,9 @@ export async function runPipeline(taskId: string, emit: EmitFn): Promise<void> {
       emit({ type: 'attempt_start', attemptNum: attempt, agentId });
 
       let codingPrompt = plan.codingPrompt;
+      if (workspaceContext) {
+        codingPrompt = codingPrompt + `\n\n${workspaceContext}`;
+      }
       if (!isRetry && projectHistory.length > 0) {
         const historyContext = projectHistory.map(h => {
           try {

@@ -44,6 +44,7 @@ async function planViaCliAgent(
   userPrompt: string,
   projectConfig: ProjectConfig | null,
   onProgress?: (msg: string) => void,
+  workspaceContext?: string,
 ): Promise<Plan> {
   onProgress?.('Generating plan via coding agent CLI...');
 
@@ -56,6 +57,7 @@ async function planViaCliAgent(
 Task: ${userPrompt}
 
 ${projectContext}
+${workspaceContext ?? ''}
 
 Respond with ONLY a valid JSON object (no markdown, no explanation) with this structure:
 {
@@ -178,6 +180,7 @@ async function planViaApi(
   userPrompt: string,
   projectConfig: ProjectConfig | null,
   onProgress?: (msg: string) => void,
+  workspaceContext?: string,
 ): Promise<Plan> {
   const Anthropic = (await import('@anthropic-ai/sdk')).default;
   const anthropic = new Anthropic();
@@ -235,7 +238,7 @@ Respond with ONLY the JSON object, no markdown code fences, no explanation.`,
     messages: [
       {
         role: 'user',
-        content: `Task: ${userPrompt}\n\n${projectContext}`,
+        content: `Task: ${userPrompt}\n\n${projectContext}${workspaceContext ? `\n${workspaceContext}` : ''}`,
       },
     ],
   });
@@ -262,10 +265,11 @@ export async function generatePlan(
   mode: PlanningMode,
   manualInput?: { codingPrompt: string; verificationChecklist: string },
   onProgress?: (msg: string) => void,
+  workspaceContext?: string,
 ): Promise<Plan> {
   switch (mode) {
     case 'auto':
-      return planViaCliAgent(userPrompt, projectConfig, onProgress);
+      return planViaCliAgent(userPrompt, projectConfig, onProgress, workspaceContext);
 
     case 'manual':
       if (!manualInput?.codingPrompt) {
@@ -278,7 +282,7 @@ export async function generatePlan(
       );
 
     case 'api':
-      return planViaApi(userPrompt, projectConfig, onProgress);
+      return planViaApi(userPrompt, projectConfig, onProgress, workspaceContext);
 
     default:
       throw new Error(`Unknown planning mode: ${mode}`);
