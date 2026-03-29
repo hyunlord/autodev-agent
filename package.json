@@ -7,7 +7,7 @@
     "autodev-agent": "./bin/cli.ts"
   },
   "scripts": {
-    "dev": "rm -rf .next && next dev",
+    "dev": "rm -rf .next/cache && next dev",
     "build": "next build",
     "start": "next start",
     "db:generate": "drizzle-kit generate",
