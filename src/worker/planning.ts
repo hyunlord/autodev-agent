@@ -16,9 +16,9 @@ export const VerificationStepSchema = z.object({
   expectedText: z.string().optional(),
   vlmPrompt: z.string().optional(),
   runCmd: z.string().optional(),
-  waitMs: z.number().optional(),
+  waitMs: z.coerce.number().optional(),
   expectedStdout: z.string().optional(),
-  expectedExitCode: z.number().optional(),
+  expectedExitCode: z.coerce.number().optional(),
   notExpectedStdout: z.string().optional(),
 });
 

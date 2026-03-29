@@ -74,6 +74,28 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
       .then((data) => {
         setTask(data);
         setCurrentStatus(data.status);
+
+        // Seed live events from DB so previously stored events show on reload
+        if (Array.isArray(data.events) && data.events.length > 0) {
+          const parsed: PipelineEvent[] = data.events.map((e: any) => {
+            try { return typeof e === 'string' ? JSON.parse(e) : e; } catch { return e; }
+          });
+          setLiveEvents(parsed);
+          for (const ev of parsed) {
+            if (ev.type === 'screenshot') {
+              setScreenshots((prev) => [...prev, { path: ev.path, checkId: ev.checkId }]);
+            }
+            if (ev.type === 'verification_result') {
+              setVerificationResults((prev) => [...prev, { checkId: ev.checkId, status: ev.status ?? 'skip', detail: ev.detail }]);
+            }
+            if (ev.type === 'escalation') {
+              setEscalationReport(ev.report);
+            }
+            if (ev.type === 'attempt_start') {
+              setAttemptCount(ev.attemptNum);
+            }
+          }
+        }
       });
   }, [id]);
 
