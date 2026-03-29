@@ -95,17 +95,57 @@ export class ClaudeCodeAgent implements ICodingAgent {
       },
     })) {
       if (msg.type === 'assistant') {
-        opts.onProgress?.({
-          type: 'log',
-          level: 'info',
-          message: `[Claude Code] ${typeof (msg as any).message === 'string' ? String((msg as any).message).slice(0, 200) : 'Working...'}`,
-        });
+        const betaMsg = (msg as any).message;
+        if (betaMsg?.content && Array.isArray(betaMsg.content)) {
+          for (const block of betaMsg.content) {
+            if (block.type === 'text' && block.text) {
+              opts.onProgress?.({
+                type: 'log',
+                level: 'info',
+                message: `[Claude Code] ${block.text.slice(0, 300)}`,
+              });
+            }
+            if (block.type === 'tool_use') {
+              const toolName = block.name ?? 'unknown';
+              const input = block.input ?? {};
+              let toolMsg = `[Claude Code] 🔧 Tool: ${toolName}`;
+              if (toolName === 'Write' || toolName === 'write' || toolName === 'file_write') {
+                toolMsg = `[Claude Code] 📝 Writing: ${input.file_path ?? input.path ?? 'file'}`;
+              } else if (toolName === 'Read' || toolName === 'read' || toolName === 'file_read') {
+                toolMsg = `[Claude Code] 📖 Reading: ${input.file_path ?? input.path ?? 'file'}`;
+              } else if (toolName === 'Bash' || toolName === 'bash' || toolName === 'execute_bash') {
+                toolMsg = `[Claude Code] 💻 Running: ${(input.command ?? input.cmd ?? '').slice(0, 100)}`;
+              } else if (toolName === 'Edit' || toolName === 'edit' || toolName === 'file_edit') {
+                toolMsg = `[Claude Code] ✏️ Editing: ${input.file_path ?? input.path ?? 'file'}`;
+              }
+              opts.onProgress?.({ type: 'log', level: 'info', message: toolMsg });
+            }
+          }
+        }
       }
+
+      if (msg.type === 'tool_use_summary') {
+        const summary = (msg as any).summary;
+        if (summary) {
+          opts.onProgress?.({ type: 'log', level: 'info', message: `[Claude Code] ${summary.slice(0, 300)}` });
+        }
+      }
+
+      if (msg.type === 'tool_progress') {
+        const toolName = (msg as any).tool_name ?? '';
+        const elapsed = (msg as any).elapsed_time_seconds ?? 0;
+        if (elapsed > 5) {
+          opts.onProgress?.({ type: 'log', level: 'info', message: `[Claude Code] ⏳ ${toolName} running (${elapsed.toFixed(0)}s)...` });
+        }
+      }
+
       if (msg.type === 'result') {
-        resultText = (msg as any).result ?? '';
-        costUsd = (msg as any).total_cost_usd ?? 0;
-        inputTokens = (msg as any).usage?.input_tokens ?? 0;
-        outputTokens = (msg as any).usage?.output_tokens ?? 0;
+        const resultMsg = msg as any;
+        resultText = resultMsg.result ?? '';
+        costUsd = resultMsg.total_cost_usd ?? 0;
+        inputTokens = resultMsg.usage?.input_tokens ?? 0;
+        outputTokens = resultMsg.usage?.output_tokens ?? 0;
+        opts.onProgress?.({ type: 'log', level: 'info', message: `[Claude Code] ✅ Complete (${resultMsg.num_turns ?? '?'} turns, $${costUsd.toFixed(4)})` });
       }
     }
 

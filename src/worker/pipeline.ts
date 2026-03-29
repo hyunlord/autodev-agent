@@ -183,7 +183,7 @@ export async function runPipeline(taskId: string, emit: EmitFn): Promise<void> {
 
         const { allowed, reason } = retryCtrl.canRetry();
         if (!allowed) {
-          await escalate(taskId, task.prompt, plan.summary, retryCtrl, lastFailedChecks, lastModifiedFiles, totalCostUsd, reason!, emit);
+          await escalate(taskId, task.prompt, plan.summary, retryCtrl, lastFailedChecks, lastModifiedFiles, totalCostUsd, reason!, emit, projectDir);
           return;
         }
 
@@ -247,6 +247,15 @@ export async function runPipeline(taskId: string, emit: EmitFn): Promise<void> {
           verificationPassed: true,
         });
         emit({ type: 'task_complete', success: true, summary: `Completed in ${attempt} attempt(s): ${plan.summary}. All checks passed. Cost: $${totalCostUsd.toFixed(4)}` });
+
+        // Commit successful changes as new baseline
+        try {
+          const { getExeca } = await import('../lib/execa');
+          const ex = await getExeca();
+          await ex('git', ['add', '-A'], { cwd: projectDir, reject: false });
+          await ex('git', ['commit', '-m', `autodev: ${plan.summary.slice(0, 72)}`], { cwd: projectDir, reject: false });
+        } catch { /* git commit failed — non-critical */ }
+
         return;
       }
 
@@ -271,14 +280,14 @@ export async function runPipeline(taskId: string, emit: EmitFn): Promise<void> {
 
       const { allowed, reason } = retryCtrl.canRetry();
       if (!allowed) {
-        await escalate(taskId, task.prompt, plan.summary, retryCtrl, lastFailedChecks, lastModifiedFiles, totalCostUsd, reason!, emit);
+        await escalate(taskId, task.prompt, plan.summary, retryCtrl, lastFailedChecks, lastModifiedFiles, totalCostUsd, reason!, emit, projectDir);
         return;
       }
 
       emit({ type: 'log', level: 'info', message: `Will retry (${reason ?? 'checks failed'})...` });
     }
 
-    await escalate(taskId, task.prompt, plan.summary, retryCtrl, lastFailedChecks, lastModifiedFiles, totalCostUsd, 'max_attempts', emit);
+    await escalate(taskId, task.prompt, plan.summary, retryCtrl, lastFailedChecks, lastModifiedFiles, totalCostUsd, 'max_attempts', emit, projectDir);
 
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
@@ -299,6 +308,7 @@ async function escalate(
   totalCostUsd: number,
   stopReason: string,
   emit: EmitFn,
+  projectDir: string,
 ): Promise<void> {
   const retrySummary = retryCtrl.getSummary();
 
@@ -328,6 +338,20 @@ async function escalate(
   emit({ type: 'log', level: 'error', message: `Escalating: ${stopReason} after ${retrySummary.attempts} attempt(s)` });
   emit({ type: 'escalation', report });
   emit({ type: 'task_complete', success: false, summary: `Escalated (${stopReason}): ${summary}. ${retrySummary.attempts} attempt(s), $${totalCostUsd.toFixed(4)} spent.` });
+
+  // Roll back auto-created workspaces to clean state
+  if (projectDir.includes('.autodev/workspaces/') || projectDir.includes('.autodev\\workspaces\\')) {
+    try {
+      const { getExeca } = await import('../lib/execa');
+      const ex = await getExeca();
+      const gitCheck = await ex('git', ['rev-parse', '--is-inside-work-tree'], { cwd: projectDir, reject: false });
+      if (gitCheck.exitCode === 0) {
+        await ex('git', ['checkout', '.'], { cwd: projectDir, reject: false });
+        await ex('git', ['clean', '-fd'], { cwd: projectDir, reject: false });
+        emit({ type: 'log', level: 'info', message: 'Rolled back workspace to clean state' });
+      }
+    } catch { /* rollback failed — non-critical */ }
+  }
 }
 
 async function selectAgent(
