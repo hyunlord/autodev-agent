@@ -64,6 +64,7 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
   const [verificationResults, setVerificationResults] = useState<Array<{ checkId: string; status: string; detail: string }>>([]);
   const [escalationReport, setEscalationReport] = useState<string | null>(null);
   const [attemptCount, setAttemptCount] = useState(1);
+  const [previewFile, setPreviewFile] = useState<{ path: string; content: string; language: string } | null>(null);
   const eventsEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -107,6 +108,21 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
     eventsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [liveEvents]);
 
+  const loadFilePreview = async (filePath: string) => {
+    if (!task?.projectDir) return;
+    if (previewFile?.path === filePath) {
+      setPreviewFile(null);
+      return;
+    }
+    try {
+      const res = await fetch(`/api/files?projectDir=${encodeURIComponent(task.projectDir)}&file=${encodeURIComponent(filePath)}`);
+      if (res.ok) {
+        const data = await res.json();
+        setPreviewFile(data);
+      }
+    } catch {}
+  };
+
   const parsedResult = task?.result
     ? (() => { try { return typeof task.result === 'string' ? JSON.parse(task.result) : task.result; } catch { return null; } })()
     : null;
@@ -129,7 +145,21 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
       <p className="text-gray-300 mb-4">{task.prompt}</p>
 
       {task.projectDir && (
-        <p className="text-gray-500 text-sm mb-4">Project: {task.projectDir}</p>
+        <div className="flex items-center gap-2 mb-4">
+          <code className="text-sm text-gray-400 bg-gray-800 px-2 py-1 rounded">{task.projectDir}</code>
+          <button
+            onClick={async () => {
+              await fetch('/api/workspace/open', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ path: task.projectDir }),
+              });
+            }}
+            className="px-2.5 py-1 text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg transition-colors"
+          >
+            📂 Open Folder
+          </button>
+        </div>
       )}
 
       {attemptCount > 1 && (
@@ -185,12 +215,33 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
           </div>
           {parsedResult?.modifiedFiles?.length > 0 && (
             <div className="mt-3 pt-3 border-t border-gray-800">
-              <p className="text-xs text-gray-500 mb-1">Modified Files</p>
-              <div className="flex flex-wrap gap-1">
+              <p className="text-xs text-gray-500 mb-2">Modified Files</p>
+              <div className="space-y-1">
                 {parsedResult.modifiedFiles.map((f: string, i: number) => (
-                  <code key={i} className="text-xs bg-gray-800 text-gray-300 px-1.5 py-0.5 rounded">{f}</code>
+                  <button
+                    key={i}
+                    onClick={() => loadFilePreview(f)}
+                    className={`block w-full text-left text-xs px-2 py-1.5 rounded transition-colors ${
+                      previewFile?.path === f
+                        ? 'bg-indigo-900/30 text-indigo-300 border border-indigo-800'
+                        : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                    }`}
+                  >
+                    📄 {f}
+                  </button>
                 ))}
               </div>
+              {previewFile && (
+                <div className="mt-3 rounded-lg border border-gray-700 overflow-hidden">
+                  <div className="flex items-center justify-between px-3 py-1.5 bg-gray-800 border-b border-gray-700">
+                    <span className="text-xs text-gray-400">{previewFile.path}</span>
+                    <span className="text-xs text-gray-600">{previewFile.language}</span>
+                  </div>
+                  <pre className="p-3 text-xs text-gray-300 overflow-x-auto max-h-96 bg-gray-950">
+                    <code>{previewFile.content}</code>
+                  </pre>
+                </div>
+              )}
             </div>
           )}
         </div>
