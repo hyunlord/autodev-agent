@@ -83,7 +83,7 @@ Order from cheapest to most expensive. Always include build_check first.
   const result = await execa(claudePath, [
     '-p', planPrompt,
     '--output-format', 'text',
-    '--max-turns', '10',
+    '--max-turns', '5',
     '--dangerously-skip-permissions',
   ], {
     timeout: 120_000,
@@ -92,7 +92,11 @@ Order from cheapest to most expensive. Always include build_check first.
   });
 
   if (result.exitCode !== 0) {
-    throw new Error(`CLI planning failed (exit ${result.exitCode}): ${result.stderr.slice(0, 500)}`);
+    const debugOutput = [
+      result.stderr ? `stderr: ${result.stderr.slice(0, 1000)}` : '',
+      result.stdout ? `stdout: ${result.stdout.slice(0, 1000)}` : '',
+    ].filter(Boolean).join('\n');
+    throw new Error(`CLI planning failed (exit ${result.exitCode}):\n${debugOutput}`);
   }
 
   const cleaned = result.stdout.replace(/^```(?:json)?\n?/m, '').replace(/\n?```$/m, '').trim();
@@ -105,11 +109,12 @@ Order from cheapest to most expensive. Always include build_check first.
     if (jsonMatch) {
       parsed = JSON.parse(jsonMatch[0]);
     } else {
-      throw new Error(`CLI returned non-JSON output: ${cleaned.slice(0, 500)}`);
+      throw new Error(`CLI returned non-JSON output (${cleaned.length} chars):\n${cleaned.slice(0, 1000)}`);
     }
   }
 
   const plan = PlanSchema.parse(parsed);
+  onProgress?.(`Planning output: ${cleaned.length} chars, parsed successfully`);
   onProgress?.(`Plan ready: ${plan.summary}`);
   return plan;
 }
