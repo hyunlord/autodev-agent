@@ -192,7 +192,12 @@ export async function runPipeline(taskId: string, rawEmit: EmitFn): Promise<void
       emit({ type: 'status_change', status: 'coding', message: isRetry ? `Retrying with error context (attempt ${attempt})...` : 'Sending task to Claude Code...' });
       emit({ type: 'attempt_start', attemptNum: attempt, agentId });
 
-      let codingPrompt = plan.codingPrompt;
+      let codingPrompt = `CRITICAL: You MUST only create and modify files inside this directory: ${projectDir}
+Do NOT navigate to or modify files outside this directory.
+Do NOT search for or modify any files in parent directories.
+Your working directory is ${projectDir} — all file paths must be relative to this directory.
+
+${plan.codingPrompt}`;
       if (workspaceContext) {
         codingPrompt = codingPrompt + `\n\n${workspaceContext}`;
       }
