@@ -45,9 +45,11 @@ const [tasks, setTasks] = useState<Task[]>([]);
   const [selectedAgent, setSelectedAgent] = useState('claude-code');
 
   const fetchTasks = async () => {
-    const res = await fetch('/api/tasks');
-    const data = await res.json();
-    setTasks(data);
+    try {
+      const res = await fetch('/api/tasks');
+      const data = await res.json();
+      setTasks(data);
+    } catch {}
   };
 
   useEffect(() => {
