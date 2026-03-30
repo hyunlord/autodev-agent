@@ -67,6 +67,7 @@ IMPORTANT RULES:
 5. For verification: if there's no package.json, do NOT use build_check with "npm run build". Use file_check instead.
 6. For simple HTML files, use file_check to verify the file exists and contains expected content. No port_check or http_check needed.
 7. The codingPrompt must explicitly tell the coding agent to work in the current directory and modify existing files.
+8. NEVER include absolute paths in codingPrompt. The coding agent's working directory is already set correctly. Use only relative paths (e.g., ./index.html, ./src/app/page.tsx). NEVER reference /Users/, /home/, or any absolute directory.
 
 Respond with ONLY a valid JSON object (no markdown, no explanation) with this structure:
 {
@@ -215,6 +216,7 @@ IMPORTANT RULES:
 3. Match the technology of existing files. HTML workspace = HTML solution. React workspace = React solution.
 4. For verification: if there's no package.json, do NOT use build_check with "npm run build". Use file_check instead.
 5. The codingPrompt must tell the coding agent to modify existing files in the current directory.
+6. NEVER include absolute paths in codingPrompt. The coding agent's working directory is already set correctly. Use only relative paths (e.g., ./index.html, ./src/app/page.tsx). NEVER reference /Users/, /home/, or any absolute directory.
 
 Your response MUST be valid JSON matching this schema:
 {

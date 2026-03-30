@@ -189,7 +189,7 @@ export async function runPipeline(taskId: string, rawEmit: EmitFn): Promise<void
         updateTaskStatus(taskId, 'coding');
       }
 
-      emit({ type: 'status_change', status: 'coding', message: isRetry ? `Retrying with error context (attempt ${attempt})...` : 'Sending task to Claude Code...' });
+      emit({ type: 'status_change', status: 'coding', message: isRetry ? `Retrying with error context (attempt ${attempt})...` : `Sending task to ${agent.name}...` });
       emit({ type: 'attempt_start', attemptNum: attempt, agentId });
 
       let codingPrompt = `CRITICAL: You MUST only create and modify files inside this directory: ${projectDir}
@@ -219,8 +219,13 @@ ${plan.codingPrompt}`;
         emit({ type: 'log', level: 'info', message: `Retry context: ${lastFailedChecks.length} failed checks from previous attempt` });
       }
 
+      const safePrompt = `CRITICAL: Your working directory is ${projectDir}.
+ONLY modify files inside this directory.
+Do NOT navigate to or modify any files outside ${projectDir}.
+All paths must be relative to the current directory.\n\n${codingPrompt}`;
+
       const codeResult = await agent.invoke({
-        task: codingPrompt,
+        task: safePrompt,
         projectDir,
         maxTurns: 20,
         timeoutMs: 300_000,
