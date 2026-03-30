@@ -83,6 +83,13 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
         setTask(data);
         setCurrentStatus(data.status);
 
+        // Hydrate plan from DB
+        if (data.plan) {
+          const plan = typeof data.plan === 'string' ? JSON.parse(data.plan) : data.plan;
+          setPlanData(plan);
+          setEditedCodingPrompt(plan.codingPrompt ?? '');
+        }
+
         // Hydrate events from DB (each has { type, data, createdAt } where data is JSON string)
         if (data.events && Array.isArray(data.events) && data.events.length > 0) {
           const storedEvents: PipelineEvent[] = [];
@@ -236,47 +243,51 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
 
       <StageIndicator currentStatus={currentStatus} />
 
-      {(currentStatus === 'plan_review' && planData) && (
+      {planData && (
         <section className="mb-6 p-5 bg-indigo-950/20 rounded-lg border border-indigo-800/50">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-indigo-300">Plan Review</h2>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setEditingPlan(!editingPlan)}
-                className="px-3 py-1.5 text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg transition-colors"
-              >
-                {editingPlan ? 'Preview' : 'Edit'}
-              </button>
-              <button
-                onClick={async () => {
-                  await fetch(`/api/tasks/${id}`, {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ action: 'reject' }),
-                  });
-                  setCurrentStatus('failed');
-                }}
-                className="px-3 py-1.5 text-xs bg-red-900/50 hover:bg-red-900 text-red-300 rounded-lg transition-colors"
-              >
-                Reject
-              </button>
-              <button
-                onClick={async () => {
-                  const planToSend = editingPlan ? {
-                    ...planData,
-                    codingPrompt: editedCodingPrompt,
-                  } : undefined;
-                  await fetch(`/api/tasks/${id}`, {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ action: 'approve', plan: planToSend }),
-                  });
-                }}
-                className="px-4 py-1.5 text-xs bg-green-700 hover:bg-green-600 text-white rounded-lg transition-colors font-medium"
-              >
-                Approve &amp; Run
-              </button>
-            </div>
+            <h2 className="text-lg font-semibold text-indigo-300">
+              {currentStatus === 'plan_review' ? 'Plan Review' : 'Plan'}
+            </h2>
+            {currentStatus === 'plan_review' && (
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setEditingPlan(!editingPlan)}
+                  className="px-3 py-1.5 text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg transition-colors"
+                >
+                  {editingPlan ? 'Preview' : 'Edit'}
+                </button>
+                <button
+                  onClick={async () => {
+                    await fetch(`/api/tasks/${id}`, {
+                      method: 'PATCH',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ action: 'reject' }),
+                    });
+                    setCurrentStatus('failed');
+                  }}
+                  className="px-3 py-1.5 text-xs bg-red-900/50 hover:bg-red-900 text-red-300 rounded-lg transition-colors"
+                >
+                  Reject
+                </button>
+                <button
+                  onClick={async () => {
+                    const planToSend = editingPlan ? {
+                      ...planData,
+                      codingPrompt: editedCodingPrompt,
+                    } : undefined;
+                    await fetch(`/api/tasks/${id}`, {
+                      method: 'PATCH',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ action: 'approve', plan: planToSend }),
+                    });
+                  }}
+                  className="px-4 py-1.5 text-xs bg-green-700 hover:bg-green-600 text-white rounded-lg transition-colors font-medium"
+                >
+                  Approve &amp; Run
+                </button>
+              </div>
+            )}
           </div>
 
           <div className="space-y-4">
@@ -296,7 +307,7 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
 
             <div>
               <p className="text-xs text-gray-500 mb-1">Coding prompt</p>
-              {editingPlan ? (
+              {editingPlan && currentStatus === 'plan_review' ? (
                 <textarea
                   value={editedCodingPrompt}
                   onChange={(e) => setEditedCodingPrompt(e.target.value)}

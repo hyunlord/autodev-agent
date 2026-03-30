@@ -94,6 +94,13 @@ RULE 5 — VERIFICATION:
 - file_check must use filePath AND expectedText to verify the change was actually made.
 - For HTML files, expectedText should check for the new feature (e.g., a button class, a CSS property).
 
+RULE 6 — LANGUAGE:
+- The "summary" field must be in the SAME language as the user's task description.
+- If the task is in Korean, summary must be in Korean.
+- If the task is in English, summary must be in English.
+- The "codingPrompt" should stay in English (better for coding agents).
+- Verification step descriptions should be in English (for consistency).
+
 Respond with ONLY valid JSON:
 {
   "summary": "One-line summary",
@@ -254,6 +261,11 @@ RULE 4 — CODING PROMPT:
 RULE 5 — VERIFICATION:
 - No package.json → file_check ONLY (no build_check, port_check, http_check).
 - file_check must include filePath AND expectedText.
+
+RULE 6 — LANGUAGE:
+- "summary" must match the language of the user's task (Korean task → Korean summary, English task → English summary).
+- "codingPrompt" stays in English.
+- Verification descriptions stay in English.
 
 Your response MUST be valid JSON:
 {

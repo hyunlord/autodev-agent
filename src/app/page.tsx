@@ -142,7 +142,14 @@ const [tasks, setTasks] = useState<Task[]>([]);
           ))}
         </div>
         {planningMode === 'auto' && (
-          <p className="mt-2 text-xs text-gray-500">Uses claude CLI (OAuth) — run &apos;claude login&apos; first</p>
+          <p className="mt-2 text-xs text-gray-500">
+            {selectedAgent === 'claude-code' && "Uses Claude CLI (OAuth) — run 'claude login' first"}
+            {selectedAgent === 'codex-cli' && "Uses Codex CLI — run 'codex login' first"}
+            {selectedAgent === 'gemini-cli' && "Uses Gemini CLI — run 'gemini login' first"}
+            {selectedAgent === 'aider' && "Uses Aider — configure API key in ~/.aider.conf.yml"}
+            {selectedAgent === 'cline-cli' && "Uses Cline CLI — configure in ~/.cline/config"}
+            {!['claude-code', 'codex-cli', 'gemini-cli', 'aider', 'cline-cli'].includes(selectedAgent) && `Uses ${selectedAgent} CLI`}
+          </p>
         )}
         {planningMode === 'api' && (
           <p className="mt-2 text-xs text-yellow-500">Requires ANTHROPIC_API_KEY in .autodev/.env</p>
