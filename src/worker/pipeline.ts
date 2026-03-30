@@ -49,6 +49,9 @@ export async function runPipeline(taskId: string, rawEmit: EmitFn): Promise<void
 
   const config = await loadConfig(projectDir);
 
+  const customPlanningPrompt = (task as any).planningSystemPrompt ?? null;
+  const customCodingPrompt = (task as any).codingSystemPrompt ?? null;
+
   // Fetch project history for context (completed tasks in same projectDir)
   const projectHistory = db
     .select({
@@ -134,6 +137,7 @@ export async function runPipeline(taskId: string, rawEmit: EmitFn): Promise<void
       (msg) => emit({ type: 'log', level: 'info', message: msg }),
       workspaceContext,
       projectDir,
+      customPlanningPrompt,
     );
 
     emit({ type: 'log', level: 'info', message: `Plan: ${plan.summary}` });
@@ -230,7 +234,7 @@ export async function runPipeline(taskId: string, rawEmit: EmitFn): Promise<void
       emit({ type: 'status_change', status: 'coding', message: isRetry ? `Retrying with error context (attempt ${attempt})...` : `Sending task to ${agent.name}...` });
       emit({ type: 'attempt_start', attemptNum: attempt, agentId });
 
-      let codingPrompt = `CRITICAL: You MUST only create and modify files inside this directory: ${projectDir}
+      let codingPrompt = `${customCodingPrompt ? customCodingPrompt + '\n\n' : ''}CRITICAL: You MUST only create and modify files inside this directory: ${projectDir}
 Do NOT navigate to or modify files outside this directory.
 Do NOT search for or modify any files in parent directories.
 Your working directory is ${projectDir} — all file paths must be relative to this directory.

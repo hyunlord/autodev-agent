@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { BUILT_IN_PRESETS } from '@/lib/prompts/presets';
 
 interface Task {
   id: string;
@@ -45,6 +46,10 @@ const [tasks, setTasks] = useState<Task[]>([]);
   const [agents, setAgents] = useState<Array<{ id: string; name: string; available: boolean; path: string | null }>>([]);
   const [selectedAgent, setSelectedAgent] = useState('claude-code');
   const [autoApprove, setAutoApprove] = useState(false);
+  const [showPromptSettings, setShowPromptSettings] = useState(false);
+  const [promptPreset, setPromptPreset] = useState('default');
+  const [planningSystemPrompt, setPlanningSystemPrompt] = useState('');
+  const [codingSystemPrompt, setCodingSystemPrompt] = useState('');
 
   const fetchTasks = async () => {
     try {
@@ -84,6 +89,8 @@ const [tasks, setTasks] = useState<Task[]>([]);
         planningMode,
         agentId: selectedAgent,
         autoApprove,
+        planningSystemPrompt: planningSystemPrompt || undefined,
+        codingSystemPrompt: codingSystemPrompt || undefined,
         ...(planningMode === 'manual' ? { codingPrompt, verificationChecklist } : {}),
       }),
     });
@@ -202,6 +209,71 @@ const [tasks, setTasks] = useState<Task[]>([]);
             />
             <span className="text-sm text-gray-400">Auto-approve plan (skip review)</span>
           </label>
+        </div>
+        <div className="mt-3">
+          <button
+            type="button"
+            onClick={() => setShowPromptSettings(!showPromptSettings)}
+            className="text-sm text-gray-500 hover:text-gray-300 transition-colors"
+          >
+            {showPromptSettings ? '\u25BE' : '\u25B8'} System prompts
+          </button>
+          {showPromptSettings && (
+            <div className="mt-2 space-y-3 p-3 bg-gray-800/50 rounded-lg border border-gray-700">
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Preset</label>
+                <div className="flex flex-wrap gap-2">
+                  {BUILT_IN_PRESETS.map(p => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => {
+                        setPromptPreset(p.id);
+                        setCodingSystemPrompt(p.codingPrompt);
+                        setPlanningSystemPrompt(p.planningPrompt);
+                      }}
+                      className={`px-2.5 py-1 text-xs rounded-lg transition-colors ${
+                        promptPreset === p.id
+                          ? 'bg-indigo-600 text-white'
+                          : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
+                      }`}
+                    >
+                      {p.name}
+                    </button>
+                  ))}
+                </div>
+                {promptPreset !== 'default' && promptPreset !== 'custom' && (
+                  <p className="text-xs text-gray-500 mt-1">
+                    {BUILT_IN_PRESETS.find(p => p.id === promptPreset)?.description}
+                  </p>
+                )}
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">
+                  Planning prompt <span className="text-gray-600">(optional)</span>
+                </label>
+                <textarea
+                  value={planningSystemPrompt}
+                  onChange={(e) => { setPlanningSystemPrompt(e.target.value); setPromptPreset('custom'); }}
+                  placeholder="Additional instructions for the planning phase..."
+                  rows={3}
+                  className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-gray-300 text-xs font-mono focus:outline-none focus:border-indigo-500 resize-y"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">
+                  Coding prompt <span className="text-gray-600">(optional)</span>
+                </label>
+                <textarea
+                  value={codingSystemPrompt}
+                  onChange={(e) => { setCodingSystemPrompt(e.target.value); setPromptPreset('custom'); }}
+                  placeholder="Additional instructions for the coding agent..."
+                  rows={3}
+                  className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-gray-300 text-xs font-mono focus:outline-none focus:border-indigo-500 resize-y"
+                />
+              </div>
+            </div>
+          )}
         </div>
         <div className="mt-3 flex gap-3">
           <input

@@ -46,6 +46,7 @@ async function planViaCliAgent(
   onProgress?: (msg: string) => void,
   workspaceContext?: string,
   workspaceDir?: string,
+  customPlanningPrompt?: string | null,
 ): Promise<Plan> {
   onProgress?.('Generating plan via coding agent CLI...');
 
@@ -120,7 +121,7 @@ Respond with ONLY valid JSON:
     throw new Error('Claude CLI not found. Install with: npm install -g @anthropic-ai/claude-code');
   }
   const result = await execa(claudePath, [
-    '-p', planPrompt,
+    '-p', customPlanningPrompt ? `${customPlanningPrompt}\n\n${planPrompt}` : planPrompt,
     '--output-format', 'text',
     '--max-turns', '5',
     '--dangerously-skip-permissions',
@@ -219,6 +220,7 @@ async function planViaApi(
   projectConfig: ProjectConfig | null,
   onProgress?: (msg: string) => void,
   workspaceContext?: string,
+  customPlanningPrompt?: string | null,
 ): Promise<Plan> {
   const Anthropic = (await import('@anthropic-ai/sdk')).default;
   const anthropic = new Anthropic();
@@ -236,7 +238,7 @@ Default port: ${projectConfig.defaultPort ?? 'none'}`
     model: 'claude-sonnet-4-20250514',
     max_tokens: 4096,
     temperature: 0.1,
-    system: `You are a development planning assistant. Generate a JSON plan for modifying an EXISTING project.
+    system: `${customPlanningPrompt ? customPlanningPrompt + '\n\n' : ''}You are a development planning assistant. Generate a JSON plan for modifying an EXISTING project.
 
 ## STRICT RULES — VIOLATIONS WILL CAUSE TASK FAILURE
 
@@ -320,10 +322,11 @@ export async function generatePlan(
   onProgress?: (msg: string) => void,
   workspaceContext?: string,
   workspaceDir?: string,
+  customPlanningPrompt?: string | null,
 ): Promise<Plan> {
   switch (mode) {
     case 'auto':
-      return planViaCliAgent(userPrompt, projectConfig, onProgress, workspaceContext, workspaceDir);
+      return planViaCliAgent(userPrompt, projectConfig, onProgress, workspaceContext, workspaceDir, customPlanningPrompt);
 
     case 'manual':
       if (!manualInput?.codingPrompt) {
@@ -336,7 +339,7 @@ export async function generatePlan(
       );
 
     case 'api':
-      return planViaApi(userPrompt, projectConfig, onProgress, workspaceContext);
+      return planViaApi(userPrompt, projectConfig, onProgress, workspaceContext, customPlanningPrompt);
 
     default:
       throw new Error(`Unknown planning mode: ${mode}`);

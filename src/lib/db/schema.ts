@@ -13,6 +13,8 @@ export const tasks = sqliteTable('tasks', {
   projectDir:  text('project_dir'),
   projectType: text('project_type'),
   plan:        text('plan', { mode: 'json' }),
+  planningSystemPrompt: text('planning_system_prompt'),
+  codingSystemPrompt:   text('coding_system_prompt'),
   config:      text('config', { mode: 'json' }),
   result:      text('result', { mode: 'json' }),
   createdAt:   text('created_at').notNull(),
