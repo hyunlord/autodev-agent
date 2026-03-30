@@ -59,11 +59,20 @@ Task: ${userPrompt}
 ${projectContext}
 ${workspaceContext ?? ''}
 
+IMPORTANT RULES:
+1. If existing files are listed above, your plan MUST modify those files — do NOT create a new project from scratch.
+2. If the workspace has only simple files (HTML, CSS, JS) with no package.json, do NOT introduce a framework (React, Next.js, etc.). Modify the existing files directly.
+3. If the workspace has only an index.html file, modify that file. Do NOT create src/app/ or any framework structure.
+4. Match the technology of the existing files. HTML workspace = HTML solution. React workspace = React solution.
+5. For verification: if there's no package.json, do NOT use build_check with "npm run build". Use file_check instead.
+6. For simple HTML files, use file_check to verify the file exists and contains expected content. No port_check or http_check needed.
+7. The codingPrompt must explicitly tell the coding agent to work in the current directory and modify existing files.
+
 Respond with ONLY a valid JSON object (no markdown, no explanation) with this structure:
 {
   "summary": "One-line summary",
-  "codingPrompt": "Detailed instruction for a coding agent including exact file paths and implementation details",
-  "estimatedFiles": ["file1.ts", "file2.ts"],
+  "codingPrompt": "Detailed instruction for a coding agent including exact file paths and implementation details. Tell it to modify existing files, not create a new project.",
+  "estimatedFiles": ["file1.html", "file2.css"],
   "verificationSpec": {
     "steps": [
       { "id": "v1", "description": "Build succeeds", "type": "build_check", "command": "npm run build" }
@@ -71,10 +80,10 @@ Respond with ONLY a valid JSON object (no markdown, no explanation) with this st
   }
 }
 
-Verification step types: build_check, file_check, port_check, http_check, dom_check, vlm_check.
-Order from cheapest to most expensive. Always include build_check first.
-7. desktop_check — launch a desktop/GUI app, wait for rendering, take a screenshot (for Godot, Electron, native apps). Use runCmd and optional vlmPrompt.
-8. cli_output_check — run a command and verify stdout/stderr/exit code (for CLI tools, scripts). Use command, expectedStdout, expectedExitCode.`;
+Verification step types: build_check, file_check, port_check, http_check, dom_check, vlm_check, desktop_check, cli_output_check.
+Order from cheapest to most expensive.
+Only include build_check if the project has a build command (package.json with build script).
+For simple HTML/CSS/JS files, use file_check only.`;
 
   const { getExeca } = await import('../lib/execa');
   const execa = await getExeca();
@@ -199,6 +208,13 @@ Default port: ${projectConfig.defaultPort ?? 'none'}`
     max_tokens: 4096,
     temperature: 0.1,
     system: `You are a development planning assistant. Given a user's task description and project context, generate a structured plan.
+
+IMPORTANT RULES:
+1. If existing files are listed in the project context, your plan MUST modify those files — do NOT create a new project from scratch.
+2. If the workspace has only simple files (HTML, CSS, JS) with no package.json, do NOT introduce a framework. Modify existing files directly.
+3. Match the technology of existing files. HTML workspace = HTML solution. React workspace = React solution.
+4. For verification: if there's no package.json, do NOT use build_check with "npm run build". Use file_check instead.
+5. The codingPrompt must tell the coding agent to modify existing files in the current directory.
 
 Your response MUST be valid JSON matching this schema:
 {

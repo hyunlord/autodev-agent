@@ -137,7 +137,35 @@ export async function runPipeline(taskId: string, rawEmit: EmitFn): Promise<void
 
     emit({ type: 'log', level: 'info', message: `Plan: ${plan.summary}` });
     emit({ type: 'log', level: 'info', message: `Estimated files: ${plan.estimatedFiles.join(', ')}` });
+    emit({ type: 'log', level: 'info', message: `Coding prompt: ${plan.codingPrompt.slice(0, 500)}` });
+    emit({ type: 'log', level: 'info', message: `Verification: ${plan.verificationSpec.steps.map(s => `${s.id}:${s.type}(${s.description})`).join(', ')}` });
     recordEvent(taskId, 'plan_complete', { summary: plan.summary, files: plan.estimatedFiles });
+
+    // Validate verification spec against actual project — remove impossible checks
+    if (!projectConfig?.buildCmd) {
+      const hasPkgJson = existsSync(join(projectDir, 'package.json'));
+      if (!hasPkgJson) {
+        plan.verificationSpec.steps = plan.verificationSpec.steps.filter(s => {
+          if (s.type === 'build_check') {
+            emit({ type: 'log', level: 'warn', message: `Removed build_check: no package.json found` });
+            return false;
+          }
+          if (s.type === 'port_check' || s.type === 'http_check' || s.type === 'dom_check') {
+            emit({ type: 'log', level: 'warn', message: `Removed ${s.type}: no dev server for this project type` });
+            return false;
+          }
+          return true;
+        });
+        if (plan.verificationSpec.steps.length === 0) {
+          plan.verificationSpec.steps.push({
+            id: 'v1',
+            description: 'Output files exist',
+            type: 'file_check',
+            filePath: plan.estimatedFiles[0] ?? 'index.html',
+          });
+        }
+      }
+    }
 
     // ─── 3. Code → Verify retry loop ─────────────────────
     let { agent, agentId } = await selectAgent((task as any).agentId ?? 'claude-code', emit);
@@ -400,8 +428,8 @@ async function escalate(
       const gitCheck = await ex('git', ['rev-parse', '--is-inside-work-tree'], { cwd: projectDir, reject: false });
       if (gitCheck.exitCode === 0) {
         await ex('git', ['checkout', '.'], { cwd: projectDir, reject: false });
-        await ex('git', ['clean', '-fd'], { cwd: projectDir, reject: false });
-        emit({ type: 'log', level: 'info', message: 'Rolled back workspace to clean state' });
+        await ex('git', ['clean', '-fdx'], { cwd: projectDir, reject: false });
+        emit({ type: 'log', level: 'info', message: 'Rolled back workspace to clean state (including build artifacts)' });
       }
     } catch { /* rollback failed — non-critical */ }
   }

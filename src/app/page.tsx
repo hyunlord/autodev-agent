@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { useTheme } from '@/components/ThemeProvider';
 
 interface Task {
   id: string;
@@ -27,6 +28,7 @@ const STATUS_COLORS: Record<string, string> = {
 
 export default function Dashboard() {
   const router = useRouter();
+  const { theme, toggleTheme } = useTheme();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [projects, setProjects] = useState<Array<{
     projectDir: string;
@@ -78,6 +80,7 @@ export default function Dashboard() {
         prompt,
         projectDir: projectDir || undefined,
         planningMode,
+        agentId: selectedAgent,
         ...(planningMode === 'manual' ? { codingPrompt, verificationChecklist } : {}),
       }),
     });
@@ -95,9 +98,18 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen p-8 max-w-4xl mx-auto">
-      <header className="mb-8">
-        <h1 className="text-3xl font-bold">AutoDev Agent</h1>
-        <p className="text-gray-400 mt-1">Universal AI Development Orchestrator</p>
+      <header className="mb-8 flex justify-between items-start">
+        <div>
+          <h1 className="text-3xl font-bold">AutoDev Agent</h1>
+          <p className="text-gray-400 mt-1">Universal AI Development Orchestrator</p>
+        </div>
+        <button
+          onClick={toggleTheme}
+          className="p-2 rounded-lg bg-gray-800 dark:bg-gray-800 hover:bg-gray-700 text-gray-300 transition-colors"
+          aria-label="Toggle dark mode"
+        >
+          {theme === 'dark' ? '\u2600\uFE0F' : '\uD83C\uDF19'}
+        </button>
       </header>
 
       <div className="flex flex-wrap gap-2 mb-4">
