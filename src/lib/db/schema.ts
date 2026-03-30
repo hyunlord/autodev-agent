@@ -4,7 +4,7 @@ export const tasks = sqliteTable('tasks', {
   id:          text('id').primaryKey(),
   prompt:      text('prompt').notNull(),
   status:      text('status', {
-    enum: ['pending', 'planning', 'coding', 'verifying', 'retrying', 'completed', 'failed', 'escalated'],
+    enum: ['pending', 'planning', 'plan_review', 'coding', 'verifying', 'retrying', 'completed', 'failed', 'escalated'],
   }).notNull().default('pending'),
   planningMode: text('planning_mode', {
     enum: ['auto', 'manual', 'api'],
@@ -12,6 +12,7 @@ export const tasks = sqliteTable('tasks', {
   agentId:     text('agent_id').notNull().default('claude-code'),
   projectDir:  text('project_dir'),
   projectType: text('project_type'),
+  plan:        text('plan', { mode: 'json' }),
   config:      text('config', { mode: 'json' }),
   result:      text('result', { mode: 'json' }),
   createdAt:   text('created_at').notNull(),

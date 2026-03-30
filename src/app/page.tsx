@@ -17,6 +17,7 @@ interface Task {
 const STATUS_COLORS: Record<string, string> = {
   pending: 'bg-gray-700 text-gray-300',
   planning: 'bg-blue-900 text-blue-300',
+  plan_review: 'bg-indigo-900 text-indigo-300',
   coding: 'bg-purple-900 text-purple-300',
   verifying: 'bg-yellow-900 text-yellow-300',
   retrying: 'bg-orange-900 text-orange-300',
@@ -43,6 +44,7 @@ const [tasks, setTasks] = useState<Task[]>([]);
   const [verificationChecklist, setVerificationChecklist] = useState('');
   const [agents, setAgents] = useState<Array<{ id: string; name: string; available: boolean; path: string | null }>>([]);
   const [selectedAgent, setSelectedAgent] = useState('claude-code');
+  const [autoApprove, setAutoApprove] = useState(false);
 
   const fetchTasks = async () => {
     try {
@@ -81,6 +83,7 @@ const [tasks, setTasks] = useState<Task[]>([]);
         projectDir: projectDir || undefined,
         planningMode,
         agentId: selectedAgent,
+        autoApprove,
         ...(planningMode === 'manual' ? { codingPrompt, verificationChecklist } : {}),
       }),
     });
@@ -181,6 +184,17 @@ const [tasks, setTasks] = useState<Task[]>([]);
               </option>
             ))}
           </select>
+        </div>
+        <div className="mt-3 flex items-center gap-2">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={autoApprove}
+              onChange={(e) => setAutoApprove(e.target.checked)}
+              className="rounded border-gray-700 bg-gray-800 text-indigo-600 focus:ring-indigo-500"
+            />
+            <span className="text-sm text-gray-400">Auto-approve plan (skip review)</span>
+          </label>
         </div>
         <div className="mt-3 flex gap-3">
           <input

@@ -24,6 +24,40 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   });
 }
 
+export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const body = await req.json();
+  const { action, plan: editedPlan } = body;
+
+  const task = db.select().from(tasks).where(eq(tasks.id, id)).get();
+  if (!task) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+
+  if (action === 'approve') {
+    if (editedPlan) {
+      db.update(tasks).set({
+        plan: JSON.stringify(editedPlan),
+        updatedAt: new Date().toISOString(),
+      }).where(eq(tasks.id, id)).run();
+    }
+    db.update(tasks).set({
+      status: 'coding',
+      updatedAt: new Date().toISOString(),
+    }).where(eq(tasks.id, id)).run();
+    return NextResponse.json({ success: true, action: 'approved' });
+  }
+
+  if (action === 'reject') {
+    db.update(tasks).set({
+      status: 'failed',
+      result: JSON.stringify({ error: 'Plan rejected by user' }),
+      updatedAt: new Date().toISOString(),
+    }).where(eq(tasks.id, id)).run();
+    return NextResponse.json({ success: true, action: 'rejected' });
+  }
+
+  return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
+}
+
 export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   db.delete(tasks).where(eq(tasks.id, id)).run();

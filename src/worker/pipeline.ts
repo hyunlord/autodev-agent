@@ -142,6 +142,43 @@ export async function runPipeline(taskId: string, rawEmit: EmitFn): Promise<void
     emit({ type: 'log', level: 'info', message: `Verification: ${plan.verificationSpec.steps.map(s => `${s.id}:${s.type}(${s.description})`).join(', ')}` });
     recordEvent(taskId, 'plan_complete', { summary: plan.summary, files: plan.estimatedFiles });
 
+    // ─── 3. Plan Review ──────────────────────────────
+    const autoApprove = taskConfig.autoApprove === true;
+
+    db.update(tasks).set({
+      plan: JSON.stringify(plan),
+      updatedAt: new Date().toISOString(),
+    }).where(eq(tasks.id, taskId)).run();
+
+    if (!autoApprove) {
+      updateTaskStatus(taskId, 'plan_review');
+      emit({ type: 'status_change', status: 'plan_review', message: 'Plan ready for review. Approve to continue.' });
+      emit({ type: 'plan_ready', plan: {
+        summary: plan.summary,
+        codingPrompt: plan.codingPrompt,
+        estimatedFiles: plan.estimatedFiles,
+        verificationSpec: plan.verificationSpec,
+      }});
+
+      const approved = await waitForApproval(taskId);
+      if (!approved) {
+        updateTaskStatus(taskId, 'failed', { error: 'Plan rejected by user' });
+        emit({ type: 'task_complete', success: false, summary: 'Plan rejected by user' });
+        return;
+      }
+
+      const updatedTask = db.select().from(tasks).where(eq(tasks.id, taskId)).get();
+      if (updatedTask?.plan) {
+        const editedPlan = typeof updatedTask.plan === 'string' ? JSON.parse(updatedTask.plan as string) : updatedTask.plan;
+        plan.summary = (editedPlan as any).summary ?? plan.summary;
+        plan.codingPrompt = (editedPlan as any).codingPrompt ?? plan.codingPrompt;
+        plan.estimatedFiles = (editedPlan as any).estimatedFiles ?? plan.estimatedFiles;
+        plan.verificationSpec = (editedPlan as any).verificationSpec ?? plan.verificationSpec;
+      }
+
+      emit({ type: 'log', level: 'info', message: 'Plan approved. Starting coding...' });
+    }
+
     // Validate verification spec against actual project — remove impossible checks
     if (!projectConfig?.buildCmd) {
       const hasPkgJson = existsSync(join(projectDir, 'package.json'));
@@ -505,6 +542,24 @@ function updateTaskStatus(taskId: string, status: TaskStatus, result?: Record<st
   const update: Record<string, unknown> = { status, updatedAt: new Date().toISOString() };
   if (result) update.result = JSON.stringify(result);
   db.update(tasks).set(update).where(eq(tasks.id, taskId)).run();
+}
+
+async function waitForApproval(taskId: string, timeoutMs: number = 600_000): Promise<boolean> {
+  const pollIntervalMs = 2_000;
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    const task = db.select().from(tasks).where(eq(tasks.id, taskId)).get();
+    if (!task) return false;
+
+    if (task.status !== 'plan_review') {
+      return task.status === 'coding';
+    }
+
+    await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+  }
+
+  return false;
 }
 
 function recordEvent(taskId: string, type: string, data: unknown): void {

@@ -36,9 +36,11 @@ export async function POST(req: Request) {
     agentId: body.agentId ?? 'claude-code',
     projectDir: projectDir ?? null,
     projectType: null,
+    plan: null,
     config: JSON.stringify({
       codingPrompt: body.codingPrompt ?? null,
       verificationChecklist: body.verificationChecklist ?? null,
+      autoApprove: body.autoApprove ?? false,
     }),
     result: null,
     createdAt: now,

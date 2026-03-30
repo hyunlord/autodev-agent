@@ -1,4 +1,4 @@
-export type TaskStatus = 'pending' | 'planning' | 'coding' | 'verifying' | 'retrying' | 'completed' | 'failed' | 'escalated';
+export type TaskStatus = 'pending' | 'planning' | 'plan_review' | 'coding' | 'verifying' | 'retrying' | 'completed' | 'failed' | 'escalated';
 
 export type PlanningMode = 'auto' | 'manual' | 'api';
 
@@ -10,4 +10,5 @@ export type PipelineEvent =
   | { type: 'attempt_start'; attemptNum: number; agentId: string }
   | { type: 'attempt_complete'; attemptNum: number; success: boolean; error?: string }
   | { type: 'task_complete'; success: boolean; summary: string }
-  | { type: 'escalation'; report: string };
+  | { type: 'escalation'; report: string }
+  | { type: 'plan_ready'; plan: { summary: string; codingPrompt: string; estimatedFiles: string[]; verificationSpec: any } };

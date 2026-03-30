@@ -24,7 +24,7 @@ interface PipelineEvent {
   [key: string]: any;
 }
 
-const STAGES = ['pending', 'planning', 'coding', 'verifying', 'completed'];
+const STAGES = ['pending', 'planning', 'plan_review', 'coding', 'verifying', 'completed'];
 
 function StageIndicator({ currentStatus }: { currentStatus: string }) {
   const currentIdx = STAGES.indexOf(currentStatus);
@@ -46,7 +46,7 @@ function StageIndicator({ currentStatus }: { currentStatus: string }) {
           <div key={stage} className="flex items-center gap-2">
             {i > 0 && <div className={`w-8 h-0.5 ${i <= currentIdx ? 'bg-green-700' : 'bg-gray-700'}`} />}
             <span className={`px-3 py-1 rounded-full text-xs font-medium capitalize ${color}`}>
-              {stage}
+              {stage === 'plan_review' ? 'review' : stage}
             </span>
           </div>
         );
@@ -64,6 +64,14 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
   const [verificationResults, setVerificationResults] = useState<Array<{ checkId: string; status: string; detail: string }>>([]);
   const [escalationReport, setEscalationReport] = useState<string | null>(null);
   const [attemptCount, setAttemptCount] = useState(1);
+  const [planData, setPlanData] = useState<{
+    summary: string;
+    codingPrompt: string;
+    estimatedFiles: string[];
+    verificationSpec: { steps: Array<{ id: string; type: string; description: string; [key: string]: any }> };
+  } | null>(null);
+  const [editingPlan, setEditingPlan] = useState(false);
+  const [editedCodingPrompt, setEditedCodingPrompt] = useState('');
   const [previewFile, setPreviewFile] = useState<{ path: string; content: string; language: string } | null>(null);
   const [projectTasks, setProjectTasks] = useState<Array<{ id: string; prompt: string; status: string; createdAt: string }>>([]);
   const eventsEndRef = useRef<HTMLDivElement>(null);
@@ -104,6 +112,10 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
               }
               if (parsed.type === 'attempt_start' && typeof parsed.attemptNum === 'number') {
                 maxAttempt = Math.max(maxAttempt, parsed.attemptNum);
+              }
+              if (parsed.type === 'plan_ready') {
+                setPlanData(parsed.plan as any);
+                setEditedCodingPrompt((parsed.plan as any)?.codingPrompt ?? '');
               }
             } catch { /* skip unparseable events */ }
           }
@@ -146,6 +158,10 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
       }
       if (event.type === 'escalation') {
         setEscalationReport(event.report);
+      }
+      if (event.type === 'plan_ready') {
+        setPlanData(event.plan as any);
+        setEditedCodingPrompt((event.plan as any)?.codingPrompt ?? '');
       }
       if (event.type === 'attempt_start') {
         setAttemptCount(event.attemptNum);
@@ -219,6 +235,96 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
       )}
 
       <StageIndicator currentStatus={currentStatus} />
+
+      {(currentStatus === 'plan_review' && planData) && (
+        <section className="mb-6 p-5 bg-indigo-950/20 rounded-lg border border-indigo-800/50">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-indigo-300">Plan Review</h2>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setEditingPlan(!editingPlan)}
+                className="px-3 py-1.5 text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg transition-colors"
+              >
+                {editingPlan ? 'Preview' : 'Edit'}
+              </button>
+              <button
+                onClick={async () => {
+                  await fetch(`/api/tasks/${id}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'reject' }),
+                  });
+                  setCurrentStatus('failed');
+                }}
+                className="px-3 py-1.5 text-xs bg-red-900/50 hover:bg-red-900 text-red-300 rounded-lg transition-colors"
+              >
+                Reject
+              </button>
+              <button
+                onClick={async () => {
+                  const planToSend = editingPlan ? {
+                    ...planData,
+                    codingPrompt: editedCodingPrompt,
+                  } : undefined;
+                  await fetch(`/api/tasks/${id}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'approve', plan: planToSend }),
+                  });
+                }}
+                className="px-4 py-1.5 text-xs bg-green-700 hover:bg-green-600 text-white rounded-lg transition-colors font-medium"
+              >
+                Approve &amp; Run
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <div>
+              <p className="text-xs text-gray-500 mb-1">Summary</p>
+              <p className="text-sm text-gray-200">{planData.summary}</p>
+            </div>
+
+            <div>
+              <p className="text-xs text-gray-500 mb-1">Estimated files</p>
+              <div className="flex flex-wrap gap-1">
+                {planData.estimatedFiles.map((f, i) => (
+                  <code key={i} className="text-xs bg-gray-800 text-gray-300 px-1.5 py-0.5 rounded">{f}</code>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <p className="text-xs text-gray-500 mb-1">Coding prompt</p>
+              {editingPlan ? (
+                <textarea
+                  value={editedCodingPrompt}
+                  onChange={(e) => setEditedCodingPrompt(e.target.value)}
+                  rows={12}
+                  className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-gray-300 text-xs font-mono focus:outline-none focus:border-indigo-500 resize-y"
+                />
+              ) : (
+                <pre className="text-xs text-gray-300 bg-gray-900 p-3 rounded-lg overflow-x-auto max-h-64 whitespace-pre-wrap font-mono">{planData.codingPrompt}</pre>
+              )}
+            </div>
+
+            <div>
+              <p className="text-xs text-gray-500 mb-1">Verification steps</p>
+              <div className="space-y-1">
+                {planData.verificationSpec.steps.map((s: any, i: number) => (
+                  <div key={i} className="text-xs text-gray-400 bg-gray-900 px-2 py-1.5 rounded flex items-center gap-2">
+                    <span className="text-indigo-400 font-mono">{s.id}</span>
+                    <span className="text-gray-600">&middot;</span>
+                    <span className="text-gray-500">{s.type}</span>
+                    <span className="text-gray-600">&middot;</span>
+                    <span className="text-gray-300">{s.description}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
 
       {(currentStatus === 'completed' || currentStatus === 'failed' || currentStatus === 'escalated') && task.result && (
         <div className={`mb-6 p-4 rounded-lg border ${
