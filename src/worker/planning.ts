@@ -45,6 +45,7 @@ async function planViaCliAgent(
   projectConfig: ProjectConfig | null,
   onProgress?: (msg: string) => void,
   workspaceContext?: string,
+  workspaceDir?: string,
 ): Promise<Plan> {
   onProgress?.('Generating plan via coding agent CLI...');
 
@@ -52,39 +53,58 @@ async function planViaCliAgent(
     ? `Project: ${projectConfig.displayName} (${projectConfig.language}), build: ${projectConfig.buildCmd ?? 'none'}, dev: ${projectConfig.devCmd}, port: ${projectConfig.defaultPort ?? 'none'}`
     : 'Project type: unknown';
 
-  const planPrompt = `You are a development planning assistant. Analyze this task and generate a JSON plan.
+  const planPrompt = `You are a development planning assistant. Generate a JSON plan for modifying an EXISTING project.
 
-Task: ${userPrompt}
-
+## Project Context
 ${projectContext}
-${workspaceContext ?? ''}
 
-IMPORTANT RULES:
-1. If existing files are listed above, your plan MUST modify those files — do NOT create a new project from scratch.
-2. If the workspace has only simple files (HTML, CSS, JS) with no package.json, do NOT introduce a framework (React, Next.js, etc.). Modify the existing files directly.
-3. If the workspace has only an index.html file, modify that file. Do NOT create src/app/ or any framework structure.
-4. Match the technology of the existing files. HTML workspace = HTML solution. React workspace = React solution.
-5. For verification: if there's no package.json, do NOT use build_check with "npm run build". Use file_check instead.
-6. For simple HTML files, use file_check to verify the file exists and contains expected content. No port_check or http_check needed.
-7. The codingPrompt must explicitly tell the coding agent to work in the current directory and modify existing files.
-8. NEVER include absolute paths in codingPrompt. The coding agent's working directory is already set correctly. Use only relative paths (e.g., ./index.html, ./src/app/page.tsx). NEVER reference /Users/, /home/, or any absolute directory.
+## Existing Files in Workspace
+${workspaceContext ?? 'No files yet (empty workspace).'}
 
-Respond with ONLY a valid JSON object (no markdown, no explanation) with this structure:
+## Task
+${userPrompt}
+
+## STRICT RULES — VIOLATIONS WILL CAUSE TASK FAILURE
+
+RULE 1 — TECHNOLOGY MATCH:
+- Project type "${projectConfig?.type ?? 'unknown'}" determines what technology to use.
+- "static-html" or "unknown" with only .html/.css/.js files → modify those files directly using plain HTML/CSS/JS. Do NOT use React, Next.js, Vue, or any framework.
+- "nextjs" → modify existing Next.js files (src/app/, etc.)
+- "react" → modify existing React files
+- If the workspace has index.html and no package.json, the ONLY correct approach is to edit index.html.
+
+RULE 2 — NO NEW PROJECTS:
+- NEVER create a new project structure (no npx create-next-app, no npm init, no framework scaffolding).
+- NEVER create src/app/, src/components/, or similar framework directories unless they already exist.
+- Modify ONLY files that already exist, or create new files that match the existing technology.
+
+RULE 3 — FILE PATHS:
+- Use ONLY relative paths (./index.html, ./styles.css).
+- NEVER use absolute paths (/Users/..., /home/...).
+- The coding agent's working directory is already set to the project root.
+
+RULE 4 — CODING PROMPT CONTENT:
+- The codingPrompt must name the EXACT files to modify (from the file list above).
+- If the task says "이 페이지" or "this page", it refers to the existing HTML/page file in the workspace, NOT some external application.
+- Include specific code changes (what to add, where to add it).
+- Tell the agent to keep all existing functionality intact.
+
+RULE 5 — VERIFICATION:
+- If project has no package.json: use file_check ONLY. No build_check, no port_check, no http_check.
+- file_check must use filePath AND expectedText to verify the change was actually made.
+- For HTML files, expectedText should check for the new feature (e.g., a button class, a CSS property).
+
+Respond with ONLY valid JSON:
 {
   "summary": "One-line summary",
-  "codingPrompt": "Detailed instruction for a coding agent including exact file paths and implementation details. Tell it to modify existing files, not create a new project.",
-  "estimatedFiles": ["file1.html", "file2.css"],
+  "codingPrompt": "Specific instructions referencing exact files from the workspace",
+  "estimatedFiles": ["index.html"],
   "verificationSpec": {
     "steps": [
-      { "id": "v1", "description": "Build succeeds", "type": "build_check", "command": "npm run build" }
+      {"id": "v1", "description": "index.html contains dark mode toggle", "type": "file_check", "filePath": "index.html", "expectedText": "dark-mode"}
     ]
   }
-}
-
-Verification step types: build_check, file_check, port_check, http_check, dom_check, vlm_check, desktop_check, cli_output_check.
-Order from cheapest to most expensive.
-Only include build_check if the project has a build command (package.json with build script).
-For simple HTML/CSS/JS files, use file_check only.`;
+}`;
 
   const { getExeca } = await import('../lib/execa');
   const execa = await getExeca();
@@ -98,6 +118,7 @@ For simple HTML/CSS/JS files, use file_check only.`;
     '--max-turns', '5',
     '--dangerously-skip-permissions',
   ], {
+    cwd: workspaceDir,
     timeout: 120_000,
     reject: false,
     env: { ...process.env },
@@ -208,49 +229,51 @@ Default port: ${projectConfig.defaultPort ?? 'none'}`
     model: 'claude-sonnet-4-20250514',
     max_tokens: 4096,
     temperature: 0.1,
-    system: `You are a development planning assistant. Given a user's task description and project context, generate a structured plan.
+    system: `You are a development planning assistant. Generate a JSON plan for modifying an EXISTING project.
 
-IMPORTANT RULES:
-1. If existing files are listed in the project context, your plan MUST modify those files — do NOT create a new project from scratch.
-2. If the workspace has only simple files (HTML, CSS, JS) with no package.json, do NOT introduce a framework. Modify existing files directly.
-3. Match the technology of existing files. HTML workspace = HTML solution. React workspace = React solution.
-4. For verification: if there's no package.json, do NOT use build_check with "npm run build". Use file_check instead.
-5. The codingPrompt must tell the coding agent to modify existing files in the current directory.
-6. NEVER include absolute paths in codingPrompt. The coding agent's working directory is already set correctly. Use only relative paths (e.g., ./index.html, ./src/app/page.tsx). NEVER reference /Users/, /home/, or any absolute directory.
+## STRICT RULES — VIOLATIONS WILL CAUSE TASK FAILURE
 
-Your response MUST be valid JSON matching this schema:
+RULE 1 — TECHNOLOGY MATCH:
+- The project type is provided in the user message. Match it exactly.
+- "static-html" or "unknown" with .html/.css/.js files → plain HTML/CSS/JS only. NO frameworks.
+- "nextjs" → modify existing Next.js files. "react" → modify existing React files.
+- If the workspace has index.html and no package.json, edit index.html directly.
+
+RULE 2 — NO NEW PROJECTS:
+- NEVER create new project structures. Modify existing files only.
+- NEVER add frameworks that don't already exist in the project.
+
+RULE 3 — FILE PATHS:
+- Use ONLY relative paths. NEVER use absolute paths.
+
+RULE 4 — CODING PROMPT:
+- Name exact files to modify from the workspace file list.
+- "이 페이지" / "this page" = the existing page file in the workspace.
+- Include specific code changes.
+
+RULE 5 — VERIFICATION:
+- No package.json → file_check ONLY (no build_check, port_check, http_check).
+- file_check must include filePath AND expectedText.
+
+Your response MUST be valid JSON:
 {
-  "summary": "One-line summary of what will be done",
-  "codingPrompt": "Detailed, specific instruction for a coding agent. Include exact file paths, code patterns, and implementation details. Be thorough — the coding agent only sees this prompt, not the original user request.",
-  "estimatedFiles": ["list", "of", "files", "to", "modify"],
+  "summary": "One-line summary",
+  "codingPrompt": "Specific instructions for exact files",
+  "estimatedFiles": ["file.html"],
   "verificationSpec": {
     "steps": [
-      {
-        "id": "v1",
-        "description": "What this checks",
-        "type": "build_check|port_check|http_check|file_check|dom_check|vlm_check",
-        "command": "optional: shell command for build_check",
-        "url": "optional: URL for http_check",
-        "filePath": "optional: path for file_check",
-        "selector": "optional: CSS selector for dom_check",
-        "expectedText": "optional: expected text content",
-        "vlmPrompt": "optional: natural language description for VLM to verify visually"
-      }
+      {"id": "v1", "description": "what to check", "type": "file_check", "filePath": "file.html", "expectedText": "expected content"}
     ]
   }
 }
 
-Verification steps should be ordered from cheapest to most expensive:
-1. build_check — does it compile/build without errors?
-2. file_check — do the expected files exist with expected content?
-3. port_check — does the dev server start and listen on the expected port?
-4. http_check — does the page load with HTTP 200?
-5. dom_check — does the page contain expected elements/text?
-6. vlm_check — does the page visually match the expectation? (natural language)
-7. desktop_check — launch a desktop/GUI app, wait for rendering, take a screenshot (for Godot, Electron, native apps). Use runCmd and optional vlmPrompt.
-8. cli_output_check — run a command and verify stdout/stderr/exit code (for CLI tools, scripts). Use command, expectedStdout, expectedExitCode.
-
-Always include at least a build_check. Include vlm_check only when there's a visual aspect to verify.
+Verification types (use ONLY what's appropriate):
+- file_check — file exists with expected content (ALWAYS use for static HTML projects)
+- build_check — only if package.json exists with build script
+- port_check, http_check, dom_check — only if project has a dev server
+- vlm_check — visual verification via screenshot
+- desktop_check — GUI app screenshot
+- cli_output_check — command output verification
 
 Respond with ONLY the JSON object, no markdown code fences, no explanation.`,
     messages: [
@@ -284,10 +307,11 @@ export async function generatePlan(
   manualInput?: { codingPrompt: string; verificationChecklist: string },
   onProgress?: (msg: string) => void,
   workspaceContext?: string,
+  workspaceDir?: string,
 ): Promise<Plan> {
   switch (mode) {
     case 'auto':
-      return planViaCliAgent(userPrompt, projectConfig, onProgress, workspaceContext);
+      return planViaCliAgent(userPrompt, projectConfig, onProgress, workspaceContext, workspaceDir);
 
     case 'manual':
       if (!manualInput?.codingPrompt) {

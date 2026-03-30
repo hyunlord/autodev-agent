@@ -133,6 +133,7 @@ export async function runPipeline(taskId: string, rawEmit: EmitFn): Promise<void
       } : undefined,
       (msg) => emit({ type: 'log', level: 'info', message: msg }),
       workspaceContext,
+      projectDir,
     );
 
     emit({ type: 'log', level: 'info', message: `Plan: ${plan.summary}` });

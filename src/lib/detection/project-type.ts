@@ -82,6 +82,18 @@ const DETECTORS: Detector[] = [
       devCmd: 'go run .', defaultPort: 8080,
     }),
   },
+  {
+    markerFile: 'index.html',
+    detect: () => ({
+      type: 'static-html',
+      displayName: 'Static HTML',
+      language: 'html',
+      installCmd: null,
+      buildCmd: null,
+      devCmd: 'open index.html',
+      defaultPort: null,
+    }),
+  },
 ];
 
 export function detectProjectType(dir: string): ProjectConfig | null {
