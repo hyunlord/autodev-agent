@@ -1,6 +1,5 @@
 import type { Metadata } from 'next';
 import './globals.css';
-import { ThemeProvider } from '@/components/ThemeProvider';
 
 export const metadata: Metadata = {
   title: 'AutoDev Agent',
@@ -9,9 +8,9 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
-      <body className="bg-white dark:bg-gray-950 text-gray-900 dark:text-gray-100 antialiased">
-        <ThemeProvider>{children}</ThemeProvider>
+    <html lang="en" className="dark">
+      <body className="bg-gray-950 text-gray-100 antialiased">
+        {children}
       </body>
     </html>
   );
