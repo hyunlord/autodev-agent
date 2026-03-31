@@ -15,7 +15,7 @@ import type { ICodingAgent } from '../lib/plugins/interfaces';
 
 type EmitFn = (event: PipelineEvent) => void;
 
-const TOOL_ARTIFACTS = ['.omc/', '.opencode/', '.autodev/', '.git/', '.DS_Store'];
+const TOOL_ARTIFACTS = ['.omc/', '.omx/', '.opencode/', '.autodev/', '.git/', '.DS_Store'];
 
 function filterToolArtifacts(files: string[]): string[] {
   return files.filter(f => !TOOL_ARTIFACTS.some(prefix => f.startsWith(prefix)) && f !== '.DS_Store');
@@ -33,6 +33,7 @@ async function scanWorkspace(projectDir: string, emit: EmitFn): Promise<string> 
       '-not', '-path', '*/.next/*',
       '-not', '-path', '*/.autodev/*',
       '-not', '-path', '*/.omc/*',
+      '-not', '-path', '*/.omx/*',
       '-not', '-path', '*/.opencode/*',
       '-type', 'f',
     ], { reject: false, timeout: 5_000 });
@@ -291,6 +292,21 @@ async function runSingleCycle(
     }
 
     emit({ type: 'log', level: 'info', message: 'Plan approved. Starting coding...' });
+  }
+
+  // ─── GOAL_COMPLETE: skip coding entirely ────────────────
+  if (plan.summary.includes('GOAL_COMPLETE') || plan.codingPrompt.trim() === '' || plan.codingPrompt.includes('No additional changes needed')) {
+    emit({ type: 'log', level: 'info', message: 'Goal complete — skipping coding phase' });
+    return {
+      success: true,
+      summary: plan.summary,
+      modifiedFiles: [],
+      costUsd: 0,
+      attemptCount: 0,
+      totalDurationMs: Date.now() - startTime,
+      failedChecks: [],
+      attemptRecords: [],
+    };
   }
 
   // Validate verification spec against actual project — remove impossible checks

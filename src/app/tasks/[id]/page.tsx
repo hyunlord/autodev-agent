@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect, use, useRef } from 'react';
+import { useState, useEffect, use } from 'react';
 import Link from 'next/link';
 
 interface TaskDetail {
@@ -75,9 +75,10 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
   const [previewFile, setPreviewFile] = useState<{ path: string; content: string; language: string } | null>(null);
   const [projectTasks, setProjectTasks] = useState<Array<{ id: string; prompt: string; status: string; createdAt: string }>>([]);
   const [cycleInfo, setCycleInfo] = useState<{ current: number; max: number; steps: string[] }>({ current: 0, max: 0, steps: [] });
-  const eventsEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    window.scrollTo(0, 0);
+
     fetch(`/api/tasks/${id}`)
       .then((r) => r.json())
       .then((data) => {
@@ -194,10 +195,6 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
     };
     return () => es.close();
   }, [id]);
-
-  useEffect(() => {
-    eventsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [liveEvents]);
 
   const loadFilePreview = async (filePath: string) => {
     if (!task?.projectDir) return;
@@ -545,7 +542,6 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
               </div>
             ))
           )}
-          <div ref={eventsEndRef} />
         </div>
       </section>
 

@@ -34,8 +34,12 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
   if (action === 'stop') {
     db.update(tasks).set({
-      status: 'completed',
-      result: JSON.stringify({ summary: 'Stopped by user', stoppedAt: new Date().toISOString() }),
+      status: 'failed',
+      result: JSON.stringify({
+        summary: 'Stopped by user',
+        stoppedAt: new Date().toISOString(),
+        stopReason: 'user_requested',
+      }),
       updatedAt: new Date().toISOString(),
     }).where(eq(tasks.id, id)).run();
     return NextResponse.json({ success: true, action: 'stopped' });
