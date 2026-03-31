@@ -69,6 +69,10 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
     codingPrompt: string;
     estimatedFiles: string[];
     verificationSpec: { steps: Array<{ id: string; type: string; description: string; [key: string]: any }> };
+    taskCategory?: string;
+    agentName?: string;
+    agentId?: string;
+    autoSelected?: boolean;
   } | null>(null);
   const [editingPlan, setEditingPlan] = useState(false);
   const [editedCodingPrompt, setEditedCodingPrompt] = useState('');
@@ -347,6 +351,27 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
               <p className="text-xs text-gray-500 mb-1">Summary</p>
               <p className="text-sm text-gray-200">{planData.summary}</p>
             </div>
+
+            {(planData.taskCategory || planData.agentName) && (
+              <div className="flex items-center gap-4">
+                {planData.taskCategory && (
+                  <div>
+                    <p className="text-xs text-gray-500 mb-0.5">Category</p>
+                    <span className="text-xs px-2 py-0.5 bg-indigo-900/30 text-indigo-300 rounded-full">
+                      {planData.taskCategory}
+                    </span>
+                  </div>
+                )}
+                {planData.agentName && (
+                  <div>
+                    <p className="text-xs text-gray-500 mb-0.5">Agent</p>
+                    <span className="text-xs px-2 py-0.5 bg-gray-800 text-gray-300 rounded">
+                      {planData.autoSelected ? '🤖 ' : ''}{planData.agentName}
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
 
             <div>
               <p className="text-xs text-gray-500 mb-1">Estimated files</p>

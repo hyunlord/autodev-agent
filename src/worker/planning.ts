@@ -31,6 +31,8 @@ export type VerificationStep = z.infer<typeof VerificationStepSchema>;
 
 export const PlanSchema = z.object({
   summary: z.string(),
+  taskCategory: z.string().optional(),
+  recommendedAgent: z.string().optional(),
   codingPrompt: z.string(),
   estimatedFiles: z.array(z.string()),
   verificationSpec: VerificationSpecSchema,
@@ -105,6 +107,8 @@ RULE 6 — LANGUAGE:
 Respond with ONLY valid JSON:
 {
   "summary": "One-line summary",
+  "taskCategory": "html-css",
+  "recommendedAgent": "claude-code",
   "codingPrompt": "Specific instructions referencing exact files from the workspace",
   "estimatedFiles": ["index.html"],
   "verificationSpec": {
@@ -112,7 +116,26 @@ Respond with ONLY valid JSON:
       {"id": "v1", "description": "index.html contains dark mode toggle", "type": "file_check", "filePath": "index.html", "expectedText": "dark-mode"}
     ]
   }
-}`;
+}
+
+AGENT RECOMMENDATION:
+Available agents: claude-code, gemini-cli, codex-cli, aider, cline-cli
+Choose the best agent for this task based on these guidelines:
+- "claude-code": Best for complex tasks, multi-file changes, architecture work, debugging. Most capable but slower.
+- "gemini-cli": Good for quick tasks, simple HTML/CSS, documentation, small changes. Fast.
+- "codex-cli": Good for code generation, algorithm implementation, full-stack work. Strong reasoning.
+- "aider": Good for refactoring, code review, incremental changes to existing code.
+- "cline-cli": General purpose, good for varied tasks.
+Set recommendedAgent to the agent id that best fits this specific task.
+
+TASK CATEGORY (set taskCategory):
+- "quick-fix": Typo, one-line change, simple rename
+- "html-css": Web page styling, UI, static HTML work
+- "full-stack": Multi-file, backend+frontend, complex architecture
+- "refactor": Code restructuring without behavior change
+- "new-project": Creating something from scratch
+- "debug": Fixing errors, troubleshooting
+- "docs": Documentation, README, comments`;
 
   const { getExeca } = await import('../lib/execa');
   const execa = await getExeca();
@@ -272,6 +295,8 @@ RULE 6 — LANGUAGE:
 Your response MUST be valid JSON:
 {
   "summary": "One-line summary",
+  "taskCategory": "html-css",
+  "recommendedAgent": "claude-code",
   "codingPrompt": "Specific instructions for exact files",
   "estimatedFiles": ["file.html"],
   "verificationSpec": {
@@ -280,6 +305,25 @@ Your response MUST be valid JSON:
     ]
   }
 }
+
+AGENT RECOMMENDATION:
+Available agents: claude-code, gemini-cli, codex-cli, aider, cline-cli
+Choose the best agent for this task based on these guidelines:
+- "claude-code": Best for complex tasks, multi-file changes, architecture work, debugging. Most capable but slower.
+- "gemini-cli": Good for quick tasks, simple HTML/CSS, documentation, small changes. Fast.
+- "codex-cli": Good for code generation, algorithm implementation, full-stack work. Strong reasoning.
+- "aider": Good for refactoring, code review, incremental changes to existing code.
+- "cline-cli": General purpose, good for varied tasks.
+Set recommendedAgent to the agent id that best fits this specific task.
+
+TASK CATEGORY (set taskCategory):
+- "quick-fix": Typo, one-line change, simple rename
+- "html-css": Web page styling, UI, static HTML work
+- "full-stack": Multi-file, backend+frontend, complex architecture
+- "refactor": Code restructuring without behavior change
+- "new-project": Creating something from scratch
+- "debug": Fixing errors, troubleshooting
+- "docs": Documentation, README, comments
 
 Verification types (use ONLY what's appropriate):
 - file_check — file exists with expected content (ALWAYS use for static HTML projects)

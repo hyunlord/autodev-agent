@@ -7,7 +7,7 @@ import { nanoid } from 'nanoid';
 import { detectProjectType, type ProjectConfig } from '../lib/detection/project-type';
 import { generatePlan } from './planning';
 import { PluginRegistry } from '../lib/plugins/registry';
-import { detectTaskCategory, selectBestAgent } from '../lib/agent-selector';
+import { selectAgent } from '../lib/agent-selector';
 import { RetryController, type AttemptRecord } from './retry';
 import { generateEscalationReport } from './escalation';
 import { loadConfig, type AutoDevConfig } from '../lib/config';
@@ -248,6 +248,16 @@ async function runSingleCycle(
   emit({ type: 'log', level: 'info', message: `Verification: ${plan.verificationSpec.steps.map(s => `${s.id}:${s.type}(${s.description})`).join(', ')}` });
   recordEvent(taskId, 'plan_complete', { summary: plan.summary, files: plan.estimatedFiles });
 
+  // ─── Agent Selection (from LLM recommendation) ────────
+  const taskCategory = plan.taskCategory ?? 'unknown';
+  emit({ type: 'log', level: 'info', message: `Task category: ${taskCategory}` });
+
+  let { agent, agentId, autoSelected } = await selectAgent(
+    plan.recommendedAgent,
+    (task as any).agentId,
+  );
+  emit({ type: 'log', level: 'info', message: `${autoSelected ? 'Auto-selected' : 'Using'} agent: ${agent.name} (${taskCategory})` });
+
   // ─── Plan Review ───────────────────────────────────────
   const autoApprove = options?.forceAutoApprove || taskConfig.autoApprove === true;
 
@@ -264,6 +274,11 @@ async function runSingleCycle(
       codingPrompt: plan.codingPrompt,
       estimatedFiles: plan.estimatedFiles,
       verificationSpec: plan.verificationSpec,
+      taskCategory,
+      recommendedAgent: plan.recommendedAgent,
+      agentName: agent.name,
+      agentId,
+      autoSelected,
     }});
 
     const approved = await waitForApproval(taskId);
@@ -336,16 +351,6 @@ async function runSingleCycle(
   }
 
   // ─── Code → Verify retry loop ─────────────────────────
-  // Detect task category and auto-select best agent
-  const taskCategory = detectTaskCategory(task.prompt, projectConfig?.type);
-  emit({ type: 'log', level: 'info', message: `Task category: ${taskCategory}` });
-
-  let { agent, agentId, autoSelected } = await selectBestAgent(
-    taskCategory,
-    (task as any).agentId,
-  );
-  emit({ type: 'log', level: 'info', message: `${autoSelected ? 'Auto-selected' : 'Using'} agent: ${agent.name} (${taskCategory})` });
-
   const retryCtrl = new RetryController({
     maxAttempts: config.maxRetries,
     timeBudgetMs: 300_000,
