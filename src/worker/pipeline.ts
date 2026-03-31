@@ -7,11 +7,11 @@ import { nanoid } from 'nanoid';
 import { detectProjectType, type ProjectConfig } from '../lib/detection/project-type';
 import { generatePlan } from './planning';
 import { PluginRegistry } from '../lib/plugins/registry';
+import { detectTaskCategory, selectBestAgent } from '../lib/agent-selector';
 import { RetryController, type AttemptRecord } from './retry';
 import { generateEscalationReport } from './escalation';
 import { loadConfig, type AutoDevConfig } from '../lib/config';
 import type { PipelineEvent, TaskStatus, PlanningMode } from '../lib/types';
-import type { ICodingAgent } from '../lib/plugins/interfaces';
 
 type EmitFn = (event: PipelineEvent) => void;
 
@@ -336,7 +336,15 @@ async function runSingleCycle(
   }
 
   // ─── Code → Verify retry loop ─────────────────────────
-  let { agent, agentId } = await selectAgent((task as any).agentId ?? 'claude-code', emit);
+  // Detect task category and auto-select best agent
+  const taskCategory = detectTaskCategory(task.prompt, projectConfig?.type);
+  emit({ type: 'log', level: 'info', message: `Task category: ${taskCategory}` });
+
+  let { agent, agentId, autoSelected } = await selectBestAgent(
+    taskCategory,
+    (task as any).agentId,
+  );
+  emit({ type: 'log', level: 'info', message: `${autoSelected ? 'Auto-selected' : 'Using'} agent: ${agent.name} (${taskCategory})` });
 
   const retryCtrl = new RetryController({
     maxAttempts: config.maxRetries,
@@ -768,31 +776,6 @@ async function escalate(
   }
 }
 
-async function selectAgent(
-  preferredId: string,
-  emit: EmitFn,
-): Promise<{ agent: ICodingAgent; agentId: string }> {
-  const preferred = PluginRegistry.instance.getAgent(preferredId);
-  if (preferred && await preferred.isAvailable()) {
-    emit({ type: 'log', level: 'info', message: `Using agent: ${preferred.name}` });
-    return { agent: preferred, agentId: preferred.id };
-  }
-
-  emit({ type: 'log', level: 'warn', message: `Agent '${preferredId}' not available, trying fallback...` });
-
-  const allAgents = PluginRegistry.instance.listAgents();
-  for (const fallback of allAgents) {
-    if (fallback.id === preferredId) continue;
-    if (await fallback.isAvailable()) {
-      emit({ type: 'log', level: 'info', message: `Fallback: using ${fallback.name}` });
-      return { agent: fallback, agentId: fallback.id };
-    }
-  }
-
-  throw new Error(
-    'No coding agent available. Install at least one of: Claude Code, Codex CLI, Gemini CLI, Aider, Cline CLI'
-  );
-}
 
 async function resolveProjectDir(taskId: string, userDir: string | null): Promise<string> {
   if (userDir && userDir.trim()) {

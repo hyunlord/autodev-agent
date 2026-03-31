@@ -44,7 +44,7 @@ const [tasks, setTasks] = useState<Task[]>([]);
   const [codingPrompt, setCodingPrompt] = useState('');
   const [verificationChecklist, setVerificationChecklist] = useState('');
   const [agents, setAgents] = useState<Array<{ id: string; name: string; available: boolean; path: string | null }>>([]);
-  const [selectedAgent, setSelectedAgent] = useState('claude-code');
+  const [selectedAgent, setSelectedAgent] = useState('auto');
   const [autoApprove, setAutoApprove] = useState(false);
   const [showPromptSettings, setShowPromptSettings] = useState(false);
   const [promptPreset, setPromptPreset] = useState('default');
@@ -79,8 +79,6 @@ const [tasks, setTasks] = useState<Task[]>([]);
   useEffect(() => {
     fetch('/api/status').then(r => r.json()).then(data => {
       setAgents(data.agents ?? []);
-      const firstAvailable = (data.agents ?? []).find((a: any) => a.available);
-      if (firstAvailable) setSelectedAgent(firstAvailable.id);
     }).catch(() => {});
   }, []);
 
@@ -163,7 +161,8 @@ const [tasks, setTasks] = useState<Task[]>([]);
             {selectedAgent === 'gemini-cli' && "Uses Gemini CLI — run 'gemini login' first"}
             {selectedAgent === 'aider' && "Uses Aider — configure API key in ~/.aider.conf.yml"}
             {selectedAgent === 'cline-cli' && "Uses Cline CLI — configure in ~/.cline/config"}
-            {!['claude-code', 'codex-cli', 'gemini-cli', 'aider', 'cline-cli'].includes(selectedAgent) && `Uses ${selectedAgent} CLI`}
+            {selectedAgent === 'auto' && "Agent will be auto-selected based on task type"}
+            {!['auto', 'claude-code', 'codex-cli', 'gemini-cli', 'aider', 'cline-cli'].includes(selectedAgent) && `Uses ${selectedAgent} CLI`}
           </p>
         )}
         {planningMode === 'api' && (
@@ -200,6 +199,7 @@ const [tasks, setTasks] = useState<Task[]>([]);
             onChange={(e) => setSelectedAgent(e.target.value)}
             className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-100 focus:outline-none focus:border-indigo-500"
           >
+            <option value="auto">Auto (best for task)</option>
             {agents.map(a => (
               <option key={a.id} value={a.id} disabled={!a.available}>
                 {a.name} {a.available ? '' : '(not installed)'}
