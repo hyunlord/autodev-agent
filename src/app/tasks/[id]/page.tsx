@@ -79,6 +79,12 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
   const [previewFile, setPreviewFile] = useState<{ path: string; content: string; language: string } | null>(null);
   const [projectTasks, setProjectTasks] = useState<Array<{ id: string; prompt: string; status: string; createdAt: string }>>([]);
   const [cycleInfo, setCycleInfo] = useState<{ current: number; max: number; steps: string[] }>({ current: 0, max: 0, steps: [] });
+  const [liveUsage, setLiveUsage] = useState<{
+    totalCostUsd: number;
+    totalInputTokens: number;
+    totalOutputTokens: number;
+    agentCosts: Record<string, number>;
+  }>({ totalCostUsd: 0, totalInputTokens: 0, totalOutputTokens: 0, agentCosts: {} });
 
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -108,6 +114,7 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
           const storedScreenshots: Array<{ path: string; checkId: string }> = [];
           let storedEscalation: string | null = null;
           let maxAttempt = 1;
+          const storedUsage = { totalCostUsd: 0, totalInputTokens: 0, totalOutputTokens: 0, agentCosts: {} as Record<string, number> };
 
           for (const evt of data.events) {
             try {
@@ -141,6 +148,13 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
                 setPlanData(parsed.plan as any);
                 setEditedCodingPrompt((parsed.plan as any)?.codingPrompt ?? '');
               }
+              if (parsed.type === 'cost_update') {
+                storedUsage.totalCostUsd = (parsed as any).totalCostUsd ?? storedUsage.totalCostUsd;
+                storedUsage.totalInputTokens += (parsed as any).inputTokens ?? 0;
+                storedUsage.totalOutputTokens += (parsed as any).outputTokens ?? 0;
+                const aid = (parsed as any).agentId as string;
+                if (aid) storedUsage.agentCosts[aid] = (storedUsage.agentCosts[aid] ?? 0) + ((parsed as any).costUsd ?? 0);
+              }
             } catch { /* skip unparseable events */ }
           }
 
@@ -149,6 +163,7 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
           setScreenshots(storedScreenshots);
           if (storedEscalation) setEscalationReport(storedEscalation);
           setAttemptCount(maxAttempt);
+          setLiveUsage(storedUsage);
         }
       });
   }, [id]);
@@ -195,6 +210,17 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
       }
       if (event.type === 'cycle_complete') {
         setCycleInfo(prev => ({ ...prev, steps: [...prev.steps, `${event.success ? '\u2713' : '\u2717'} ${event.summary}`] }));
+      }
+      if (event.type === 'cost_update') {
+        setLiveUsage(prev => ({
+          totalCostUsd: (event as any).totalCostUsd,
+          totalInputTokens: prev.totalInputTokens + ((event as any).inputTokens ?? 0),
+          totalOutputTokens: prev.totalOutputTokens + ((event as any).outputTokens ?? 0),
+          agentCosts: {
+            ...prev.agentCosts,
+            [(event as any).agentId]: (prev.agentCosts[(event as any).agentId] ?? 0) + ((event as any).costUsd ?? 0),
+          },
+        }));
       }
     };
     return () => es.close();
@@ -261,6 +287,34 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
       )}
 
       <StageIndicator currentStatus={currentStatus} />
+
+      {(liveUsage.totalCostUsd > 0 || currentStatus === 'coding') && (
+        <div className="mb-4 flex items-center gap-4 px-3 py-2 bg-gray-900/50 rounded-lg border border-gray-800 text-xs">
+          <div className="flex items-center gap-1.5">
+            <span className="text-gray-500">Cost:</span>
+            <span className="text-gray-200 font-medium">${liveUsage.totalCostUsd.toFixed(4)}</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="text-gray-500">Tokens:</span>
+            <span className="text-gray-200">
+              {(liveUsage.totalInputTokens + liveUsage.totalOutputTokens).toLocaleString()}
+            </span>
+            <span className="text-gray-600 text-[10px]">
+              ({liveUsage.totalInputTokens.toLocaleString()} in / {liveUsage.totalOutputTokens.toLocaleString()} out)
+            </span>
+          </div>
+          {Object.keys(liveUsage.agentCosts).length > 1 && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-gray-500">By agent:</span>
+              {Object.entries(liveUsage.agentCosts).map(([aid, cost]) => (
+                <span key={aid} className="text-gray-400">
+                  {aid}: ${(cost as number).toFixed(4)}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {cycleInfo.max > 1 && (
         <div className="mb-4 p-3 bg-amber-950/20 rounded-lg border border-amber-800/50">
@@ -561,7 +615,12 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
                     [auto-cycle] {event.summary}
                   </span>
                 )}
-                {!['status_change', 'log', 'task_complete', 'attempt_start', 'attempt_complete', 'verification_result', 'screenshot', 'escalation', 'cycle_start', 'cycle_complete', 'auto_cycle_complete'].includes(event.type) && (
+                {event.type === 'cost_update' && (
+                  <span className="text-emerald-400">
+                    [💰] ${((event as any).costUsd ?? 0).toFixed(4)} (total: ${((event as any).totalCostUsd ?? 0).toFixed(4)}) — {(event as any).agentId}
+                  </span>
+                )}
+                {!['status_change', 'log', 'task_complete', 'attempt_start', 'attempt_complete', 'verification_result', 'screenshot', 'escalation', 'cycle_start', 'cycle_complete', 'auto_cycle_complete', 'cost_update'].includes(event.type) && (
                   <span className="text-gray-500">[{event.type}] {JSON.stringify(event)}</span>
                 )}
               </div>

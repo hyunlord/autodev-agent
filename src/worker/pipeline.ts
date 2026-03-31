@@ -440,6 +440,16 @@ All paths must be relative to the current directory.\n\n${codingPrompt}`;
 
     totalCostUsd += codeResult.costUsd ?? 0;
 
+    emit({
+      type: 'cost_update',
+      attemptNum: attempt,
+      costUsd: codeResult.costUsd ?? 0,
+      totalCostUsd,
+      inputTokens: codeResult.tokenUsage?.inputTokens ?? 0,
+      outputTokens: codeResult.tokenUsage?.outputTokens ?? 0,
+      agentId,
+    });
+
     if (!codeResult.success) {
       const errorMsg = `Coding failed: ${codeResult.text.slice(0, 500)}`;
       emit({ type: 'attempt_complete', attemptNum: attempt, success: false, error: errorMsg });

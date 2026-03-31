@@ -14,4 +14,5 @@ export type PipelineEvent =
   | { type: 'plan_ready'; plan: { summary: string; codingPrompt: string; estimatedFiles: string[]; verificationSpec: any; taskCategory?: string; recommendedAgent?: string; agentName?: string; agentId?: string; autoSelected?: boolean } }
   | { type: 'cycle_start'; cycleNum: number; totalCycles: number; message: string }
   | { type: 'cycle_complete'; cycleNum: number; success: boolean; summary: string }
-  | { type: 'auto_cycle_complete'; totalCycles: number; summary: string };
+  | { type: 'auto_cycle_complete'; totalCycles: number; summary: string }
+  | { type: 'cost_update'; attemptNum: number; costUsd: number; totalCostUsd: number; inputTokens: number; outputTokens: number; agentId: string };

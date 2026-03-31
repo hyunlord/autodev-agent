@@ -51,6 +51,10 @@ const [tasks, setTasks] = useState<Task[]>([]);
   const [systemPrompt, setSystemPrompt] = useState('');
   const [executionMode, setExecutionMode] = useState<'single' | 'auto-cycle'>('single');
   const [maxCycles, setMaxCycles] = useState(10);
+  const [usage, setUsage] = useState<{
+    totals: { costUsd: number; tokens: number; attempts: number };
+    byAgent: Array<{ agentId: string; totalCost: number; totalTokens: number; attemptCount: number }>;
+  } | null>(null);
 
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
@@ -80,6 +84,10 @@ const [tasks, setTasks] = useState<Task[]>([]);
     fetch('/api/status').then(r => r.json()).then(data => {
       setAgents(data.agents ?? []);
     }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    fetch('/api/usage').then(r => r.json()).then(setUsage).catch(() => {});
   }, []);
 
   const handleSubmit = async () => {
@@ -120,6 +128,35 @@ const [tasks, setTasks] = useState<Task[]>([]);
           <p className="text-gray-400 mt-1">Universal AI Development Orchestrator</p>
         </div>
       </header>
+
+      {usage && usage.totals.costUsd > 0 && (
+        <div className="mb-6 flex items-center gap-6 px-4 py-3 bg-gray-900/50 rounded-lg border border-gray-800">
+          <div>
+            <p className="text-[10px] text-gray-500 uppercase tracking-wider">Total cost</p>
+            <p className="text-lg font-bold text-gray-200">${usage.totals.costUsd.toFixed(4)}</p>
+          </div>
+          <div>
+            <p className="text-[10px] text-gray-500 uppercase tracking-wider">Total tokens</p>
+            <p className="text-lg font-bold text-gray-200">{usage.totals.tokens.toLocaleString()}</p>
+          </div>
+          <div>
+            <p className="text-[10px] text-gray-500 uppercase tracking-wider">Attempts</p>
+            <p className="text-lg font-bold text-gray-200">{usage.totals.attempts}</p>
+          </div>
+          {usage.byAgent.length > 1 && (
+            <div className="flex-1">
+              <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">By agent</p>
+              <div className="flex gap-3">
+                {usage.byAgent.map(a => (
+                  <span key={a.agentId} className="text-xs text-gray-400">
+                    {a.agentId}: ${a.totalCost.toFixed(4)} ({a.attemptCount})
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="flex flex-wrap gap-2 mb-4">
         {agents.map(a => (
