@@ -15,6 +15,12 @@ import type { ICodingAgent } from '../lib/plugins/interfaces';
 
 type EmitFn = (event: PipelineEvent) => void;
 
+const TOOL_ARTIFACTS = ['.omc/', '.opencode/', '.autodev/', '.git/', '.DS_Store'];
+
+function filterToolArtifacts(files: string[]): string[] {
+  return files.filter(f => !TOOL_ARTIFACTS.some(prefix => f.startsWith(prefix)) && f !== '.DS_Store');
+}
+
 export async function runPipeline(taskId: string, rawEmit: EmitFn): Promise<void> {
   // Wrap emit to persist all events to DB for later retrieval
   const emit: EmitFn = (event) => {
@@ -49,8 +55,7 @@ export async function runPipeline(taskId: string, rawEmit: EmitFn): Promise<void
 
   const config = await loadConfig(projectDir);
 
-  const customPlanningPrompt = (task as any).planningSystemPrompt ?? null;
-  const customCodingPrompt = (task as any).codingSystemPrompt ?? null;
+  const systemPrompt = (task as any).systemPrompt ?? null;
 
   // Fetch project history for context (completed tasks in same projectDir)
   const projectHistory = db
@@ -102,6 +107,8 @@ export async function runPipeline(taskId: string, rawEmit: EmitFn): Promise<void
         '-not', '-path', '*/node_modules/*',
         '-not', '-path', '*/.next/*',
         '-not', '-path', '*/.autodev/*',
+        '-not', '-path', '*/.omc/*',
+        '-not', '-path', '*/.opencode/*',
         '-type', 'f',
       ], { reject: false, timeout: 5_000 });
 
@@ -137,7 +144,7 @@ export async function runPipeline(taskId: string, rawEmit: EmitFn): Promise<void
       (msg) => emit({ type: 'log', level: 'info', message: msg }),
       workspaceContext,
       projectDir,
-      customPlanningPrompt,
+      systemPrompt,
     );
 
     emit({ type: 'log', level: 'info', message: `Plan: ${plan.summary}` });
@@ -234,7 +241,7 @@ export async function runPipeline(taskId: string, rawEmit: EmitFn): Promise<void
       emit({ type: 'status_change', status: 'coding', message: isRetry ? `Retrying with error context (attempt ${attempt})...` : `Sending task to ${agent.name}...` });
       emit({ type: 'attempt_start', attemptNum: attempt, agentId });
 
-      let codingPrompt = `${customCodingPrompt ? customCodingPrompt + '\n\n' : ''}CRITICAL: You MUST only create and modify files inside this directory: ${projectDir}
+      let codingPrompt = `${systemPrompt ? systemPrompt + '\n\n' : ''}CRITICAL: You MUST only create and modify files inside this directory: ${projectDir}
 Do NOT navigate to or modify files outside this directory.
 Do NOT search for or modify any files in parent directories.
 Your working directory is ${projectDir} — all file paths must be relative to this directory.
@@ -298,7 +305,6 @@ All paths must be relative to the current directory.\n\n${codingPrompt}`;
         createdAt: new Date().toISOString(),
       }).run();
 
-      lastModifiedFiles = codeResult.modifiedFiles;
       totalCostUsd += codeResult.costUsd ?? 0;
 
       if (!codeResult.success) {
@@ -336,7 +342,8 @@ All paths must be relative to the current directory.\n\n${codingPrompt}`;
         continue;
       }
 
-      emit({ type: 'log', level: 'info', message: `Code generated (attempt ${attempt}). Files: ${codeResult.modifiedFiles.join(', ') || 'none detected'}` });
+      lastModifiedFiles = filterToolArtifacts(codeResult.modifiedFiles);
+      emit({ type: 'log', level: 'info', message: `Code generated (attempt ${attempt}). Files: ${lastModifiedFiles.join(', ') || 'none detected'}` });
       emit({ type: 'attempt_complete', attemptNum: attempt, success: true });
 
       // ─── Verification phase ──────────────────────────

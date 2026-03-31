@@ -334,19 +334,11 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
               </div>
             </div>
           </div>
-          {(task as any).planningSystemPrompt && (
+          {(task as any).systemPrompt && (
             <div className="mt-3 pt-3 border-t border-gray-800">
-              <p className="text-xs text-gray-500 mb-1">Planning system prompt</p>
+              <p className="text-xs text-gray-500 mb-1">System prompt</p>
               <pre className="text-xs text-gray-400 bg-gray-900 p-2 rounded max-h-24 overflow-y-auto whitespace-pre-wrap font-mono">
-                {(task as any).planningSystemPrompt}
-              </pre>
-            </div>
-          )}
-          {(task as any).codingSystemPrompt && (
-            <div className="mt-2">
-              <p className="text-xs text-gray-500 mb-1">Coding system prompt</p>
-              <pre className="text-xs text-gray-400 bg-gray-900 p-2 rounded max-h-24 overflow-y-auto whitespace-pre-wrap font-mono">
-                {(task as any).codingSystemPrompt}
+                {(task as any).systemPrompt}
               </pre>
             </div>
           )}

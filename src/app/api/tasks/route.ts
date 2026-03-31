@@ -37,8 +37,7 @@ export async function POST(req: Request) {
     projectDir: projectDir ?? null,
     projectType: null,
     plan: null,
-    planningSystemPrompt: body.planningSystemPrompt ?? null,
-    codingSystemPrompt: body.codingSystemPrompt ?? null,
+    systemPrompt: body.systemPrompt ?? null,
     config: JSON.stringify({
       codingPrompt: body.codingPrompt ?? null,
       verificationChecklist: body.verificationChecklist ?? null,

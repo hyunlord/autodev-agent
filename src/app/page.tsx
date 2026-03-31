@@ -48,8 +48,7 @@ const [tasks, setTasks] = useState<Task[]>([]);
   const [autoApprove, setAutoApprove] = useState(false);
   const [showPromptSettings, setShowPromptSettings] = useState(false);
   const [promptPreset, setPromptPreset] = useState('default');
-  const [planningSystemPrompt, setPlanningSystemPrompt] = useState('');
-  const [codingSystemPrompt, setCodingSystemPrompt] = useState('');
+  const [systemPrompt, setSystemPrompt] = useState('');
 
   const fetchTasks = async () => {
     try {
@@ -89,8 +88,7 @@ const [tasks, setTasks] = useState<Task[]>([]);
         planningMode,
         agentId: selectedAgent,
         autoApprove,
-        planningSystemPrompt: planningSystemPrompt || undefined,
-        codingSystemPrompt: codingSystemPrompt || undefined,
+        systemPrompt: systemPrompt || undefined,
         ...(planningMode === 'manual' ? { codingPrompt, verificationChecklist } : {}),
       }),
     });
@@ -221,56 +219,51 @@ const [tasks, setTasks] = useState<Task[]>([]);
           {showPromptSettings && (
             <div className="mt-2 space-y-3 p-3 bg-gray-800/50 rounded-lg border border-gray-700">
               <div>
-                <label className="block text-xs text-gray-500 mb-1">Preset</label>
-                <div className="flex flex-wrap gap-2">
+                <label className="block text-xs text-gray-500 mb-2">Preset</label>
+                <div className="grid grid-cols-3 gap-2">
                   {BUILT_IN_PRESETS.map(p => (
                     <button
                       key={p.id}
                       type="button"
                       onClick={() => {
                         setPromptPreset(p.id);
-                        setCodingSystemPrompt(p.codingPrompt);
-                        setPlanningSystemPrompt(p.planningPrompt);
+                        setSystemPrompt(p.prompt);
                       }}
-                      className={`px-2.5 py-1 text-xs rounded-lg transition-colors ${
+                      className={`text-left p-2.5 rounded-lg transition-colors border ${
                         promptPreset === p.id
-                          ? 'bg-indigo-600 text-white'
-                          : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
+                          ? 'bg-indigo-900/30 border-indigo-700 text-indigo-200'
+                          : 'bg-gray-900/50 border-gray-700/50 text-gray-400 hover:bg-gray-800 hover:border-gray-600'
                       }`}
                     >
-                      {p.name}
+                      <div className="flex items-center gap-1.5 mb-0.5">
+                        <span className="text-sm">{p.emoji}</span>
+                        <span className="text-xs font-medium">{p.name}</span>
+                      </div>
+                      <p className="text-[10px] leading-tight opacity-70">{p.tagline}</p>
                     </button>
                   ))}
                 </div>
                 {promptPreset !== 'default' && promptPreset !== 'custom' && (
-                  <p className="text-xs text-gray-500 mt-1">
+                  <p className="text-xs text-gray-500 mt-2 pl-1">
                     {BUILT_IN_PRESETS.find(p => p.id === promptPreset)?.description}
                   </p>
                 )}
               </div>
               <div>
                 <label className="block text-xs text-gray-500 mb-1">
-                  Planning prompt <span className="text-gray-600">(optional)</span>
+                  System prompt <span className="text-gray-600">(applies to both planning and coding)</span>
                 </label>
                 <textarea
-                  value={planningSystemPrompt}
-                  onChange={(e) => { setPlanningSystemPrompt(e.target.value); setPromptPreset('custom'); }}
-                  placeholder="Additional instructions for the planning phase..."
-                  rows={3}
+                  value={systemPrompt}
+                  onChange={(e) => { setSystemPrompt(e.target.value); setPromptPreset('custom'); }}
+                  placeholder="예: 한국어 주석 포함, TypeScript strict mode, 테스트 작성, 변수명 카멜케이스..."
+                  rows={4}
                   className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-gray-300 text-xs font-mono focus:outline-none focus:border-indigo-500 resize-y"
                 />
-              </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">
-                  Coding prompt <span className="text-gray-600">(optional)</span>
-                </label>
-                <textarea
-                  value={codingSystemPrompt}
-                  onChange={(e) => { setCodingSystemPrompt(e.target.value); setPromptPreset('custom'); }}
-                  placeholder="Additional instructions for the coding agent..."
-                  rows={3}
-                  className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-gray-300 text-xs font-mono focus:outline-none focus:border-indigo-500 resize-y"
-                />
+                <p className="text-[10px] text-gray-600 mt-1">
+                  This instruction is applied to both the planning phase and the coding agent.
+                  Write freely — no need to separate planning vs coding instructions.
+                </p>
               </div>
             </div>
           )}
