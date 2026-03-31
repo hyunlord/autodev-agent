@@ -1,5 +1,6 @@
 'use client';
 import { useState, useEffect, use } from 'react';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 
 interface ProjectInfo {
@@ -36,6 +37,7 @@ export default function ProjectPage({ params }: { params: Promise<{ dir: string 
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [previewFile, setPreviewFile] = useState<{ path: string; content: string; language: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const router = useRouter();
 
   useEffect(() => {
     fetch('/api/projects')
@@ -110,6 +112,15 @@ export default function ProjectPage({ params }: { params: Promise<{ dir: string 
           )}
         </div>
         <div className="flex gap-2">
+          <button
+            onClick={async () => {
+              if (!confirm('Delete all tasks and data for this project?')) return;
+              await fetch(`/api/projects?dir=${encodeURIComponent(projectDir)}`, { method: 'DELETE' });
+              router.push('/');
+            }}
+            className="px-3 py-1.5 text-xs bg-red-900/50 hover:bg-red-900 text-red-300 rounded-lg transition-colors">
+            Delete Project
+          </button>
           <button onClick={handleOpenFolder}
             className="px-3 py-1.5 text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg transition-colors">
             Open Folder
