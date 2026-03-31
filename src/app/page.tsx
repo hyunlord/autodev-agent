@@ -52,6 +52,12 @@ const [tasks, setTasks] = useState<Task[]>([]);
   const [executionMode, setExecutionMode] = useState<'single' | 'auto-cycle'>('single');
   const [maxCycles, setMaxCycles] = useState(10);
 
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const dirFromUrl = urlParams.get('projectDir');
+    if (dirFromUrl) setProjectDir(dirFromUrl);
+  }, []);
+
   const fetchTasks = async () => {
     try {
       const res = await fetch('/api/tasks');
@@ -350,25 +356,38 @@ const [tasks, setTasks] = useState<Task[]>([]);
           <h2 className="text-lg font-semibold mb-4">Recent Projects</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {projects.slice(0, 6).map((project) => (
-              <button
+              <div
                 key={project.projectDir}
-                onClick={() => setProjectDir(project.projectDir)}
                 className={`text-left p-4 bg-gray-900 rounded-lg border transition-colors ${
                   projectDir === project.projectDir
                     ? 'border-indigo-600'
                     : 'border-gray-800 hover:border-gray-600'
                 }`}
               >
-                <p className="text-sm text-gray-200 truncate font-mono">
-                  {project.projectDir.split('/').slice(-2).join('/')}
-                </p>
-                <div className="flex items-center gap-2 mt-1.5 text-xs text-gray-500">
-                  <span>{project.taskCount} tasks</span>
-                  <span className="text-green-500">{project.completedCount} ✓</span>
-                  {project.failedCount > 0 && <span className="text-red-500">{project.failedCount} ✗</span>}
-                  <span>· {new Date(project.latestTask).toLocaleDateString()}</span>
+                <div className="flex items-center justify-between">
+                  <button
+                    onClick={() => setProjectDir(project.projectDir)}
+                    className="flex-1 text-left min-w-0"
+                  >
+                    <p className="text-sm text-gray-200 truncate font-mono">
+                      {project.projectDir.split('/').slice(-2).join('/')}
+                    </p>
+                    <div className="flex items-center gap-2 mt-1.5 text-xs text-gray-500">
+                      <span>{project.taskCount} tasks</span>
+                      <span className="text-green-500">{project.completedCount} ✓</span>
+                      {project.failedCount > 0 && <span className="text-red-500">{project.failedCount} ✗</span>}
+                      <span>· {new Date(project.latestTask).toLocaleDateString()}</span>
+                    </div>
+                  </button>
+                  <Link
+                    href={`/projects/${encodeURIComponent(btoa(project.projectDir))}`}
+                    className="ml-2 px-2 py-1 text-xs text-gray-500 hover:text-indigo-400 hover:bg-gray-800 rounded transition-colors"
+                    title="Project details"
+                  >
+                    →
+                  </Link>
                 </div>
-              </button>
+              </div>
             ))}
           </div>
         </section>
