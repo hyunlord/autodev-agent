@@ -16,6 +16,11 @@ export const tasks = sqliteTable('tasks', {
   systemPrompt: text('system_prompt'),
   planningSystemPrompt: text('planning_system_prompt'),
   codingSystemPrompt:   text('coding_system_prompt'),
+  executionMode: text('execution_mode', {
+    enum: ['single', 'auto-cycle'],
+  }).notNull().default('single'),
+  cycleCount:  integer('cycle_count').notNull().default(0),
+  maxCycles:   integer('max_cycles').notNull().default(10),
   config:      text('config', { mode: 'json' }),
   result:      text('result', { mode: 'json' }),
   createdAt:   text('created_at').notNull(),

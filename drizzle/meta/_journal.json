@@ -43,6 +43,13 @@
       "when": 1774900000000,
       "tag": "0005_add_system_prompt",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1774938118416,
+      "tag": "0006_empty_scrambler",
+      "breakpoints": true
     }
   ]
 }

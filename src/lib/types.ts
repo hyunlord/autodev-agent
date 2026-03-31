@@ -11,4 +11,7 @@ export type PipelineEvent =
   | { type: 'attempt_complete'; attemptNum: number; success: boolean; error?: string }
   | { type: 'task_complete'; success: boolean; summary: string }
   | { type: 'escalation'; report: string }
-  | { type: 'plan_ready'; plan: { summary: string; codingPrompt: string; estimatedFiles: string[]; verificationSpec: any } };
+  | { type: 'plan_ready'; plan: { summary: string; codingPrompt: string; estimatedFiles: string[]; verificationSpec: any } }
+  | { type: 'cycle_start'; cycleNum: number; totalCycles: number; message: string }
+  | { type: 'cycle_complete'; cycleNum: number; success: boolean; summary: string }
+  | { type: 'auto_cycle_complete'; totalCycles: number; summary: string };

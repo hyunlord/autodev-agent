@@ -49,6 +49,8 @@ const [tasks, setTasks] = useState<Task[]>([]);
   const [showPromptSettings, setShowPromptSettings] = useState(false);
   const [promptPreset, setPromptPreset] = useState('default');
   const [systemPrompt, setSystemPrompt] = useState('');
+  const [executionMode, setExecutionMode] = useState<'single' | 'auto-cycle'>('single');
+  const [maxCycles, setMaxCycles] = useState(10);
 
   const fetchTasks = async () => {
     try {
@@ -89,6 +91,8 @@ const [tasks, setTasks] = useState<Task[]>([]);
         agentId: selectedAgent,
         autoApprove,
         systemPrompt: systemPrompt || undefined,
+        executionMode,
+        maxCycles: executionMode === 'auto-cycle' ? maxCycles : 1,
         ...(planningMode === 'manual' ? { codingPrompt, verificationChecklist } : {}),
       }),
     });
@@ -207,6 +211,46 @@ const [tasks, setTasks] = useState<Task[]>([]);
             />
             <span className="text-sm text-gray-400">Auto-approve plan (skip review)</span>
           </label>
+        </div>
+        <div className="mt-3 flex items-center gap-3">
+          <label className="text-xs text-gray-500">Execution:</label>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setExecutionMode('single')}
+              className={`px-3 py-1 text-xs rounded-lg transition-colors ${
+                executionMode === 'single'
+                  ? 'bg-indigo-600 text-white'
+                  : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+              }`}
+            >
+              Single run
+            </button>
+            <button
+              type="button"
+              onClick={() => setExecutionMode('auto-cycle')}
+              className={`px-3 py-1 text-xs rounded-lg transition-colors ${
+                executionMode === 'auto-cycle'
+                  ? 'bg-amber-600 text-white'
+                  : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+              }`}
+            >
+              Auto-cycle
+            </button>
+          </div>
+          {executionMode === 'auto-cycle' && (
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-gray-500">Max cycles:</label>
+              <input
+                type="number"
+                min={2}
+                max={50}
+                value={maxCycles}
+                onChange={(e) => setMaxCycles(Number(e.target.value))}
+                className="w-16 px-2 py-1 text-xs bg-gray-900 border border-gray-700 rounded text-gray-300"
+              />
+            </div>
+          )}
         </div>
         <div className="mt-3">
           <button

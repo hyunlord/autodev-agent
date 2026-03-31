@@ -74,6 +74,7 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
   const [editedCodingPrompt, setEditedCodingPrompt] = useState('');
   const [previewFile, setPreviewFile] = useState<{ path: string; content: string; language: string } | null>(null);
   const [projectTasks, setProjectTasks] = useState<Array<{ id: string; prompt: string; status: string; createdAt: string }>>([]);
+  const [cycleInfo, setCycleInfo] = useState<{ current: number; max: number; steps: string[] }>({ current: 0, max: 0, steps: [] });
   const eventsEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -82,6 +83,11 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
       .then((data) => {
         setTask(data);
         setCurrentStatus(data.status);
+
+        // Hydrate cycle info from DB
+        if (data.maxCycles > 1) {
+          setCycleInfo(prev => ({ ...prev, current: data.cycleCount ?? 0, max: data.maxCycles ?? 0 }));
+        }
 
         // Hydrate plan from DB
         if (data.plan) {
@@ -119,6 +125,12 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
               }
               if (parsed.type === 'attempt_start' && typeof parsed.attemptNum === 'number') {
                 maxAttempt = Math.max(maxAttempt, parsed.attemptNum);
+              }
+              if (parsed.type === 'cycle_start') {
+                setCycleInfo(prev => ({ ...prev, current: parsed.cycleNum as number, max: parsed.totalCycles as number }));
+              }
+              if (parsed.type === 'cycle_complete') {
+                setCycleInfo(prev => ({ ...prev, steps: [...prev.steps, `${parsed.success ? '\u2713' : '\u2717'} ${parsed.summary}`] }));
               }
               if (parsed.type === 'plan_ready') {
                 setPlanData(parsed.plan as any);
@@ -172,6 +184,12 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
       }
       if (event.type === 'attempt_start') {
         setAttemptCount(event.attemptNum);
+      }
+      if (event.type === 'cycle_start') {
+        setCycleInfo(prev => ({ ...prev, current: event.cycleNum as number, max: event.totalCycles as number }));
+      }
+      if (event.type === 'cycle_complete') {
+        setCycleInfo(prev => ({ ...prev, steps: [...prev.steps, `${event.success ? '\u2713' : '\u2717'} ${event.summary}`] }));
       }
     };
     return () => es.close();
@@ -242,6 +260,43 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
       )}
 
       <StageIndicator currentStatus={currentStatus} />
+
+      {cycleInfo.max > 1 && (
+        <div className="mb-4 p-3 bg-amber-950/20 rounded-lg border border-amber-800/50">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs text-amber-400 font-medium">
+              Auto-cycle: {cycleInfo.current}/{cycleInfo.max}
+            </span>
+            {currentStatus !== 'completed' && currentStatus !== 'failed' && (
+              <button
+                onClick={async () => {
+                  await fetch(`/api/tasks/${id}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'stop' }),
+                  });
+                }}
+                className="px-2 py-1 text-xs bg-red-900/50 hover:bg-red-900 text-red-300 rounded transition-colors"
+              >
+                Stop
+              </button>
+            )}
+          </div>
+          <div className="w-full bg-gray-800 rounded-full h-1.5 mb-2">
+            <div
+              className="bg-amber-500 h-1.5 rounded-full transition-all"
+              style={{ width: `${(cycleInfo.current / cycleInfo.max) * 100}%` }}
+            />
+          </div>
+          {cycleInfo.steps.length > 0 && (
+            <div className="space-y-1 mt-2">
+              {cycleInfo.steps.map((step, i) => (
+                <p key={i} className="text-xs text-gray-400">{step}</p>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {planData && (
         <section className="mb-6 p-5 bg-indigo-950/20 rounded-lg border border-indigo-800/50">
@@ -469,7 +524,22 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
                     [⚠] Task escalated — see report below
                   </span>
                 )}
-                {!['status_change', 'log', 'task_complete', 'attempt_start', 'attempt_complete', 'verification_result', 'screenshot', 'escalation'].includes(event.type) && (
+                {event.type === 'cycle_start' && (
+                  <span className="text-amber-400">
+                    [cycle] Starting cycle {event.cycleNum}/{event.totalCycles}
+                  </span>
+                )}
+                {event.type === 'cycle_complete' && (
+                  <span className={event.success ? 'text-green-400' : 'text-yellow-400'}>
+                    [cycle] Cycle {event.cycleNum} {event.success ? 'completed' : 'failed'}: {event.summary}
+                  </span>
+                )}
+                {event.type === 'auto_cycle_complete' && (
+                  <span className="text-amber-300">
+                    [auto-cycle] {event.summary}
+                  </span>
+                )}
+                {!['status_change', 'log', 'task_complete', 'attempt_start', 'attempt_complete', 'verification_result', 'screenshot', 'escalation', 'cycle_start', 'cycle_complete', 'auto_cycle_complete'].includes(event.type) && (
                   <span className="text-gray-500">[{event.type}] {JSON.stringify(event)}</span>
                 )}
               </div>

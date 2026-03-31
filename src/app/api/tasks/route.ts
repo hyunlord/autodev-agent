@@ -38,6 +38,9 @@ export async function POST(req: Request) {
     projectType: null,
     plan: null,
     systemPrompt: body.systemPrompt ?? null,
+    executionMode: body.executionMode ?? 'single',
+    cycleCount: 0,
+    maxCycles: body.maxCycles ?? 10,
     config: JSON.stringify({
       codingPrompt: body.codingPrompt ?? null,
       verificationChecklist: body.verificationChecklist ?? null,

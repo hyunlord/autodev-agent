@@ -32,6 +32,15 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const task = db.select().from(tasks).where(eq(tasks.id, id)).get();
   if (!task) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
+  if (action === 'stop') {
+    db.update(tasks).set({
+      status: 'completed',
+      result: JSON.stringify({ summary: 'Stopped by user', stoppedAt: new Date().toISOString() }),
+      updatedAt: new Date().toISOString(),
+    }).where(eq(tasks.id, id)).run();
+    return NextResponse.json({ success: true, action: 'stopped' });
+  }
+
   if (action === 'approve') {
     if (editedPlan) {
       db.update(tasks).set({
