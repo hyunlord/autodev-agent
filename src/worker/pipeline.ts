@@ -421,7 +421,7 @@ async function runSingleCycle(
       cwd: projectDir, reject: false, timeout: 5_000,
     } as any);
 
-    if (gitStatus.trim()) {
+    if (gitStatus?.trim()) {
       const changedCount = gitStatus.trim().split('\n').length;
       emit({
         type: 'log',
