@@ -40,6 +40,7 @@ export default function ProjectPage({ params }: { params: Promise<{ dir: string 
   const projectDir = atob(decodeURIComponent(dir));
 
   const [info, setInfo] = useState<ProjectInfo | null>(null);
+  const [projectName, setProjectName] = useState<string | null>(null);
   const [projectTasks, setProjectTasks] = useState<ProjectTask[]>([]);
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [previewFile, setPreviewFile] = useState<{ path: string; content: string; language: string } | null>(null);
@@ -58,9 +59,12 @@ export default function ProjectPage({ params }: { params: Promise<{ dir: string 
   useEffect(() => {
     fetch('/api/projects')
       .then(r => r.json())
-      .then((projects: ProjectInfo[]) => {
-        const found = projects.find(p => p.projectDir === projectDir);
-        if (found) setInfo(found);
+      .then((projects: any[]) => {
+        const found = projects.find((p: any) => p.projectDir === projectDir);
+        if (found) {
+          setInfo(found);
+          setProjectName(found.projectName ?? null);
+        }
       })
       .catch(() => {});
   }, [projectDir]);
@@ -165,7 +169,7 @@ export default function ProjectPage({ params }: { params: Promise<{ dir: string 
 
       <div className="flex items-start justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold mb-1">Project</h1>
+          <h1 className="text-2xl font-bold mb-1">{projectName ?? 'Project'}</h1>
           <code className="text-sm text-gray-400 bg-gray-800 px-2 py-1 rounded">{projectDir}</code>
           {info?.projectType && (
             <span className="ml-2 px-2 py-0.5 text-xs bg-indigo-900/50 text-indigo-300 rounded">

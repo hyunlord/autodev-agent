@@ -1,7 +1,7 @@
 import { db } from '../lib/db/client';
 import { tasks, attempts, events, verifications } from '../lib/db/schema';
 import { join, resolve } from 'path';
-import { existsSync, mkdirSync } from 'fs';
+import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { eq, and, not, desc } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import { detectProjectType, type ProjectConfig } from '../lib/detection/project-type';
@@ -191,6 +191,23 @@ export async function runPipeline(taskId: string, rawEmit: EmitFn): Promise<void
       );
 
       if (result.success) {
+        // Auto-generate project name from first task summary
+        if (projectDir) {
+          const nameFile = join(projectDir, '.autodev', 'project-name.txt');
+          if (!existsSync(nameFile)) {
+            try {
+              mkdirSync(join(projectDir, '.autodev'), { recursive: true });
+              const planData = typeof task.plan === 'string' ? JSON.parse(task.plan as string) : task.plan;
+              const summary = (planData as any)?.summary ?? task.prompt ?? '';
+              const projectName = summary.slice(0, 50).replace(/[/\\:*?"<>|]/g, '');
+              if (projectName) {
+                writeFileSync(nameFile, projectName, 'utf-8');
+                emit({ type: 'log', level: 'info', message: `Project named: ${projectName}` });
+              }
+            } catch { /* non-critical */ }
+          }
+        }
+
         updateTaskStatus(taskId, 'completed', {
           summary: result.summary,
           modifiedFiles: result.modifiedFiles,

@@ -2,8 +2,8 @@ import { db } from '@/lib/db/client';
 import { tasks, attempts, events, verifications } from '@/lib/db/schema';
 import { desc, eq, sql } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
-import { rmSync, existsSync } from 'fs';
-import { resolve } from 'path';
+import { rmSync, existsSync, readFileSync } from 'fs';
+import { resolve, join } from 'path';
 
 export async function GET() {
   const projects = db
@@ -20,7 +20,18 @@ export async function GET() {
     .orderBy(desc(sql`max(${tasks.updatedAt})`))
     .all();
 
-  return NextResponse.json(projects);
+  const enriched = projects.map(p => {
+    let projectName: string | null = null;
+    if (p.projectDir) {
+      const nameFile = join(p.projectDir, '.autodev', 'project-name.txt');
+      if (existsSync(nameFile)) {
+        try { projectName = readFileSync(nameFile, 'utf-8').trim(); } catch {}
+      }
+    }
+    return { ...p, projectName };
+  });
+
+  return NextResponse.json(enriched);
 }
 
 export async function DELETE(req: Request) {

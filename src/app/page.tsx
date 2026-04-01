@@ -446,7 +446,7 @@ const [tasks, setTasks] = useState<Task[]>([]);
                     className="flex-1 text-left min-w-0"
                   >
                     <p className="text-sm text-gray-200 truncate font-mono">
-                      {project.projectDir.split('/').slice(-2).join('/')}
+                      {(project as any).projectName ?? project.projectDir.split('/').slice(-2).join('/')}
                     </p>
                     <div className="flex items-center gap-2 mt-1.5 text-xs text-gray-500">
                       <span>{project.taskCount} tasks</span>

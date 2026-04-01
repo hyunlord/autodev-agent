@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, appendFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { loadPrompt, loadMcpConfig, type PromptRole } from '@/lib/harness/prompt-loader';
@@ -41,6 +41,12 @@ export async function POST(req: Request) {
     mkdirSync(dir, { recursive: true });
     const filePath = join(dir, `${role}.md`);
     writeFileSync(filePath, content, 'utf-8');
+    try {
+      appendFileSync(join(baseDir, 'harness-log.jsonl'), JSON.stringify({
+        timestamp: new Date().toISOString(), action: 'edit',
+        file: `agents/${role}.md`, scope: scope ?? 'global',
+      }) + '\n');
+    } catch { /* non-critical */ }
     return NextResponse.json({ success: true, filePath, scope: scope ?? 'global' });
   }
 
@@ -49,6 +55,12 @@ export async function POST(req: Request) {
     mkdirSync(dir, { recursive: true });
     const filePath = join(dir, 'config.json');
     writeFileSync(filePath, JSON.stringify(content, null, 2), 'utf-8');
+    try {
+      appendFileSync(join(baseDir, 'harness-log.jsonl'), JSON.stringify({
+        timestamp: new Date().toISOString(), action: 'config',
+        file: 'mcp/config.json', scope: scope ?? 'global',
+      }) + '\n');
+    } catch { /* non-critical */ }
     return NextResponse.json({ success: true, filePath, scope: scope ?? 'global' });
   }
 
@@ -73,6 +85,12 @@ export async function DELETE(req: Request) {
   if (existsSync(filePath)) {
     const { unlinkSync } = await import('fs');
     unlinkSync(filePath);
+    try {
+      appendFileSync(join(baseDir, 'harness-log.jsonl'), JSON.stringify({
+        timestamp: new Date().toISOString(), action: 'reset',
+        file: `agents/${role}.md`, scope,
+      }) + '\n');
+    } catch { /* non-critical */ }
     return NextResponse.json({ success: true, message: `Reset ${role} to default` });
   }
 

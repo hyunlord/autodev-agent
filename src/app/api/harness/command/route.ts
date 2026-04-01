@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync, appendFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { resolveCli } from '@/lib/cli-resolver';
@@ -126,21 +126,52 @@ Rules:
       stdout = data.content?.[0]?.text ?? '';
     }
 
-    // LLM 응답 파싱
-    const cleaned = stdout.replace(/^```(?:json)?\n?/m, '').replace(/\n?```$/m, '').trim();
-    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      return NextResponse.json({ error: 'Failed to parse LLM response', raw: stdout.slice(0, 500) }, { status: 500 });
+    // Parse response — extract JSON from potentially messy CLI output
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let resultJson: any = null;
+
+    // Try 1: direct parse
+    try {
+      resultJson = JSON.parse(stdout);
+    } catch {
+      // Try 2: strip markdown fences
+      const cleaned = stdout
+        .replace(/^```(?:json)?\s*\n?/gm, '')
+        .replace(/\n?```\s*$/gm, '')
+        .trim();
+      try {
+        resultJson = JSON.parse(cleaned);
+      } catch {
+        // Try 3: find JSON object containing "changes"
+        const jsonMatch = cleaned.match(/\{[\s\S]*"changes"[\s\S]*\}/);
+        if (jsonMatch) {
+          try {
+            resultJson = JSON.parse(jsonMatch[0]);
+          } catch {
+            // Try 4: find last line that parses as JSON with changes/summary
+            const lines = cleaned.split('\n');
+            for (let i = lines.length - 1; i >= 0; i--) {
+              try {
+                const parsed = JSON.parse(lines[i]);
+                if (parsed.changes || parsed.summary) { resultJson = parsed; break; }
+              } catch { continue; }
+            }
+          }
+        }
+      }
     }
 
-    const result = JSON.parse(jsonMatch[0]) as {
-      changes?: Array<{ file: string; action: string; content?: string }>;
-      summary?: string;
-    };
+    if (!resultJson || !resultJson.changes) {
+      return NextResponse.json({
+        error: 'LLM 응답에서 JSON을 추출하지 못했습니다',
+        raw: stdout.slice(0, 300),
+        durationMs: Date.now() - startTime,
+      }, { status: 500 });
+    }
 
     // 변경 사항 적용
     const applied: string[] = [];
-    for (const change of result.changes ?? []) {
+    for (const change of resultJson.changes ?? []) {
       const filePath = join(autodevDir, change.file);
       const dir = filePath.substring(0, filePath.lastIndexOf('/'));
 
@@ -156,9 +187,21 @@ Rules:
       }
     }
 
+    // Log harness changes
+    const logPath = join(autodevDir, 'harness-log.jsonl');
+    const logEntry = JSON.stringify({
+      timestamp: new Date().toISOString(),
+      action: 'command',
+      command,
+      cliMode: mode,
+      summary: resultJson.summary,
+      changes: applied,
+    });
+    try { appendFileSync(logPath, logEntry + '\n'); } catch { /* non-critical */ }
+
     return NextResponse.json({
       success: true,
-      summary: result.summary,
+      summary: resultJson.summary,
       changes: applied,
       cliMode: mode,
       durationMs: Date.now() - startTime,

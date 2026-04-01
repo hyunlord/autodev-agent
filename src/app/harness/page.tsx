@@ -126,6 +126,7 @@ export default function HarnessPage() {
   const [commandCli, setCommandCli] = useState<'claude-cli' | 'gemini-cli' | 'codex-cli' | 'api'>('claude-cli');
   const [commandLoading, setCommandLoading] = useState(false);
   const [commandResult, setCommandResult] = useState<{ summary: string; changes: string[]; cliMode?: string; durationMs?: number } | null>(null);
+  const [harnessLog, setHarnessLog] = useState<Array<{ timestamp: string; action: string; command?: string; summary?: string; file?: string; cliMode?: string }>>([]);
 
   // Scope selector
   const [projects, setProjects] = useState<Project[]>([]);
@@ -146,6 +147,16 @@ export default function HarnessPage() {
       .then(data => setAgents(data.agents ?? []))
       .catch(() => {});
   }, [selectedScope]);
+
+  useEffect(() => {
+    if (tab === 'pipeline') {
+      const params = selectedScope !== 'global' ? `?projectDir=${encodeURIComponent(selectedScope)}` : '';
+      fetch(`/api/harness/log${params}`)
+        .then(r => r.json())
+        .then(setHarnessLog)
+        .catch(() => setHarnessLog([]));
+    }
+  }, [tab, selectedScope, commandResult]);
 
   useEffect(() => {
     fetch('/api/mcp')
@@ -452,6 +463,31 @@ export default function HarnessPage() {
                     ))}
                   </div>
                 )}
+              </div>
+            )}
+
+            {harnessLog.length > 0 && (
+              <div className="mt-4 max-w-lg mx-auto">
+                <p className="text-xs text-gray-500 mb-2">변경 이력</p>
+                <div className="space-y-1 max-h-48 overflow-y-auto">
+                  {harnessLog.map((log, i) => (
+                    <div key={i} className="flex items-center gap-2 text-[10px] text-gray-500 px-2 py-1 bg-gray-900/30 rounded">
+                      <span className="text-gray-600">{new Date(log.timestamp).toLocaleString()}</span>
+                      <span className={`px-1 rounded ${
+                        log.action === 'command' ? 'bg-indigo-900/30 text-indigo-400' :
+                        log.action === 'edit' ? 'bg-amber-900/30 text-amber-400' :
+                        log.action === 'reset' ? 'bg-red-900/30 text-red-400' :
+                        'bg-gray-800 text-gray-400'
+                      }`}>
+                        {log.action}
+                      </span>
+                      <span className="text-gray-400 truncate flex-1">
+                        {log.command ?? log.summary ?? log.file ?? ''}
+                      </span>
+                      {log.cliMode && <span className="text-gray-600">{log.cliMode}</span>}
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </div>
