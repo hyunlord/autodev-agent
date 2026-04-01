@@ -127,6 +127,12 @@ const [tasks, setTasks] = useState<Task[]>([]);
           <h1 className="text-3xl font-bold">AutoDev Agent</h1>
           <p className="text-gray-400 mt-1">Universal AI Development Orchestrator</p>
         </div>
+        <Link
+          href="/harness"
+          className="px-3 py-1.5 text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg transition-colors"
+        >
+          ⚙ Harness
+        </Link>
       </header>
 
       {usage && usage.totals.costUsd > 0 && (
