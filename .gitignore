@@ -1,6 +1,7 @@
 node_modules/
 .next/
-.autodev/
+.autodev/*.env
+.autodev/*.db
 .omc/
 *.db
 *.db-wal
