@@ -8,3 +8,7 @@ node_modules/
 *.db-shm
 .env
 .env.local
+.mcp.json
+.autodev/workspaces/
+.playwright-mcp/
+tsconfig.tsbuildinfo
