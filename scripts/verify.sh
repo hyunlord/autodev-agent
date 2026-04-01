@@ -12,7 +12,14 @@ echo ""
 echo "=== Step 1: Build ==="
 pnpm build 2>&1 | tail -5
 if [ $? -ne 0 ]; then
-  echo "❌ BUILD FAILED"
+  echo ""
+  echo "┌─────────────┬──────────┐"
+  echo "│    항목     │  결과    │"
+  echo "├─────────────┼──────────┤"
+  echo "│ Build       │ ❌ FAIL  │"
+  echo "├─────────────┼──────────┤"
+  echo "│ TOTAL       │ ❌ FAIL  │"
+  echo "└─────────────┴──────────┘"
   exit 1
 fi
 echo "✅ Build passed"
@@ -41,7 +48,16 @@ sleep 1
 lsof -ti:3000 | xargs kill -9 2>/dev/null || true
 
 if [ $FAIL -ne 0 ]; then
-  echo "❌ API CHECK FAILED"
+  echo ""
+  echo "┌─────────────┬──────────┐"
+  echo "│    항목     │  결과    │"
+  echo "├─────────────┼──────────┤"
+  echo "│ Build       │ ✅ PASS  │"
+  echo "├─────────────┼──────────┤"
+  echo "│ API Health  │ ❌ FAIL  │"
+  echo "├─────────────┼──────────┤"
+  echo "│ TOTAL       │ ❌ FAIL  │"
+  echo "└─────────────┴──────────┘"
   exit 1
 fi
 echo "✅ All APIs responded 200"
@@ -69,13 +85,35 @@ if [ "$MODE" = "full" ]; then
   lsof -ti:3000 | xargs kill -9 2>/dev/null || true
 
   if [ "$DASH" != "200" ] || [ "$HARNESS" != "200" ]; then
-    echo "❌ UI CHECK FAILED"
+    echo ""
+    echo "┌─────────────┬──────────┐"
+    echo "│    항목     │  결과    │"
+    echo "├─────────────┼──────────┤"
+    echo "│ Build       │ ✅ PASS  │"
+    echo "├─────────────┼──────────┤"
+    echo "│ API Health  │ ✅ PASS  │"
+    echo "├─────────────┼──────────┤"
+    echo "│ UI Check    │ ❌ FAIL  │"
+    echo "├─────────────┼──────────┤"
+    echo "│ TOTAL       │ ❌ FAIL  │"
+    echo "└─────────────┴──────────┘"
     exit 1
   fi
   echo "✅ UI pages accessible"
   echo ""
 fi
 
-echo "================================"
-echo "✅ Verify $MODE PASSED"
-echo "================================"
+echo ""
+echo "┌─────────────┬──────────┐"
+echo "│    항목     │  결과    │"
+echo "├─────────────┼──────────┤"
+echo "│ Build       │ ✅ PASS  │"
+echo "├─────────────┼──────────┤"
+echo "│ API Health  │ ✅ PASS  │"
+if [ "$MODE" = "full" ]; then
+echo "├─────────────┼──────────┤"
+echo "│ UI Check    │ ✅ PASS  │"
+fi
+echo "├─────────────┼──────────┤"
+echo "│ TOTAL       │ ✅ PASS  │"
+echo "└─────────────┴──────────┘"
