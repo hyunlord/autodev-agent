@@ -1,6 +1,7 @@
 import type { VerificationSpec } from './planning';
 import type { ProjectConfig } from '../lib/detection/project-type';
 import type { PipelineEvent } from '../lib/types';
+import { loadPrompt } from '../lib/harness/prompt-loader';
 import { runBuildCheck } from '../lib/plugins/verifiers/build-check';
 import { runFileCheck } from '../lib/plugins/verifiers/file-check';
 import { runPortCheck } from '../lib/plugins/verifiers/port-check';
@@ -46,6 +47,14 @@ export async function runVerification(
   let consoleErrors: string[] = [];
   let webCtx: WebVerifyContext | null = null;
 
+  // Load verifier and evaluator prompts from harness
+  const verifierPrompt = loadPrompt('verifier', projectDir);
+  const evaluatorPrompt = loadPrompt('evaluator', projectDir);
+  // evaluatorPrompt reserved for future LLM-based evaluation
+  void evaluatorPrompt;
+
+  emit({ type: 'log', level: 'info', message: `Verifier prompt: ${verifierPrompt.source}${verifierPrompt.filePath ? ` (${verifierPrompt.filePath})` : ' (built-in)'}` });
+
   try {
     for (const step of spec.steps) {
       emit({ type: 'log', level: 'info', message: `[Verify] Running: ${step.description}` });
@@ -76,6 +85,26 @@ export async function runVerification(
           case 'file_check': {
             const filePath = step.filePath ?? '';
             const result = runFileCheck(filePath, projectDir, step.expectedText);
+
+            // Enhanced: 파일이 비어있지 않은지도 확인
+            if (result.passed && result.actual) {
+              const fileSize = result.actual.length;
+              if (fileSize < 10) {
+                results.push({
+                  checkId: step.id,
+                  type: step.type,
+                  status: 'fail',
+                  description: step.description,
+                  expected: step.expectedText,
+                  actual: `File exists but nearly empty (${fileSize} bytes)`,
+                  durationMs: Date.now() - startTime,
+                });
+                emit({ type: 'log', level: 'warn', message: `[✗] ${step.description}: File nearly empty` });
+                emit({ type: 'verification_result', checkId: step.id, status: 'fail', detail: `File nearly empty (${fileSize} bytes)` });
+                break;
+              }
+            }
+
             results.push({
               checkId: step.id,
               type: step.type,
@@ -85,6 +114,8 @@ export async function runVerification(
               actual: result.actual,
               durationMs: result.durationMs,
             });
+            const icon = result.passed ? '✓' : '✗';
+            emit({ type: 'log', level: result.passed ? 'info' : 'warn', message: `[${icon}] ${result.passed ? 'Content found' : result.actual ?? 'Check failed'}` });
             emit({ type: 'verification_result', checkId: step.id, status: result.passed ? 'pass' : 'fail', detail: result.actual });
             break;
           }
@@ -360,11 +391,47 @@ export async function runVerification(
     }
   } finally {
     if (webCtx) {
+      const port = webCtx.port;
+      emit({ type: 'log', level: 'info', message: '[Verify] Cleaning up web app...' });
       await cleanupWebApp(webCtx);
+      // Force kill any remaining process on the port
+      try {
+        const { getExeca } = await import('../lib/execa');
+        const execa = await getExeca();
+        await execa('sh', ['-c', `lsof -ti:${port} | xargs kill -9 2>/dev/null`], {
+          reject: false,
+          timeout: 5_000,
+        });
+      } catch { /* no lingering process */ }
+      emit({ type: 'log', level: 'info', message: '[Verify] Web app cleaned up, port released' });
     }
   }
 
   const allPassed = results.every(r => r.status === 'pass' || r.status === 'skip');
+
+  // Summary
+  const passCount = results.filter(r => r.status === 'pass').length;
+  const failCount = results.filter(r => r.status === 'fail').length;
+  const skipCount = results.filter(r => r.status === 'skip').length;
+
+  emit({
+    type: 'log',
+    level: allPassed ? 'info' : 'warn',
+    message: `Verification summary: ${passCount} passed, ${failCount} failed, ${skipCount} skipped`,
+  });
+
+  // If failed, emit detailed failure analysis
+  if (failCount > 0) {
+    const failedChecks = results.filter(r => r.status === 'fail');
+    const failDetails = failedChecks.map(f =>
+      `- ${f.description}: ${f.actual ?? 'unknown reason'}`
+    ).join('\n');
+    emit({
+      type: 'log',
+      level: 'warn',
+      message: `Verification failed:\n${failDetails}`,
+    });
+  }
 
   return { allPassed, results, consoleErrors };
 }
