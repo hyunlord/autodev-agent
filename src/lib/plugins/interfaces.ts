@@ -1,5 +1,15 @@
 import type { PipelineEvent } from '../types';
 
+// ─── MCP ──────────────────────────────────────────────────────
+
+export interface McpServerInfo {
+  id: string;
+  command?: string;
+  args?: string[];
+  url?: string;
+  type: 'local' | 'remote';
+}
+
 // ─── Coding Agent ─────────────────────────────────────────────
 
 export interface CodingAgentOptions {
@@ -10,6 +20,7 @@ export interface CodingAgentOptions {
   timeoutMs?: number;
   testCmd?: string;
   model?: string;
+  mcpServers?: McpServerInfo[];
   onProgress?: (event: PipelineEvent) => void;
 }
 

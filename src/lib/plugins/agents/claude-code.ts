@@ -2,6 +2,9 @@ import type { ICodingAgent, CodingAgentOptions, CodingAgentResult } from '../int
 import { resolveCli } from '../../cli-resolver';
 import { getExeca } from '../../execa';
 import { getModifiedFiles } from '../../git-utils';
+import { tmpdir } from 'os';
+import { writeFileSync, unlinkSync, existsSync } from 'fs';
+import { join } from 'path';
 
 function formatClaudeEvent(event: any): string | null {
   if (event.type === 'assistant' && event.message) {
@@ -179,6 +182,23 @@ export class ClaudeCodeAgent implements ICodingAgent {
       args.push('--model', opts.model);
     }
 
+    // Write temp MCP config file if local MCP servers are provided
+    let mcpConfigPath: string | undefined;
+    if (opts.mcpServers && opts.mcpServers.length > 0) {
+      const mcpServers: Record<string, any> = {};
+      for (const mcp of opts.mcpServers) {
+        if (mcp.type === 'local' && mcp.command) {
+          mcpServers[mcp.id] = { command: mcp.command, args: mcp.args ?? [] };
+        }
+      }
+      if (Object.keys(mcpServers).length > 0) {
+        mcpConfigPath = join(tmpdir(), `autodev-mcp-${Date.now()}.json`);
+        writeFileSync(mcpConfigPath, JSON.stringify({ mcpServers }));
+        args.push('--mcp-config', mcpConfigPath);
+        opts.onProgress?.({ type: 'log', level: 'info', message: `[Claude Code CLI] MCP config: ${Object.keys(mcpServers).join(', ')}` });
+      }
+    }
+
     opts.onProgress?.({
       type: 'log',
       level: 'info',
@@ -255,6 +275,11 @@ export class ClaudeCodeAgent implements ICodingAgent {
       } catch {
         resultText = result.stdout;
       }
+    }
+
+    // Clean up temp MCP config file
+    if (mcpConfigPath && existsSync(mcpConfigPath)) {
+      try { unlinkSync(mcpConfigPath); } catch { /* non-critical */ }
     }
 
     const modifiedFiles = await getModifiedFiles(opts.projectDir);

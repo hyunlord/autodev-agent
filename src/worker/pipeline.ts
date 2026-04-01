@@ -11,6 +11,7 @@ import { selectAgent } from '../lib/agent-selector';
 import { loadPrompt } from '../lib/harness/prompt-loader';
 import { McpManager } from '../lib/harness/mcp-manager';
 import { buildProjectContext, formatContext } from '../lib/harness/context-builder';
+import type { McpServerInfo } from '../lib/plugins/interfaces';
 import { RetryController, type AttemptRecord } from './retry';
 import { generateEscalationReport } from './escalation';
 import { loadConfig, type AutoDevConfig } from '../lib/config';
@@ -117,6 +118,11 @@ export async function runPipeline(taskId: string, rawEmit: EmitFn): Promise<void
     emit({ type: 'log', level: 'info', message: `Verification MCP: ${verifyMcps.join(', ')}` });
   }
 
+  const planningMcpPrompt = mcpManager.getMcpPromptSection('planning');
+  const codingMcpServers = mcpManager.getServersForStage('coding');
+  const codingMcpPrompt = mcpManager.getMcpPromptSection('coding');
+  const verifyMcpPrompt = mcpManager.getMcpPromptSection('verification');
+
   try {
     // ─── 1. Detect project type ──────────────────────────
     const projectConfig = detectProjectType(projectDir);
@@ -146,7 +152,10 @@ export async function runPipeline(taskId: string, rawEmit: EmitFn): Promise<void
       } catch { /* ignore */ }
     }
     const projectCtx = await buildProjectContext(projectDir, previousTaskSummary);
-    const workspaceContext = formatContext(projectCtx);
+    let workspaceContext = formatContext(projectCtx);
+    if (planningMcpPrompt) {
+      workspaceContext += '\n' + planningMcpPrompt;
+    }
     emit({ type: 'log', level: 'info', message: `Context: branch=${projectCtx.gitBranch ?? 'n/a'}, files=${projectCtx.fileCount}, changed=${projectCtx.changedFiles.length}` });
     if (projectCtx.packageInfo) {
       emit({ type: 'log', level: 'info', message: `Package: ${projectCtx.packageInfo.name} (${projectCtx.packageInfo.dependencies.length} deps, scripts: ${projectCtx.packageInfo.scripts.join(', ')})` });
@@ -157,12 +166,13 @@ export async function runPipeline(taskId: string, rawEmit: EmitFn): Promise<void
     const maxCycles = (task as any).maxCycles ?? 10;
 
     if (executionMode === 'auto-cycle') {
-      await runAutoCycle(taskId, task, projectDir, projectConfig, workspaceContext, systemPrompt, taskConfig, config, maxCycles, emit, projectHistory);
+      await runAutoCycle(taskId, task, projectDir, projectConfig, workspaceContext, systemPrompt, taskConfig, config, maxCycles, emit, projectHistory, codingMcpServers, codingMcpPrompt, verifyMcpPrompt);
     } else {
       // Single mode: run once, handle completion/escalation
       const result = await runSingleCycle(
         taskId, task, projectDir, projectConfig, workspaceContext,
-        systemPrompt, taskConfig, config, emit, { projectHistory },
+        systemPrompt, taskConfig, config, emit,
+        { projectHistory, codingMcpServers, codingMcpPrompt, verifyMcpPrompt },
       );
 
       if (result.success) {
@@ -239,6 +249,9 @@ async function runSingleCycle(
   options?: {
     forceAutoApprove?: boolean;
     projectHistory?: Array<{ prompt: string; status: string; result: any; createdAt: string }>;
+    codingMcpServers?: McpServerInfo[];
+    codingMcpPrompt?: string;
+    verifyMcpPrompt?: string;
   },
 ): Promise<SingleCycleResult> {
   const startTime = Date.now();
@@ -433,13 +446,22 @@ ${plan.codingPrompt}`;
     const coderPrompt = loadPrompt('coder', projectDir, { projectDir });
     emit({ type: 'log', level: 'info', message: `Coder prompt: ${coderPrompt.source}${coderPrompt.filePath ? ` (${coderPrompt.filePath})` : ' (built-in)'}` });
 
-    const safePrompt = `${coderPrompt.content}\n\n${codingPrompt}`;
+    const codingMcpPrompt = options?.codingMcpPrompt ?? '';
+    const codingMcpServers = options?.codingMcpServers ?? [];
+    const verifyMcpPrompt = options?.verifyMcpPrompt ?? '';
+
+    const safePrompt = `${coderPrompt.content}${codingMcpPrompt ? '\n' + codingMcpPrompt : ''}\n\n${codingPrompt}`;
+
+    if (verifyMcpPrompt) {
+      emit({ type: 'log', level: 'info', message: `Verification MCP tools available` });
+    }
 
     const codeResult = await agent.invoke({
       task: safePrompt,
       projectDir,
       maxTurns: 20,
       timeoutMs: 300_000,
+      mcpServers: codingMcpServers.length > 0 ? codingMcpServers : undefined,
       onProgress: (event) => emit(event),
     });
 
@@ -638,6 +660,9 @@ async function runAutoCycle(
   maxCycles: number,
   emit: EmitFn,
   projectHistory: Array<{ prompt: string; status: string; result: any; createdAt: string }>,
+  codingMcpServers: McpServerInfo[] = [],
+  codingMcpPrompt = '',
+  verifyMcpPrompt = '',
 ): Promise<void> {
   const originalGoal = task.prompt;
   const completedSteps: string[] = [];
@@ -687,7 +712,7 @@ Continue working on the next step. If the original goal is fully complete, respo
       const result = await runSingleCycle(
         taskId, cycleTask, projectDir, projectConfig,
         workspaceContext, systemPrompt, taskConfig, config, emit,
-        { forceAutoApprove, projectHistory: cycle === 1 ? projectHistory : [] },
+        { forceAutoApprove, projectHistory: cycle === 1 ? projectHistory : [], codingMcpServers, codingMcpPrompt, verifyMcpPrompt },
       );
 
       totalCostUsd += result.costUsd;

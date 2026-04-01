@@ -1,4 +1,5 @@
 import { loadMcpConfig, type McpConfig, type McpServerConfig } from './prompt-loader';
+import type { McpServerInfo } from '../plugins/interfaces';
 
 export interface McpTool {
   name: string;
@@ -126,6 +127,61 @@ export class McpManager {
 
   getServerConfig(id: string): McpServerConfig | undefined {
     return this.config.servers[id];
+  }
+
+  /**
+   * Get MCP server info for a pipeline stage (config-based, no process required)
+   */
+  getServersForStage(stage: 'planning' | 'coding' | 'verification'): McpServerInfo[] {
+    const serverIds = this.config.pipeline_mapping[stage] ?? [];
+    const result: McpServerInfo[] = [];
+
+    for (const id of serverIds) {
+      const config = this.config.servers[id];
+      if (!config || !config.enabled) continue;
+
+      result.push({
+        id,
+        command: config.command,
+        args: config.args,
+        url: config.url,
+        type: config.type,
+      });
+    }
+
+    return result;
+  }
+
+  /**
+   * Generate a prompt section describing available MCP tools for a stage
+   */
+  getMcpPromptSection(stage: 'planning' | 'coding' | 'verification'): string {
+    const servers = this.getServersForStage(stage);
+    if (servers.length === 0) return '';
+
+    const lines = servers.map(s => {
+      if (s.id === 'playwright') {
+        return `- **Playwright MCP**: Browser automation. Navigate pages, click elements, take screenshots, check console errors. Use for UI verification.`;
+      }
+      if (s.id === 'context7') {
+        return `- **Context7 MCP**: Up-to-date library documentation. Use "use context7" to fetch current docs for any library.`;
+      }
+      if (s.id === 'codex') {
+        return `- **Codex MCP**: Code generation via OpenAI Codex. Available as an alternative coding tool.`;
+      }
+      if (s.id === 'firecrawl') {
+        return `- **Firecrawl MCP**: Web scraping and crawling. Extract content from external websites.`;
+      }
+      if (s.id === 'github') {
+        return `- **GitHub MCP**: Repository management. Search code, manage issues and PRs.`;
+      }
+      if (s.id === 'websearch') {
+        return `- **Web Search MCP**: Search the web for current information via Exa.`;
+      }
+      return `- **${s.id} MCP**: Available MCP server.`;
+    });
+
+    return `\n## Available MCP Tools\nThe following MCP tools are available for this stage:\n${lines.join('\n')}\nUse these tools when they would help complete the task more effectively.\n`;
   }
 
   async shutdown(): Promise<void> {
