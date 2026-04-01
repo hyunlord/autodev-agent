@@ -16,6 +16,7 @@ import { RetryController, type AttemptRecord } from './retry';
 import { generateEscalationReport } from './escalation';
 import { loadConfig, type AutoDevConfig } from '../lib/config';
 import type { PipelineEvent, TaskStatus, PlanningMode } from '../lib/types';
+import { ProgressDetector } from '../lib/safety/progress-detector';
 
 type EmitFn = (event: PipelineEvent) => void;
 
@@ -700,6 +701,11 @@ async function runAutoCycle(
   const allModifiedFiles: string[] = [];
   let totalCostUsd = 0;
 
+  const progressDetector = new ProgressDetector({
+    maxCostUsd: taskConfig.maxCostUsd ?? 5.0,
+    maxConsecutiveFailures: taskConfig.maxConsecutiveFailures ?? 3,
+  });
+
   for (let cycle = 1; cycle <= maxCycles; cycle++) {
     // Check if user stopped the task
     const currentTask = db.select().from(tasks).where(eq(tasks.id, taskId)).get();
@@ -708,7 +714,8 @@ async function runAutoCycle(
       break;
     }
 
-    emit({ type: 'cycle_start', cycleNum: cycle, totalCycles: maxCycles, message: `Starting cycle ${cycle}/${maxCycles}` });
+    const stats = progressDetector.getStats();
+    emit({ type: 'cycle_start', cycleNum: cycle, totalCycles: maxCycles, message: `Starting cycle ${cycle}/${maxCycles} (${stats.passed} passed, ${stats.failed} failed, $${stats.totalCost.toFixed(4)})` });
 
     // Update cycle count in DB
     db.update(tasks).set({
@@ -749,6 +756,46 @@ Continue working on the next step. If the original goal is fully complete, respo
       totalCostUsd += result.costUsd;
 
       emit({ type: 'cycle_complete', cycleNum: cycle, success: result.success, summary: result.summary });
+
+      // Record cycle result and check progress
+      progressDetector.record({
+        cycle,
+        success: result.success,
+        summary: result.summary,
+        modifiedFiles: result.modifiedFiles ?? [],
+        costUsd: result.costUsd,
+        errorMessage: result.success ? undefined : result.summary,
+      });
+
+      const progressCheck = progressDetector.check();
+
+      if (progressCheck.recommendation === 'warn') {
+        emit({ type: 'log', level: 'warn', message: `⚠ ${progressCheck.reason}` });
+      }
+
+      if (!progressCheck.shouldContinue) {
+        const cycleStats = progressDetector.getStats();
+        emit({
+          type: 'log',
+          level: 'warn',
+          message: `Auto-cycle stopped: ${progressCheck.reason}`,
+        });
+        emit({
+          type: 'auto_cycle_complete',
+          totalCycles: cycle,
+          summary: `Stopped after ${cycle} cycles (${cycleStats.passed} passed, ${cycleStats.failed} failed, $${cycleStats.totalCost.toFixed(4)}): ${progressCheck.reason}`,
+        });
+        updateTaskStatus(taskId, 'failed', {
+          summary: `Auto-cycle stopped: ${progressCheck.reason}`,
+          completedSteps,
+          modifiedFiles: [...new Set(allModifiedFiles)],
+          cycles: cycle,
+          costUsd: totalCostUsd,
+          stopReason: progressCheck.reason,
+        });
+        emit({ type: 'task_complete', success: false, summary: `Auto-cycle stopped: ${progressCheck.reason}` });
+        return;
+      }
 
       if (result.success) {
         completedSteps.push(result.summary);
