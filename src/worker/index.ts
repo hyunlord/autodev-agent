@@ -34,9 +34,9 @@ for (const agent of agents) {
 }
 console.log(`[Worker] Registered ${agents.length} agents: ${agents.map(a => a.id).join(', ')}`);
 
-// ─── Message Handler ───────────────────────────────────────────
+// ─── Task tracking with AbortController ────────────────────────
 
-const activeTasks = new Set<string>();
+const activeTasks = new Map<string, AbortController>();
 
 process.on('message', async (msg: WorkerMessage) => {
   if (msg.type === 'dispatch') {
@@ -47,7 +47,8 @@ process.on('message', async (msg: WorkerMessage) => {
       return;
     }
 
-    activeTasks.add(taskId);
+    const abortController = new AbortController();
+    activeTasks.set(taskId, abortController);
     console.log(`[Worker] Starting pipeline for task ${taskId}`);
 
     const emit = (event: PipelineEvent) => {
@@ -55,22 +56,37 @@ process.on('message', async (msg: WorkerMessage) => {
     };
 
     try {
-      await runPipeline(taskId, emit);
+      await runPipeline(taskId, emit, abortController.signal);
     } catch (err) {
-      console.error(`[Worker] Pipeline error for task ${taskId}:`, err);
-      emit({
-        type: 'task_complete',
-        success: false,
-        summary: `Pipeline crashed: ${err instanceof Error ? err.message : String(err)}`,
-      });
+      if (abortController.signal.aborted) {
+        console.log(`[Worker] Task ${taskId} was cancelled`);
+        emit({
+          type: 'task_complete',
+          success: false,
+          summary: 'Task cancelled by user',
+        });
+      } else {
+        console.error(`[Worker] Pipeline error for task ${taskId}:`, err);
+        emit({
+          type: 'task_complete',
+          success: false,
+          summary: `Pipeline crashed: ${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
     } finally {
       activeTasks.delete(taskId);
     }
   }
 
   if (msg.type === 'cancel') {
-    console.log(`[Worker] Cancel requested for task ${msg.taskId}`);
-    // TODO: implement cancellation via AbortController
+    const taskId = msg.taskId;
+    const controller = activeTasks.get(taskId);
+    if (controller) {
+      console.log(`[Worker] Cancelling task ${taskId}...`);
+      controller.abort();
+    } else {
+      console.log(`[Worker] Task ${taskId} not found in active tasks`);
+    }
   }
 });
 

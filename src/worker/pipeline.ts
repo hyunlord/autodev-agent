@@ -42,7 +42,13 @@ interface SingleCycleResult {
 // ═════════════════════════════════════════════════════════
 // Pipeline entry point
 // ═════════════════════════════════════════════════════════
-export async function runPipeline(taskId: string, rawEmit: EmitFn): Promise<void> {
+function checkAbort(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw new Error('Task cancelled');
+  }
+}
+
+export async function runPipeline(taskId: string, rawEmit: EmitFn, signal?: AbortSignal): Promise<void> {
   // Wrap emit to persist all events to DB for later retrieval
   const emit: EmitFn = (event) => {
     rawEmit(event);
@@ -65,6 +71,7 @@ export async function runPipeline(taskId: string, rawEmit: EmitFn): Promise<void
 
   const projectDir = await resolveProjectDir(taskId, task.projectDir);
   emit({ type: 'log', level: 'info', message: `Working directory: ${projectDir}` });
+  emit({ type: 'log', level: 'info', message: `Safety: AbortController active, destructive command check enabled` });
 
   // Save auto-created workspace path back to DB
   if (!task.projectDir) {
@@ -125,6 +132,7 @@ export async function runPipeline(taskId: string, rawEmit: EmitFn): Promise<void
 
   try {
     // ─── 1. Detect project type ──────────────────────────
+    checkAbort(signal);
     const projectConfig = detectProjectType(projectDir);
     updateTaskStatus(taskId, 'planning');
     emit({ type: 'status_change', status: 'planning', message: 'Analyzing project and generating plan...' });
@@ -172,7 +180,7 @@ export async function runPipeline(taskId: string, rawEmit: EmitFn): Promise<void
       const result = await runSingleCycle(
         taskId, task, projectDir, projectConfig, workspaceContext,
         systemPrompt, taskConfig, config, emit,
-        { projectHistory, codingMcpServers, codingMcpPrompt, verifyMcpPrompt },
+        { projectHistory, codingMcpServers, codingMcpPrompt, verifyMcpPrompt, signal },
       );
 
       if (result.success) {
@@ -252,8 +260,10 @@ async function runSingleCycle(
     codingMcpServers?: McpServerInfo[];
     codingMcpPrompt?: string;
     verifyMcpPrompt?: string;
+    signal?: AbortSignal;
   },
 ): Promise<SingleCycleResult> {
+  const signal = options?.signal;
   const startTime = Date.now();
 
   // ─── Planning ──────────────────────────────────────────
@@ -403,6 +413,24 @@ async function runSingleCycle(
     });
   }
 
+  // ─── Git dirty state check ──────────────────────────
+  try {
+    const { getExeca } = await import('../lib/execa');
+    const ex = await getExeca();
+    const { stdout: gitStatus } = await ex('git', ['status', '--porcelain'], {
+      cwd: projectDir, reject: false, timeout: 5_000,
+    } as any);
+
+    if (gitStatus.trim()) {
+      const changedCount = gitStatus.trim().split('\n').length;
+      emit({
+        type: 'log',
+        level: 'warn',
+        message: `⚠ ${changedCount} uncommitted change(s) detected. Coding agent may modify these files. Consider committing first.`,
+      });
+    }
+  } catch { /* not a git repo, skip */ }
+
   for (let attempt = 1; attempt <= config.maxRetries; attempt++) {
     const isRetry = attempt > 1;
     if (isRetry) {
@@ -412,6 +440,7 @@ async function runSingleCycle(
       updateTaskStatus(taskId, 'coding');
     }
 
+    checkAbort(signal);
     emit({ type: 'status_change', status: 'coding', message: isRetry ? `Retrying with error context (attempt ${attempt})...` : `Sending task to ${agent.name}...` });
     emit({ type: 'attempt_start', attemptNum: attempt, agentId });
 
@@ -550,6 +579,7 @@ ${plan.codingPrompt}`;
     emit({ type: 'attempt_complete', attemptNum: attempt, success: true });
 
     // ─── Verification phase ──────────────────────────
+    checkAbort(signal);
     updateTaskStatus(taskId, 'verifying');
     emit({ type: 'status_change', status: 'verifying', message: `Verifying (attempt ${attempt})...` });
 

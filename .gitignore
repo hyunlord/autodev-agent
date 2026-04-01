@@ -12,3 +12,4 @@ node_modules/
 .autodev/workspaces/
 .playwright-mcp/
 tsconfig.tsbuildinfo
+.omx/
