@@ -417,11 +417,12 @@ async function runSingleCycle(
   try {
     const { getExeca } = await import('../lib/execa');
     const ex = await getExeca();
-    const { stdout: gitStatus } = await ex('git', ['status', '--porcelain'], {
+    const gitResult = await ex('git', ['status', '--porcelain'], {
       cwd: projectDir, reject: false, timeout: 5_000,
     } as any);
+    const gitStatus = (gitResult.stdout ?? '') as string;
 
-    if (gitStatus?.trim()) {
+    if (gitStatus.trim()) {
       const changedCount = gitStatus.trim().split('\n').length;
       emit({
         type: 'log',
