@@ -9,6 +9,7 @@ import { generatePlan } from './planning';
 import { PluginRegistry } from '../lib/plugins/registry';
 import { selectAgent } from '../lib/agent-selector';
 import { loadPrompt } from '../lib/harness/prompt-loader';
+import { McpManager } from '../lib/harness/mcp-manager';
 import { RetryController, type AttemptRecord } from './retry';
 import { generateEscalationReport } from './escalation';
 import { loadConfig, type AutoDevConfig } from '../lib/config';
@@ -135,6 +136,26 @@ export async function runPipeline(taskId: string, rawEmit: EmitFn): Promise<void
     .limit(10)
     .all();
 
+  // ─── Initialize MCP Manager ─────────────────────────────
+  const mcpManager = new McpManager(projectDir);
+  const mcpConfig = mcpManager.getConfig();
+  const enabledServers = Object.entries(mcpConfig.servers)
+    .filter(([, s]) => s.enabled)
+    .map(([id]) => id);
+
+  if (enabledServers.length > 0) {
+    emit({ type: 'log', level: 'info', message: `MCP servers configured: ${enabledServers.join(', ')}` });
+  }
+
+  const planningMcps = mcpConfig.pipeline_mapping.planning.filter(id => enabledServers.includes(id));
+  const verifyMcps = mcpConfig.pipeline_mapping.verification.filter(id => enabledServers.includes(id));
+  if (planningMcps.length > 0) {
+    emit({ type: 'log', level: 'info', message: `Planning MCP: ${planningMcps.join(', ')}` });
+  }
+  if (verifyMcps.length > 0) {
+    emit({ type: 'log', level: 'info', message: `Verification MCP: ${verifyMcps.join(', ')}` });
+  }
+
   try {
     // ─── 1. Detect project type ──────────────────────────
     const projectConfig = detectProjectType(projectDir);
@@ -205,6 +226,8 @@ export async function runPipeline(taskId: string, rawEmit: EmitFn): Promise<void
     emit({ type: 'task_complete', success: false, summary: `Failed: ${errorMessage}` });
     updateTaskStatus(taskId, 'failed', { error: errorMessage });
     recordEvent(taskId, 'pipeline_error', { error: errorMessage });
+  } finally {
+    await mcpManager.shutdown();
   }
 }
 

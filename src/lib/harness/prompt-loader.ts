@@ -157,6 +157,7 @@ export interface McpServerConfig {
   type: 'local' | 'remote';
   enabled: boolean;
   headers?: Record<string, string>;
+  env?: Record<string, string>;
 }
 
 export interface McpConfig {
@@ -193,10 +194,42 @@ function getDefaultMcpConfig(): McpConfig {
         type: 'remote',
         enabled: true,
       },
+      codex: {
+        command: 'npx',
+        args: ['-y', 'codex', 'mcp'],
+        type: 'local',
+        enabled: false,
+      },
+      firecrawl: {
+        command: 'npx',
+        args: ['-y', 'firecrawl-mcp'],
+        type: 'local',
+        enabled: false,
+        env: {
+          FIRECRAWL_API_KEY: '${FIRECRAWL_API_KEY}',
+        },
+      },
+      github: {
+        command: 'npx',
+        args: ['-y', '@modelcontextprotocol/server-github'],
+        type: 'local',
+        enabled: false,
+        env: {
+          GITHUB_TOKEN: '${GITHUB_TOKEN}',
+        },
+      },
+      websearch: {
+        url: 'https://mcp.exa.ai/mcp?tools=web_search_exa',
+        type: 'remote',
+        enabled: false,
+        headers: {
+          'x-api-key': '${EXA_API_KEY}',
+        },
+      },
     },
     pipeline_mapping: {
-      planning: ['context7'],
-      coding: [],
+      planning: ['context7', 'websearch'],
+      coding: ['codex'],
       verification: ['playwright'],
     },
   };

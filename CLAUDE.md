@@ -86,6 +86,50 @@ Auto-cycle 모드: 위 흐름을 GOAL_COMPLETE까지 반복 (max N cycles)
 이 프로젝트는 harness engineering 구조를 사용합니다.
 `.autodev/agents/` 폴더의 .md 파일들이 각 에이전트의 지시서입니다.
 
+## MCP 서버 (개발 환경)
+
+이 프로젝트는 4개의 MCP 서버가 설치되어 있다.
+
+### 사용법
+
+#### Sequential Thinking — 복잡한 설계
+복잡한 기능을 구현하기 전에 Sequential Thinking을 사용해서 계획을 세운다.
+- 현재 상태 파악 → 목표 정의 → 작업 분해 → 검증 방법 설계
+
+#### Context7 — 라이브러리 문서
+라이브러리 사용법이 불확실하면 Context7로 최신 문서를 참조한다.
+"use context7"을 붙여서 사용.
+- Next.js 15 App Router, Drizzle ORM, Tailwind CSS 등
+
+#### Playwright — UI 검증
+UI 변경 후 Playwright MCP로 브라우저에서 실제 확인한다.
+- pnpm dev를 백그라운드로 시작 (pnpm dev &)
+- localhost:3000 접속 → 요소 확인 → 콘솔 에러 체크
+- 검증 완료 후 반드시 dev server를 kill한다 (포트 충돌 방지)
+- 승인 묻지 않고 바로 실행한다
+
+#### Memory — 세션 간 기억
+중요한 결정이나 발견한 문제는 Memory MCP에 저장한다.
+- 아키텍처 결정, 해결한 버그 패턴, 테스트 결과 등
+
+#### Firecrawl — 외부 문서 크롤링
+외부 API 문서나 참고 사이트의 내용이 필요하면 Firecrawl로 크롤링한다.
+- API 공식 문서 수집, 예제 코드 참조
+
+#### GitHub — 코드 검색/PR 관리
+GitHub 레포에서 구현 패턴을 검색하거나 이슈/PR을 관리한다.
+- 유사 구현 검색, 코드 리뷰, 이슈 추적
+
+### 작업 프로토콜 — Plan → Code → Verify
+
+모든 작업은 이 3단계를 순환한다.
+
+1. **Plan**: Sequential Thinking으로 계획 수립. agents/planner.md 참조.
+2. **Code**: Context7로 문서 확인하면서 코드 작성. agents/coder.md 참조.
+3. **Verify**: pnpm build + Playwright로 검증. agents/verifier.md 참조.
+   - PASS → 완료
+   - FAIL → Plan으로 돌아가서 원인 분석 → 재시도 (최대 3회)
+
 ## 현재 진행 상황
 
 Phase A (핵심 지능): 5/5 완료

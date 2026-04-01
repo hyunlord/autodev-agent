@@ -25,6 +25,35 @@ pnpm build
 - 기존 Plan Review 동작하는지
 - 기존 프로젝트 관리 페이지 동작하는지
 
+### 5. UI Check (UI 변경 시) — Playwright MCP 사용
+
+#### 서버 시작
+```bash
+# 백그라운드로 dev server 시작
+pnpm dev &
+DEV_PID=$!
+sleep 5  # 서버 준비 대기
+```
+
+#### 검증 실행
+Playwright MCP로 확인 — 승인 묻지 않고 바로 실행:
+1. localhost:3000 접속
+2. 변경된 페이지로 이동
+3. 변경된 요소가 렌더링되는지 확인
+4. 콘솔 에러 0건 확인
+5. 네트워크 에러 0건 확인
+
+추측으로 "잘 될 거야"라고 하지 않는다. Playwright로 확인한다.
+
+#### 서버 정리 (필수)
+검증이 끝나면 반드시 띄운 서버를 내린다:
+```bash
+kill $DEV_PID 2>/dev/null
+# 포트가 아직 물려있으면 강제 종료
+lsof -ti:3000 | xargs kill -9 2>/dev/null
+```
+서버를 안 내리면 다음 작업에서 포트 충돌이 발생한다.
+
 ## Fail Criteria
 
 - next build 실패 = 자동 FAIL

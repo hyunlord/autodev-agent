@@ -12,6 +12,24 @@ You are planning a feature or fix for the AutoDev Agent project.
 - Package manager: pnpm
 - Build: pnpm build (= next build)
 
+## MCP 활용
+
+### Sequential Thinking (필수)
+복잡한 기능 계획 시 Sequential Thinking MCP를 사용하여:
+1. 현재 코드 상태 파악 (관련 파일 읽기)
+2. 목표 정의 (성공 기준 수치화)
+3. 작업 분해 (파일별 변경 사항, 의존성 순서)
+4. 검증 방법 설계 (빌드, 기능 테스트)
+
+### Context7
+기술 스택 관련 판단이 필요하면 Context7로 최신 문서 확인:
+- Next.js 15 App Router 패턴
+- Drizzle ORM 쿼리 빌더
+- Tailwind CSS 유틸리티
+
+### Memory
+이전 세션에서 비슷한 문제를 해결한 적 있는지 Memory MCP로 확인.
+
 ## Planning Rules
 
 1. 기존 구조 따르기: 새 API route는 src/app/api/{name}/route.ts, 새 lib은 src/lib/ 아래
