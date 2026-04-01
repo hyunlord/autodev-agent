@@ -40,7 +40,7 @@ const [tasks, setTasks] = useState<Task[]>([]);
   const [prompt, setPrompt] = useState('');
   const [projectDir, setProjectDir] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [planningMode, setPlanningMode] = useState<'auto' | 'manual' | 'api'>('auto');
+  const [planningMode, setPlanningMode] = useState<'claude-cli' | 'gemini-cli' | 'api' | 'manual'>('claude-cli');
   const [codingPrompt, setCodingPrompt] = useState('');
   const [verificationChecklist, setVerificationChecklist] = useState('');
   const [agents, setAgents] = useState<Array<{ id: string; name: string; available: boolean; path: string | null }>>([]);
@@ -175,35 +175,38 @@ const [tasks, setTasks] = useState<Task[]>([]);
           rows={3}
           className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-gray-100 placeholder-gray-500 focus:outline-none focus:border-indigo-500 resize-none"
         />
-        <div className="mt-3 flex gap-2">
-          {(['auto', 'manual', 'api'] as const).map((mode) => (
-            <button
-              key={mode}
-              type="button"
-              onClick={() => setPlanningMode(mode)}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                planningMode === mode
-                  ? 'bg-indigo-600 text-white'
-                  : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
-              }`}
-            >
-              {mode === 'auto' ? 'Auto (CLI)' : mode === 'manual' ? 'Manual' : 'API'}
-            </button>
-          ))}
+        <div className="mt-3 flex items-center gap-2">
+          <label className="text-xs text-gray-500">Planning:</label>
+          <div className="flex gap-1">
+            {([
+              { id: 'claude-cli', label: 'Claude CLI' },
+              { id: 'gemini-cli', label: 'Gemini CLI' },
+              { id: 'api', label: 'Claude API' },
+              { id: 'manual', label: 'Manual' },
+            ] as const).map((mode) => (
+              <button
+                key={mode.id}
+                type="button"
+                onClick={() => setPlanningMode(mode.id)}
+                className={`px-2.5 py-1 text-xs rounded-lg transition-colors ${
+                  planningMode === mode.id
+                    ? 'bg-indigo-600 text-white'
+                    : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                }`}
+              >
+                {mode.label}
+              </button>
+            ))}
+          </div>
         </div>
-        {planningMode === 'auto' && (
-          <p className="mt-2 text-xs text-gray-500">
-            {selectedAgent === 'claude-code' && "Uses Claude CLI (OAuth) — run 'claude login' first"}
-            {selectedAgent === 'codex-cli' && "Uses Codex CLI — run 'codex login' first"}
-            {selectedAgent === 'gemini-cli' && "Uses Gemini CLI — run 'gemini login' first"}
-            {selectedAgent === 'aider' && "Uses Aider — configure API key in ~/.aider.conf.yml"}
-            {selectedAgent === 'cline-cli' && "Uses Cline CLI — configure in ~/.cline/config"}
-            {selectedAgent === 'auto' && "Agent will be auto-selected based on task type"}
-            {!['auto', 'claude-code', 'codex-cli', 'gemini-cli', 'aider', 'cline-cli'].includes(selectedAgent) && `Uses ${selectedAgent} CLI`}
-          </p>
+        {planningMode === 'claude-cli' && (
+          <p className="mt-1 text-xs text-gray-500">Uses Claude CLI for planning. Run &apos;claude login&apos; first.</p>
+        )}
+        {planningMode === 'gemini-cli' && (
+          <p className="mt-1 text-xs text-gray-500">Uses Gemini CLI for planning. Faster and cheaper. Run &apos;gemini login&apos; first.</p>
         )}
         {planningMode === 'api' && (
-          <p className="mt-2 text-xs text-yellow-500">Requires ANTHROPIC_API_KEY in .autodev/.env</p>
+          <p className="mt-1 text-xs text-yellow-500">Uses Claude API directly. Requires ANTHROPIC_API_KEY environment variable.</p>
         )}
         {planningMode === 'manual' && (
           <div className="mt-3 space-y-3">

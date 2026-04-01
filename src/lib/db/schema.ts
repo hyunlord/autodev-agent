@@ -7,8 +7,8 @@ export const tasks = sqliteTable('tasks', {
     enum: ['pending', 'planning', 'plan_review', 'coding', 'verifying', 'retrying', 'completed', 'failed', 'escalated'],
   }).notNull().default('pending'),
   planningMode: text('planning_mode', {
-    enum: ['auto', 'manual', 'api'],
-  }).notNull().default('auto'),
+    enum: ['auto', 'claude-cli', 'gemini-cli', 'api', 'manual'],
+  }).notNull().default('claude-cli'),
   agentId:     text('agent_id').notNull().default('claude-code'),
   projectDir:  text('project_dir'),
   projectType: text('project_type'),

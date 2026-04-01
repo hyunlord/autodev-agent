@@ -40,23 +40,16 @@ export const PlanSchema = z.object({
 
 export type Plan = z.infer<typeof PlanSchema>;
 
-// ─── Mode A: Auto Planning via CLI ────────────────────────────
+// ─── Shared Prompt Builder ────────────────────────────────────
 
-async function planViaCliAgent(
+function buildPlanPrompt(
   userPrompt: string,
+  projectContext: string,
+  workspaceContext: string | undefined,
   projectConfig: ProjectConfig | null,
-  onProgress?: (msg: string) => void,
-  workspaceContext?: string,
-  workspaceDir?: string,
-  systemPrompt?: string | null,
-): Promise<Plan> {
-  onProgress?.('Generating plan via coding agent CLI...');
-
-  const projectContext = projectConfig
-    ? `Project: ${projectConfig.displayName} (${projectConfig.language}), build: ${projectConfig.buildCmd ?? 'none'}, dev: ${projectConfig.devCmd}, port: ${projectConfig.defaultPort ?? 'none'}`
-    : 'Project type: unknown';
-
-  const planPrompt = `You are a development planning assistant. Generate a JSON plan for modifying an EXISTING project.
+  systemPrompt: string | null | undefined,
+): string {
+  const basePlan = `You are a development planning assistant. Generate a JSON plan for modifying an EXISTING project.
 
 ## Project Context
 ${projectContext}
@@ -137,6 +130,27 @@ TASK CATEGORY (set taskCategory):
 - "debug": Fixing errors, troubleshooting
 - "docs": Documentation, README, comments`;
 
+  return systemPrompt ? `${systemPrompt}\n\n${basePlan}` : basePlan;
+}
+
+// ─── Mode A: Planning via Claude CLI ─────────────────────────
+
+async function planViaCliAgent(
+  userPrompt: string,
+  projectConfig: ProjectConfig | null,
+  onProgress?: (msg: string) => void,
+  workspaceContext?: string,
+  workspaceDir?: string,
+  systemPrompt?: string | null,
+): Promise<Plan> {
+  onProgress?.('Generating plan via coding agent CLI...');
+
+  const projectContext = projectConfig
+    ? `Project: ${projectConfig.displayName} (${projectConfig.language}), build: ${projectConfig.buildCmd ?? 'none'}, dev: ${projectConfig.devCmd}, port: ${projectConfig.defaultPort ?? 'none'}`
+    : 'Project type: unknown';
+
+  const planPrompt = buildPlanPrompt(userPrompt, projectContext, workspaceContext, projectConfig, systemPrompt);
+
   const { getExeca } = await import('../lib/execa');
   const execa = await getExeca();
   const claudePath = await resolveCli('claude');
@@ -144,7 +158,7 @@ TASK CATEGORY (set taskCategory):
     throw new Error('Claude CLI not found. Install with: npm install -g @anthropic-ai/claude-code');
   }
   const result = await execa(claudePath, [
-    '-p', systemPrompt ? `${systemPrompt}\n\n${planPrompt}` : planPrompt,
+    '-p', planPrompt,
     '--output-format', 'text',
     '--max-turns', '5',
     '--dangerously-skip-permissions',
@@ -179,6 +193,66 @@ TASK CATEGORY (set taskCategory):
 
   const plan = PlanSchema.parse(parsed);
   onProgress?.(`Planning output: ${cleaned.length} chars, parsed successfully`);
+  onProgress?.(`Plan ready: ${plan.summary}`);
+  return plan;
+}
+
+// ─── Mode A2: Planning via Gemini CLI ────────────────────────
+
+async function planViaGeminiCli(
+  userPrompt: string,
+  projectConfig: ProjectConfig | null,
+  onProgress?: (msg: string) => void,
+  workspaceContext?: string,
+  workspaceDir?: string,
+  systemPrompt?: string | null,
+): Promise<Plan> {
+  onProgress?.('Generating plan via Gemini CLI...');
+
+  const projectContext = projectConfig
+    ? `Project: ${projectConfig.displayName} (${projectConfig.language}), build: ${projectConfig.buildCmd ?? 'none'}, dev: ${projectConfig.devCmd}, port: ${projectConfig.defaultPort ?? 'none'}`
+    : 'Project type: unknown';
+
+  const planPrompt = buildPlanPrompt(userPrompt, projectContext, workspaceContext, projectConfig, systemPrompt);
+
+  const { getExeca } = await import('../lib/execa');
+  const execa = await getExeca();
+  const geminiPath = await resolveCli('gemini');
+  if (!geminiPath) {
+    throw new Error('Gemini CLI not found. Install with: npm install -g @google/generative-ai or equivalent');
+  }
+
+  const result = await execa(geminiPath, [
+    '-p', planPrompt,
+    '--output-format', 'json',
+    '-y',
+  ], {
+    cwd: workspaceDir,
+    timeout: 120_000,
+    reject: false,
+    env: { ...process.env },
+  });
+
+  if (result.exitCode !== 0) {
+    throw new Error(`Gemini CLI planning failed (exit ${result.exitCode}): ${result.stderr?.slice(0, 500)}`);
+  }
+
+  // Gemini may wrap output in a JSON envelope with a `response` field
+  let stdout = result.stdout;
+  try {
+    const envelope = JSON.parse(stdout);
+    stdout = envelope.response ?? envelope.result ?? envelope.text ?? stdout;
+  } catch {
+    // Not a JSON envelope, use raw output
+  }
+
+  const cleaned = stdout.replace(/^```(?:json)?\n?/m, '').replace(/\n?```$/m, '').trim();
+  const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error('Failed to extract JSON from Gemini CLI output');
+
+  const parsed = JSON.parse(jsonMatch[0]);
+  const plan = PlanSchema.parse(parsed);
+  onProgress?.(`Planning output: ${jsonMatch[0].length} chars, parsed successfully`);
   onProgress?.(`Plan ready: ${plan.summary}`);
   return plan;
 }
@@ -369,8 +443,13 @@ export async function generatePlan(
   systemPrompt?: string | null,
 ): Promise<Plan> {
   switch (mode) {
-    case 'auto':
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    case 'auto' as any:  // backward compat — treat as claude-cli
+    case 'claude-cli':
       return planViaCliAgent(userPrompt, projectConfig, onProgress, workspaceContext, workspaceDir, systemPrompt);
+
+    case 'gemini-cli':
+      return planViaGeminiCli(userPrompt, projectConfig, onProgress, workspaceContext, workspaceDir, systemPrompt);
 
     case 'manual':
       if (!manualInput?.codingPrompt) {
