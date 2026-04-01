@@ -44,8 +44,8 @@ export class CodexCliAgent implements ICodingAgent {
     } catch { /* use raw stdout */ }
     // Estimate cost if not provided by CLI (o4-mini pricing)
     if (costUsd === 0) {
-      inputTokens = inputTokens || Math.ceil(opts.task.length / 4);
-      outputTokens = outputTokens || Math.ceil(resultText.length / 4);
+      inputTokens = Math.max(inputTokens, Math.ceil(opts.task.length / 4));
+      outputTokens = Math.max(outputTokens, Math.ceil(resultText.length / 4));
       costUsd = (inputTokens / 1_000_000) * 1.10 + (outputTokens / 1_000_000) * 4.40;
     }
     const modifiedFiles = await getModifiedFiles(opts.projectDir);

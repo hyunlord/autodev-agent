@@ -1,6 +1,6 @@
 export type TaskStatus = 'pending' | 'planning' | 'plan_review' | 'coding' | 'verifying' | 'retrying' | 'completed' | 'failed' | 'escalated';
 
-export type PlanningMode = 'claude-cli' | 'gemini-cli' | 'api' | 'manual';
+export type PlanningMode = 'claude-cli' | 'gemini-cli' | 'codex-cli' | 'api' | 'manual';
 
 export type PipelineEvent =
   | { type: 'status_change'; status: TaskStatus; message: string }

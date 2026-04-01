@@ -57,6 +57,7 @@ Rules:
 - For "delete" action, content is not needed
 - If the request is unclear, make a reasonable interpretation`;
 
+  const startTime = Date.now();
   try {
     const { getExeca } = await import('@/lib/execa');
     const execa = await getExeca();
@@ -85,6 +86,25 @@ Rules:
       try {
         const parsed = JSON.parse(stdout);
         stdout = parsed.response ?? parsed.result ?? parsed.text ?? stdout;
+      } catch { /* use raw */ }
+    } else if (mode === 'codex-cli') {
+      const cliPath = await resolveCli('codex');
+      if (!cliPath) return NextResponse.json({ error: 'Codex CLI not found', durationMs: Date.now() - startTime }, { status: 500 });
+      const result = await execa(cliPath, ['exec', prompt, '--full-auto', '--json'], {
+        timeout: 60_000, reject: false, env: { ...process.env },
+      }) as { stdout: string };
+      stdout = result.stdout;
+      try {
+        const lines = stdout.trim().split('\n').filter(Boolean);
+        for (const line of lines.reverse()) {
+          try {
+            const parsed = JSON.parse(line);
+            if (parsed.result || parsed.text) {
+              stdout = parsed.result ?? parsed.text ?? stdout;
+              break;
+            }
+          } catch { continue; }
+        }
       } catch { /* use raw */ }
     } else if (mode === 'api') {
       const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -141,6 +161,7 @@ Rules:
       summary: result.summary,
       changes: applied,
       cliMode: mode,
+      durationMs: Date.now() - startTime,
     });
   } catch (error) {
     return NextResponse.json(

@@ -123,9 +123,9 @@ export default function HarnessPage() {
 
   // Harness Command state
   const [harnessCommand, setHarnessCommand] = useState('');
-  const [commandCli, setCommandCli] = useState<'claude-cli' | 'gemini-cli' | 'api'>('claude-cli');
+  const [commandCli, setCommandCli] = useState<'claude-cli' | 'gemini-cli' | 'codex-cli' | 'api'>('claude-cli');
   const [commandLoading, setCommandLoading] = useState(false);
-  const [commandResult, setCommandResult] = useState<{ summary: string; changes: string[] } | null>(null);
+  const [commandResult, setCommandResult] = useState<{ summary: string; changes: string[]; cliMode?: string; durationMs?: number } | null>(null);
 
   // Scope selector
   const [projects, setProjects] = useState<Project[]>([]);
@@ -401,11 +401,12 @@ export default function HarnessPage() {
               />
               <select
                 value={commandCli}
-                onChange={e => setCommandCli(e.target.value as 'claude-cli' | 'gemini-cli' | 'api')}
+                onChange={e => setCommandCli(e.target.value as 'claude-cli' | 'gemini-cli' | 'codex-cli' | 'api')}
                 className="px-2 py-2 bg-gray-800 border border-gray-700 rounded-lg text-xs text-gray-300"
               >
                 <option value="claude-cli">Claude CLI</option>
                 <option value="gemini-cli">Gemini CLI</option>
+                <option value="codex-cli">Codex CLI</option>
                 <option value="api">Claude API</option>
               </select>
               <button
@@ -417,12 +418,40 @@ export default function HarnessPage() {
               </button>
             </div>
 
-            {commandResult && (
-              <div className="mt-2 p-2 bg-emerald-900/20 border border-emerald-800/50 rounded-lg text-xs">
-                <p className="text-emerald-400 mb-1">{commandResult.summary}</p>
-                {commandResult.changes.map((c, i) => (
-                  <p key={i} className="text-gray-400">• {c}</p>
-                ))}
+            {commandLoading && (
+              <div className="mt-2 p-3 bg-gray-800/50 border border-gray-700 rounded-lg">
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="animate-pulse text-indigo-400">●</span>
+                  <span className="text-gray-300">{commandCli}에 요청 중...</span>
+                </div>
+              </div>
+            )}
+
+            {!commandLoading && commandResult && (
+              <div className={`mt-2 p-3 border rounded-lg ${
+                commandResult.summary?.startsWith('Error')
+                  ? 'bg-red-900/20 border-red-800/50'
+                  : 'bg-emerald-900/20 border-emerald-800/50'
+              }`}>
+                <div className="flex items-center justify-between mb-1">
+                  <span className={`text-xs font-medium ${
+                    commandResult.summary?.startsWith('Error') ? 'text-red-400' : 'text-emerald-400'
+                  }`}>
+                    {commandResult.summary?.startsWith('Error') ? '✗ 실패' : '✓ 완료'}
+                  </span>
+                  <div className="flex items-center gap-2 text-[10px] text-gray-500">
+                    {commandResult.cliMode && <span>{commandResult.cliMode}</span>}
+                    {commandResult.durationMs && <span>{(commandResult.durationMs / 1000).toFixed(1)}s</span>}
+                  </div>
+                </div>
+                <p className="text-xs text-gray-300 mb-1">{commandResult.summary}</p>
+                {commandResult.changes.length > 0 && (
+                  <div className="text-[10px] text-gray-500 space-y-0.5">
+                    {commandResult.changes.map((c: string, i: number) => (
+                      <p key={i}>• {c}</p>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>

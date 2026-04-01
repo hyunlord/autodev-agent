@@ -41,6 +41,13 @@ export const PlanSchema = z.object({
 
 export type Plan = z.infer<typeof PlanSchema>;
 
+export interface PlanResult {
+  plan: Plan;
+  costUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+}
+
 // ─── Mode A: Planning via Claude CLI ─────────────────────────
 
 async function planViaCliAgent(
@@ -50,7 +57,7 @@ async function planViaCliAgent(
   workspaceContext?: string,
   workspaceDir?: string,
   systemPrompt?: string | null,
-): Promise<Plan> {
+): Promise<PlanResult> {
   onProgress?.('Generating plan via coding agent CLI...');
 
   const projectContext = projectConfig
@@ -110,7 +117,14 @@ async function planViaCliAgent(
   const plan = PlanSchema.parse(parsed);
   onProgress?.(`Planning output: ${cleaned.length} chars, parsed successfully`);
   onProgress?.(`Plan ready: ${plan.summary}`);
-  return plan;
+  const estimatedInputTokens = Math.ceil(planPrompt.length / 4);
+  const estimatedOutputTokens = Math.ceil(cleaned.length / 4);
+  return {
+    plan,
+    costUsd: (estimatedInputTokens / 1_000_000) * 3.0 + (estimatedOutputTokens / 1_000_000) * 15.0,
+    inputTokens: estimatedInputTokens,
+    outputTokens: estimatedOutputTokens,
+  };
 }
 
 // ─── Mode A2: Planning via Gemini CLI ────────────────────────
@@ -122,7 +136,7 @@ async function planViaGeminiCli(
   workspaceContext?: string,
   workspaceDir?: string,
   systemPrompt?: string | null,
-): Promise<Plan> {
+): Promise<PlanResult> {
   onProgress?.('Generating plan via Gemini CLI...');
 
   const projectContext = projectConfig
@@ -178,7 +192,92 @@ async function planViaGeminiCli(
   const plan = PlanSchema.parse(parsed);
   onProgress?.(`Planning output: ${jsonMatch[0].length} chars, parsed successfully`);
   onProgress?.(`Plan ready: ${plan.summary}`);
-  return plan;
+  const estimatedInputTokens = Math.ceil(planPrompt.length / 4);
+  const estimatedOutputTokens = Math.ceil(jsonMatch[0].length / 4);
+  return {
+    plan,
+    costUsd: (estimatedInputTokens / 1_000_000) * 1.25 + (estimatedOutputTokens / 1_000_000) * 10.0,
+    inputTokens: estimatedInputTokens,
+    outputTokens: estimatedOutputTokens,
+  };
+}
+
+// ─── Mode A3: Planning via Codex CLI ─────────────────────────
+
+async function planViaCodexCli(
+  userPrompt: string,
+  projectConfig: ProjectConfig | null,
+  onProgress?: (msg: string) => void,
+  workspaceContext?: string,
+  workspaceDir?: string,
+  systemPrompt?: string | null,
+): Promise<PlanResult> {
+  onProgress?.('Generating plan via Codex CLI...');
+
+  const projectContext = projectConfig
+    ? `Project: ${projectConfig.displayName} (${projectConfig.language}), build: ${projectConfig.buildCmd ?? 'none'}, dev: ${projectConfig.devCmd}, port: ${projectConfig.defaultPort ?? 'none'}`
+    : 'Project type: unknown';
+
+  const plannerPrompt = loadPrompt('planner', workspaceDir, {
+    projectContext,
+    workspaceContext: workspaceContext ?? 'No files yet (empty workspace).',
+    userPrompt,
+    projectType: projectConfig?.type ?? 'unknown',
+  });
+  onProgress?.(`Planner prompt: ${plannerPrompt.source}${plannerPrompt.filePath ? ` (${plannerPrompt.filePath})` : ' (built-in)'}`);
+
+  const planPrompt = systemPrompt ? `${systemPrompt}\n\n${plannerPrompt.content}` : plannerPrompt.content;
+
+  const { getExeca } = await import('../lib/execa');
+  const execa = await getExeca();
+  const codexPath = await resolveCli('codex');
+  if (!codexPath) {
+    throw new Error('Codex CLI not found');
+  }
+
+  const result = await execa(codexPath, [
+    'exec', planPrompt, '--full-auto', '--json',
+  ], {
+    cwd: workspaceDir,
+    timeout: 120_000,
+    reject: false,
+    env: { ...process.env },
+  });
+
+  if (result.exitCode !== 0) {
+    throw new Error(`Codex CLI planning failed (exit ${result.exitCode}): ${result.stderr?.slice(0, 500)}`);
+  }
+
+  let stdout = result.stdout;
+  try {
+    const lines = stdout.trim().split('\n').filter(Boolean);
+    for (const line of lines.reverse()) {
+      try {
+        const parsed = JSON.parse(line);
+        if (parsed.result || parsed.text) {
+          stdout = parsed.result ?? parsed.text ?? stdout;
+          break;
+        }
+      } catch { continue; }
+    }
+  } catch { /* use raw */ }
+
+  const cleaned = stdout.replace(/^```(?:json)?\n?/m, '').replace(/\n?```$/m, '').trim();
+  const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error('Failed to extract JSON from Codex CLI output');
+
+  const parsed = JSON.parse(jsonMatch[0]);
+  const plan = PlanSchema.parse(parsed);
+  onProgress?.(`Planning output: ${jsonMatch[0].length} chars, parsed successfully`);
+  onProgress?.(`Plan ready: ${plan.summary}`);
+  const estimatedInputTokens = Math.ceil(planPrompt.length / 4);
+  const estimatedOutputTokens = Math.ceil(jsonMatch[0].length / 4);
+  return {
+    plan,
+    costUsd: (estimatedInputTokens / 1_000_000) * 1.10 + (estimatedOutputTokens / 1_000_000) * 4.40,
+    inputTokens: estimatedInputTokens,
+    outputTokens: estimatedOutputTokens,
+  };
 }
 
 // ─── Mode B: Manual Planning ──────────────────────────────────
@@ -187,7 +286,7 @@ function planFromManualInput(
   codingPrompt: string,
   verificationChecklist: string,
   onProgress?: (msg: string) => void,
-): Plan {
+): PlanResult {
   onProgress?.('Using manually provided plan...');
 
   const lines = verificationChecklist
@@ -219,7 +318,7 @@ function planFromManualInput(
   };
 
   onProgress?.('Manual plan loaded');
-  return plan;
+  return { plan, costUsd: 0, inputTokens: 0, outputTokens: 0 };
 }
 
 function guessVerificationType(description: string): string {
@@ -242,7 +341,7 @@ async function planViaApi(
   onProgress?: (msg: string) => void,
   workspaceContext?: string,
   systemPrompt?: string | null,
-): Promise<Plan> {
+): Promise<PlanResult> {
   const Anthropic = (await import('@anthropic-ai/sdk')).default;
   const anthropic = new Anthropic();
 
@@ -288,7 +387,10 @@ async function planViaApi(
 
   const plan = PlanSchema.parse(parsed);
   onProgress?.(`Plan ready: ${plan.summary}`);
-  return plan;
+  const inputTokens = response.usage?.input_tokens ?? 0;
+  const outputTokens = response.usage?.output_tokens ?? 0;
+  const costUsd = (inputTokens / 1_000_000) * 3.0 + (outputTokens / 1_000_000) * 15.0;
+  return { plan, costUsd, inputTokens, outputTokens };
 }
 
 // ─── Main Entry Point ──────────────────────────────────────────
@@ -302,7 +404,7 @@ export async function generatePlan(
   workspaceContext?: string,
   workspaceDir?: string,
   systemPrompt?: string | null,
-): Promise<Plan> {
+): Promise<PlanResult> {
   switch (mode) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     case 'auto' as any:  // backward compat — treat as claude-cli
@@ -311,6 +413,9 @@ export async function generatePlan(
 
     case 'gemini-cli':
       return planViaGeminiCli(userPrompt, projectConfig, onProgress, workspaceContext, workspaceDir, systemPrompt);
+
+    case 'codex-cli':
+      return planViaCodexCli(userPrompt, projectConfig, onProgress, workspaceContext, workspaceDir, systemPrompt);
 
     case 'manual':
       if (!manualInput?.codingPrompt) {

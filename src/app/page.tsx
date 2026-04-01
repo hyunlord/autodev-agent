@@ -40,7 +40,7 @@ const [tasks, setTasks] = useState<Task[]>([]);
   const [prompt, setPrompt] = useState('');
   const [projectDir, setProjectDir] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [planningMode, setPlanningMode] = useState<'claude-cli' | 'gemini-cli' | 'api' | 'manual'>('claude-cli');
+  const [planningMode, setPlanningMode] = useState<'claude-cli' | 'gemini-cli' | 'codex-cli' | 'api' | 'manual'>('claude-cli');
   const [codingPrompt, setCodingPrompt] = useState('');
   const [verificationChecklist, setVerificationChecklist] = useState('');
   const [agents, setAgents] = useState<Array<{ id: string; name: string; available: boolean; path: string | null }>>([]);
@@ -199,6 +199,7 @@ const [tasks, setTasks] = useState<Task[]>([]);
             {([
               { id: 'claude-cli', label: 'Claude CLI' },
               { id: 'gemini-cli', label: 'Gemini CLI' },
+              { id: 'codex-cli', label: 'Codex CLI' },
               { id: 'api', label: 'Claude API' },
               { id: 'manual', label: 'Manual' },
             ] as const).map((mode) => (
@@ -222,6 +223,9 @@ const [tasks, setTasks] = useState<Task[]>([]);
         )}
         {planningMode === 'gemini-cli' && (
           <p className="mt-1 text-xs text-gray-500">Uses Gemini CLI for planning. Faster and cheaper. Run &apos;gemini login&apos; first.</p>
+        )}
+        {planningMode === 'codex-cli' && (
+          <p className="mt-1 text-xs text-gray-500">Uses Codex CLI for planning.</p>
         )}
         {planningMode === 'api' && (
           <p className="mt-1 text-xs text-yellow-500">Uses Claude API directly. Requires ANTHROPIC_API_KEY environment variable.</p>

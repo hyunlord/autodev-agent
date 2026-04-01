@@ -38,8 +38,8 @@ export class GeminiCliAgent implements ICodingAgent {
     }
     // Estimate cost if not provided by CLI (gemini-2.5-pro pricing)
     if (costUsd === 0) {
-      inputTokens = inputTokens || Math.ceil(opts.task.length / 4);
-      outputTokens = outputTokens || Math.ceil(resultText.length / 4);
+      inputTokens = Math.max(inputTokens, Math.ceil(opts.task.length / 4));
+      outputTokens = Math.max(outputTokens, Math.ceil(resultText.length / 4));
       costUsd = (inputTokens / 1_000_000) * 1.25 + (outputTokens / 1_000_000) * 10.0;
     }
     const modifiedFiles = await getModifiedFiles(opts.projectDir);

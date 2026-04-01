@@ -252,7 +252,7 @@ async function runSingleCycle(
   const startTime = Date.now();
 
   // ─── Planning ──────────────────────────────────────────
-  const plan = await generatePlan(
+  const planResult = await generatePlan(
     task.prompt,
     projectConfig,
     (task.planningMode ?? 'auto') as PlanningMode,
@@ -265,6 +265,7 @@ async function runSingleCycle(
     projectDir,
     systemPrompt,
   );
+  const plan = planResult.plan;
 
   emit({ type: 'log', level: 'info', message: `Plan: ${plan.summary}` });
   emit({ type: 'log', level: 'info', message: `Estimated files: ${plan.estimatedFiles.join(', ')}` });
@@ -382,8 +383,20 @@ async function runSingleCycle(
   });
 
   let lastModifiedFiles: string[] = [];
-  let totalCostUsd = 0;
+  let totalCostUsd = planResult.costUsd;
   let lastFailedChecks: Array<{ id: string; description: string; actual?: string }> = [];
+
+  if (planResult.costUsd > 0) {
+    emit({
+      type: 'cost_update',
+      attemptNum: 0,
+      costUsd: planResult.costUsd,
+      totalCostUsd,
+      inputTokens: planResult.inputTokens,
+      outputTokens: planResult.outputTokens,
+      agentId: `planning-${(task as any).planningMode ?? 'claude-cli'}`,
+    });
+  }
 
   for (let attempt = 1; attempt <= config.maxRetries; attempt++) {
     const isRetry = attempt > 1;
