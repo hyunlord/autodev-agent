@@ -61,25 +61,39 @@ lsof -ti:3000 | xargs kill -9 2>/dev/null
 - 타입 에러 = FAIL
 - import 에러 = FAIL
 
-## 자동 실행 규칙
+## Score 기반 검증
 
-이 검증은 모든 코드 변경 후 자동으로 실행되어야 한다.
+### 필수 항목 (0 or 만점 — 부분 점수 없음)
+| 항목 | 배점 | 기준 |
+|------|------|------|
+| Build | 30 | pnpm build exit 0 |
+| TypeScript | 20 | Type error 0건 |
 
-### Quick Verify (매번)
+### 품질 항목 (부분 점수 가능)
+| 항목 | 배점 | 기준 |
+|------|------|------|
+| API Health | 20 | 7개 엔드포인트 200 비율 |
+| UI Pages | 15 | 페이지 접근 가능 비율 |
+| Cross-Check | 15 | 다른 LLM 리뷰 점수 |
+
+### 등급
+- A (90%+): 바로 커밋
+- B (70-89%): 커밋 가능
+- C (50-69%): 수정 후 재검증
+- F (50% 미만): 거부
+
+### Cross-Check 원칙
+자기가 짠 코드를 자기가 검증하지 않는다.
+다른 LLM이 "깨뜨리려고 시도"한다.
+- "코드가 맞아 보인다" → 실행해봐
+- "테스트가 통과한다" → 독립적으로 검증해
+- "아마 괜찮을 것" → 확인 안 된 것은 검증 안 된 것
+
+### 실행 규칙
 ```bash
-pnpm verify
-```
-빌드 + API health check. 15초 이내 완료.
-FAIL이면 커밋하지 않는다.
+# 모든 변경 후:
+pnpm verify          # quick (빌드 + API)
 
-### Full Verify (UI 변경 시 / 커밋 전)
-```bash
-pnpm verify:full
+# 커밋 전:
+pnpm verify:cross    # cross (빌드 + API + UI + 다른 LLM 리뷰)
 ```
-빌드 + API + UI 접근 확인. 30초 이내 완료.
-
-### 규칙
-- 검증을 건너뛰는 것은 허용되지 않는다
-- "사소한 변경"이라도 `pnpm verify`는 반드시 실행한다
-- verify FAIL 상태에서 "완료" 보고는 금지
-- 서버를 띄웠으면 반드시 내린다 (스크립트가 자동 처리)

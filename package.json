@@ -12,6 +12,7 @@
     "start": "next start",
     "verify": "bash scripts/verify.sh quick",
     "verify:full": "bash scripts/verify.sh full",
+    "verify:cross": "bash scripts/verify.sh cross",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio"
