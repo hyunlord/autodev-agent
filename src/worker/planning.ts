@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { ProjectConfig } from '../lib/detection/project-type';
 import type { PlanningMode } from '../lib/types';
 import { resolveCli } from '../lib/cli-resolver';
+import { loadPrompt } from '../lib/harness/prompt-loader';
 
 // ─── Schemas (unchanged) ──────────────────────────────────────
 
@@ -40,99 +41,6 @@ export const PlanSchema = z.object({
 
 export type Plan = z.infer<typeof PlanSchema>;
 
-// ─── Shared Prompt Builder ────────────────────────────────────
-
-function buildPlanPrompt(
-  userPrompt: string,
-  projectContext: string,
-  workspaceContext: string | undefined,
-  projectConfig: ProjectConfig | null,
-  systemPrompt: string | null | undefined,
-): string {
-  const basePlan = `You are a development planning assistant. Generate a JSON plan for modifying an EXISTING project.
-
-## Project Context
-${projectContext}
-
-## Existing Files in Workspace
-${workspaceContext ?? 'No files yet (empty workspace).'}
-
-## Task
-${userPrompt}
-
-## STRICT RULES — VIOLATIONS WILL CAUSE TASK FAILURE
-
-RULE 1 — TECHNOLOGY MATCH:
-- Project type "${projectConfig?.type ?? 'unknown'}" determines what technology to use.
-- "static-html" or "unknown" with only .html/.css/.js files → modify those files directly using plain HTML/CSS/JS. Do NOT use React, Next.js, Vue, or any framework.
-- "nextjs" → modify existing Next.js files (src/app/, etc.)
-- "react" → modify existing React files
-- If the workspace has index.html and no package.json, the ONLY correct approach is to edit index.html.
-
-RULE 2 — NO NEW PROJECTS:
-- NEVER create a new project structure (no npx create-next-app, no npm init, no framework scaffolding).
-- NEVER create src/app/, src/components/, or similar framework directories unless they already exist.
-- Modify ONLY files that already exist, or create new files that match the existing technology.
-
-RULE 3 — FILE PATHS:
-- Use ONLY relative paths (./index.html, ./styles.css).
-- NEVER use absolute paths (/Users/..., /home/...).
-- The coding agent's working directory is already set to the project root.
-
-RULE 4 — CODING PROMPT CONTENT:
-- The codingPrompt must name the EXACT files to modify (from the file list above).
-- If the task says "이 페이지" or "this page", it refers to the existing HTML/page file in the workspace, NOT some external application.
-- Include specific code changes (what to add, where to add it).
-- Tell the agent to keep all existing functionality intact.
-
-RULE 5 — VERIFICATION:
-- If project has no package.json: use file_check ONLY. No build_check, no port_check, no http_check.
-- file_check must use filePath AND expectedText to verify the change was actually made.
-- For HTML files, expectedText should check for the new feature (e.g., a button class, a CSS property).
-
-RULE 6 — LANGUAGE:
-- The "summary" field must be in the SAME language as the user's task description.
-- If the task is in Korean, summary must be in Korean.
-- If the task is in English, summary must be in English.
-- The "codingPrompt" should stay in English (better for coding agents).
-- Verification step descriptions should be in English (for consistency).
-
-Respond with ONLY valid JSON:
-{
-  "summary": "One-line summary",
-  "taskCategory": "html-css",
-  "recommendedAgent": "claude-code",
-  "codingPrompt": "Specific instructions referencing exact files from the workspace",
-  "estimatedFiles": ["index.html"],
-  "verificationSpec": {
-    "steps": [
-      {"id": "v1", "description": "index.html contains dark mode toggle", "type": "file_check", "filePath": "index.html", "expectedText": "dark-mode"}
-    ]
-  }
-}
-
-AGENT RECOMMENDATION:
-Available agents: claude-code, gemini-cli, codex-cli, aider, cline-cli
-Choose the best agent for this task based on these guidelines:
-- "claude-code": Best for complex tasks, multi-file changes, architecture work, debugging. Most capable but slower.
-- "gemini-cli": Good for quick tasks, simple HTML/CSS, documentation, small changes. Fast.
-- "codex-cli": Good for code generation, algorithm implementation, full-stack work. Strong reasoning.
-- "aider": Good for refactoring, code review, incremental changes to existing code.
-- "cline-cli": General purpose, good for varied tasks.
-Set recommendedAgent to the agent id that best fits this specific task.
-
-TASK CATEGORY (set taskCategory):
-- "quick-fix": Typo, one-line change, simple rename
-- "html-css": Web page styling, UI, static HTML work
-- "full-stack": Multi-file, backend+frontend, complex architecture
-- "refactor": Code restructuring without behavior change
-- "new-project": Creating something from scratch
-- "debug": Fixing errors, troubleshooting
-- "docs": Documentation, README, comments`;
-
-  return systemPrompt ? `${systemPrompt}\n\n${basePlan}` : basePlan;
-}
-
 // ─── Mode A: Planning via Claude CLI ─────────────────────────
 
 async function planViaCliAgent(
@@ -149,7 +57,15 @@ async function planViaCliAgent(
     ? `Project: ${projectConfig.displayName} (${projectConfig.language}), build: ${projectConfig.buildCmd ?? 'none'}, dev: ${projectConfig.devCmd}, port: ${projectConfig.defaultPort ?? 'none'}`
     : 'Project type: unknown';
 
-  const planPrompt = buildPlanPrompt(userPrompt, projectContext, workspaceContext, projectConfig, systemPrompt);
+  const plannerPrompt = loadPrompt('planner', workspaceDir, {
+    projectContext,
+    workspaceContext: workspaceContext ?? 'No files yet (empty workspace).',
+    userPrompt,
+    projectType: projectConfig?.type ?? 'unknown',
+  });
+  onProgress?.(`Planner prompt: ${plannerPrompt.source}${plannerPrompt.filePath ? ` (${plannerPrompt.filePath})` : ' (built-in)'}`);
+
+  const planPrompt = systemPrompt ? `${systemPrompt}\n\n${plannerPrompt.content}` : plannerPrompt.content;
 
   const { getExeca } = await import('../lib/execa');
   const execa = await getExeca();
@@ -213,7 +129,15 @@ async function planViaGeminiCli(
     ? `Project: ${projectConfig.displayName} (${projectConfig.language}), build: ${projectConfig.buildCmd ?? 'none'}, dev: ${projectConfig.devCmd}, port: ${projectConfig.defaultPort ?? 'none'}`
     : 'Project type: unknown';
 
-  const planPrompt = buildPlanPrompt(userPrompt, projectContext, workspaceContext, projectConfig, systemPrompt);
+  const plannerPrompt = loadPrompt('planner', workspaceDir, {
+    projectContext,
+    workspaceContext: workspaceContext ?? 'No files yet (empty workspace).',
+    userPrompt,
+    projectType: projectConfig?.type ?? 'unknown',
+  });
+  onProgress?.(`Planner prompt: ${plannerPrompt.source}${plannerPrompt.filePath ? ` (${plannerPrompt.filePath})` : ' (built-in)'}`);
+
+  const planPrompt = systemPrompt ? `${systemPrompt}\n\n${plannerPrompt.content}` : plannerPrompt.content;
 
   const { getExeca } = await import('../lib/execa');
   const execa = await getExeca();
@@ -325,93 +249,30 @@ async function planViaApi(
   onProgress?.('Generating plan via Claude API...');
 
   const projectContext = projectConfig
-    ? `Project type: ${projectConfig.displayName} (${projectConfig.language})
-Build command: ${projectConfig.buildCmd ?? 'none'}
-Dev command: ${projectConfig.devCmd}
-Default port: ${projectConfig.defaultPort ?? 'none'}`
-    : 'Project type: unknown (no project detected)';
+    ? `Project: ${projectConfig.displayName} (${projectConfig.language}), build: ${projectConfig.buildCmd ?? 'none'}, dev: ${projectConfig.devCmd}, port: ${projectConfig.defaultPort ?? 'none'}`
+    : 'Project type: unknown';
+
+  const plannerPrompt = loadPrompt('planner', undefined, {
+    projectContext,
+    workspaceContext: workspaceContext ?? 'No files yet (empty workspace).',
+    userPrompt,
+    projectType: projectConfig?.type ?? 'unknown',
+  });
+  onProgress?.(`Planner prompt: ${plannerPrompt.source}${plannerPrompt.filePath ? ` (${plannerPrompt.filePath})` : ' (built-in)'}`);
+
+  const systemContent = systemPrompt
+    ? `${systemPrompt}\n\nRespond with ONLY the JSON object, no markdown code fences, no explanation.`
+    : 'Respond with ONLY the JSON object, no markdown code fences, no explanation.';
 
   const response = await anthropic.messages.create({
     model: 'claude-sonnet-4-20250514',
     max_tokens: 4096,
     temperature: 0.1,
-    system: `${systemPrompt ? systemPrompt + '\n\n' : ''}You are a development planning assistant. Generate a JSON plan for modifying an EXISTING project.
-
-## STRICT RULES — VIOLATIONS WILL CAUSE TASK FAILURE
-
-RULE 1 — TECHNOLOGY MATCH:
-- The project type is provided in the user message. Match it exactly.
-- "static-html" or "unknown" with .html/.css/.js files → plain HTML/CSS/JS only. NO frameworks.
-- "nextjs" → modify existing Next.js files. "react" → modify existing React files.
-- If the workspace has index.html and no package.json, edit index.html directly.
-
-RULE 2 — NO NEW PROJECTS:
-- NEVER create new project structures. Modify existing files only.
-- NEVER add frameworks that don't already exist in the project.
-
-RULE 3 — FILE PATHS:
-- Use ONLY relative paths. NEVER use absolute paths.
-
-RULE 4 — CODING PROMPT:
-- Name exact files to modify from the workspace file list.
-- "이 페이지" / "this page" = the existing page file in the workspace.
-- Include specific code changes.
-
-RULE 5 — VERIFICATION:
-- No package.json → file_check ONLY (no build_check, port_check, http_check).
-- file_check must include filePath AND expectedText.
-
-RULE 6 — LANGUAGE:
-- "summary" must match the language of the user's task (Korean task → Korean summary, English task → English summary).
-- "codingPrompt" stays in English.
-- Verification descriptions stay in English.
-
-Your response MUST be valid JSON:
-{
-  "summary": "One-line summary",
-  "taskCategory": "html-css",
-  "recommendedAgent": "claude-code",
-  "codingPrompt": "Specific instructions for exact files",
-  "estimatedFiles": ["file.html"],
-  "verificationSpec": {
-    "steps": [
-      {"id": "v1", "description": "what to check", "type": "file_check", "filePath": "file.html", "expectedText": "expected content"}
-    ]
-  }
-}
-
-AGENT RECOMMENDATION:
-Available agents: claude-code, gemini-cli, codex-cli, aider, cline-cli
-Choose the best agent for this task based on these guidelines:
-- "claude-code": Best for complex tasks, multi-file changes, architecture work, debugging. Most capable but slower.
-- "gemini-cli": Good for quick tasks, simple HTML/CSS, documentation, small changes. Fast.
-- "codex-cli": Good for code generation, algorithm implementation, full-stack work. Strong reasoning.
-- "aider": Good for refactoring, code review, incremental changes to existing code.
-- "cline-cli": General purpose, good for varied tasks.
-Set recommendedAgent to the agent id that best fits this specific task.
-
-TASK CATEGORY (set taskCategory):
-- "quick-fix": Typo, one-line change, simple rename
-- "html-css": Web page styling, UI, static HTML work
-- "full-stack": Multi-file, backend+frontend, complex architecture
-- "refactor": Code restructuring without behavior change
-- "new-project": Creating something from scratch
-- "debug": Fixing errors, troubleshooting
-- "docs": Documentation, README, comments
-
-Verification types (use ONLY what's appropriate):
-- file_check — file exists with expected content (ALWAYS use for static HTML projects)
-- build_check — only if package.json exists with build script
-- port_check, http_check, dom_check — only if project has a dev server
-- vlm_check — visual verification via screenshot
-- desktop_check — GUI app screenshot
-- cli_output_check — command output verification
-
-Respond with ONLY the JSON object, no markdown code fences, no explanation.`,
+    system: systemContent,
     messages: [
       {
         role: 'user',
-        content: `Task: ${userPrompt}\n\n${projectContext}${workspaceContext ? `\n${workspaceContext}` : ''}`,
+        content: plannerPrompt.content,
       },
     ],
   });

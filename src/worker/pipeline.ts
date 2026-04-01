@@ -8,6 +8,7 @@ import { detectProjectType, type ProjectConfig } from '../lib/detection/project-
 import { generatePlan } from './planning';
 import { PluginRegistry } from '../lib/plugins/registry';
 import { selectAgent } from '../lib/agent-selector';
+import { loadPrompt } from '../lib/harness/prompt-loader';
 import { RetryController, type AttemptRecord } from './retry';
 import { generateEscalationReport } from './escalation';
 import { loadConfig, type AutoDevConfig } from '../lib/config';
@@ -401,10 +402,10 @@ ${plan.codingPrompt}`;
       emit({ type: 'log', level: 'info', message: `Retry context: ${lastFailedChecks.length} failed checks from previous attempt` });
     }
 
-    const safePrompt = `CRITICAL: Your working directory is ${projectDir}.
-ONLY modify files inside this directory.
-Do NOT navigate to or modify any files outside ${projectDir}.
-All paths must be relative to the current directory.\n\n${codingPrompt}`;
+    const coderPrompt = loadPrompt('coder', projectDir, { projectDir });
+    emit({ type: 'log', level: 'info', message: `Coder prompt: ${coderPrompt.source}${coderPrompt.filePath ? ` (${coderPrompt.filePath})` : ' (built-in)'}` });
+
+    const safePrompt = `${coderPrompt.content}\n\n${codingPrompt}`;
 
     const codeResult = await agent.invoke({
       task: safePrompt,
