@@ -3,6 +3,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync, appendF
 import { join } from 'path';
 import { homedir } from 'os';
 import { resolveCli } from '@/lib/cli-resolver';
+import { extractJson } from '@/lib/utils/json-extractor';
 
 export async function POST(req: Request) {
   const { command, cliMode, projectDir } = await req.json();
@@ -128,43 +129,14 @@ Rules:
 
     // Parse response — extract JSON from potentially messy CLI output
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let resultJson: any = null;
-
-    // Try 1: direct parse
+    let resultJson: any;
     try {
-      resultJson = JSON.parse(stdout);
-    } catch {
-      // Try 2: strip markdown fences
-      const cleaned = stdout
-        .replace(/^```(?:json)?\s*\n?/gm, '')
-        .replace(/\n?```\s*$/gm, '')
-        .trim();
-      try {
-        resultJson = JSON.parse(cleaned);
-      } catch {
-        // Try 3: find JSON object containing "changes"
-        const jsonMatch = cleaned.match(/\{[\s\S]*"changes"[\s\S]*\}/);
-        if (jsonMatch) {
-          try {
-            resultJson = JSON.parse(jsonMatch[0]);
-          } catch {
-            // Try 4: find last line that parses as JSON with changes/summary
-            const lines = cleaned.split('\n');
-            for (let i = lines.length - 1; i >= 0; i--) {
-              try {
-                const parsed = JSON.parse(lines[i]);
-                if (parsed.changes || parsed.summary) { resultJson = parsed; break; }
-              } catch { continue; }
-            }
-          }
-        }
-      }
-    }
-
-    if (!resultJson || !resultJson.changes) {
+      resultJson = extractJson(stdout, 'changes');
+    } catch (parseError) {
       return NextResponse.json({
         error: 'LLM 응답에서 JSON을 추출하지 못했습니다',
         raw: stdout.slice(0, 300),
+        detail: (parseError as Error).message,
         durationMs: Date.now() - startTime,
       }, { status: 500 });
     }

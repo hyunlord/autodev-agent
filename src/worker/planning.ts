@@ -3,6 +3,7 @@ import type { ProjectConfig } from '../lib/detection/project-type';
 import type { PlanningMode } from '../lib/types';
 import { resolveCli } from '../lib/cli-resolver';
 import { loadPrompt } from '../lib/harness/prompt-loader';
+import { extractJson } from '../lib/utils/json-extractor';
 
 // ─── Schemas (unchanged) ──────────────────────────────────────
 
@@ -100,25 +101,12 @@ async function planViaCliAgent(
     throw new Error(`CLI planning failed (exit ${result.exitCode}):\n${debugOutput}`);
   }
 
-  const cleaned = result.stdout.replace(/^```(?:json)?\n?/m, '').replace(/\n?```$/m, '').trim();
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(cleaned);
-  } catch {
-    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      parsed = JSON.parse(jsonMatch[0]);
-    } else {
-      throw new Error(`CLI returned non-JSON output (${cleaned.length} chars):\n${cleaned.slice(0, 1000)}`);
-    }
-  }
-
+  const parsed = extractJson(result.stdout, 'summary');
   const plan = PlanSchema.parse(parsed);
-  onProgress?.(`Planning output: ${cleaned.length} chars, parsed successfully`);
+  onProgress?.(`Planning output: ${result.stdout.length} chars, parsed successfully`);
   onProgress?.(`Plan ready: ${plan.summary}`);
   const estimatedInputTokens = Math.ceil(planPrompt.length / 4);
-  const estimatedOutputTokens = Math.ceil(cleaned.length / 4);
+  const estimatedOutputTokens = Math.ceil(result.stdout.length / 4);
   return {
     plan,
     costUsd: (estimatedInputTokens / 1_000_000) * 3.0 + (estimatedOutputTokens / 1_000_000) * 15.0,
@@ -184,16 +172,12 @@ async function planViaGeminiCli(
     // Not a JSON envelope, use raw output
   }
 
-  const cleaned = stdout.replace(/^```(?:json)?\n?/m, '').replace(/\n?```$/m, '').trim();
-  const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) throw new Error('Failed to extract JSON from Gemini CLI output');
-
-  const parsed = JSON.parse(jsonMatch[0]);
+  const parsed = extractJson(stdout, 'summary');
   const plan = PlanSchema.parse(parsed);
-  onProgress?.(`Planning output: ${jsonMatch[0].length} chars, parsed successfully`);
+  onProgress?.(`Planning output: ${stdout.length} chars, parsed successfully`);
   onProgress?.(`Plan ready: ${plan.summary}`);
   const estimatedInputTokens = Math.ceil(planPrompt.length / 4);
-  const estimatedOutputTokens = Math.ceil(jsonMatch[0].length / 4);
+  const estimatedOutputTokens = Math.ceil(stdout.length / 4);
   return {
     plan,
     costUsd: (estimatedInputTokens / 1_000_000) * 1.25 + (estimatedOutputTokens / 1_000_000) * 10.0,
@@ -248,30 +232,12 @@ async function planViaCodexCli(
     throw new Error(`Codex CLI planning failed (exit ${result.exitCode}): ${result.stderr?.slice(0, 500)}`);
   }
 
-  let stdout = result.stdout;
-  try {
-    const lines = stdout.trim().split('\n').filter(Boolean);
-    for (const line of lines.reverse()) {
-      try {
-        const parsed = JSON.parse(line);
-        if (parsed.result || parsed.text) {
-          stdout = parsed.result ?? parsed.text ?? stdout;
-          break;
-        }
-      } catch { continue; }
-    }
-  } catch { /* use raw */ }
-
-  const cleaned = stdout.replace(/^```(?:json)?\n?/m, '').replace(/\n?```$/m, '').trim();
-  const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) throw new Error('Failed to extract JSON from Codex CLI output');
-
-  const parsed = JSON.parse(jsonMatch[0]);
+  const parsed = extractJson(result.stdout, 'summary');
   const plan = PlanSchema.parse(parsed);
-  onProgress?.(`Planning output: ${jsonMatch[0].length} chars, parsed successfully`);
+  onProgress?.(`Planning output: ${result.stdout.length} chars, parsed successfully`);
   onProgress?.(`Plan ready: ${plan.summary}`);
   const estimatedInputTokens = Math.ceil(planPrompt.length / 4);
-  const estimatedOutputTokens = Math.ceil(jsonMatch[0].length / 4);
+  const estimatedOutputTokens = Math.ceil(result.stdout.length / 4);
   return {
     plan,
     costUsd: (estimatedInputTokens / 1_000_000) * 1.10 + (estimatedOutputTokens / 1_000_000) * 4.40,
@@ -377,14 +343,7 @@ async function planViaApi(
   });
 
   const text = response.content[0].type === 'text' ? response.content[0].text : '';
-  let parsed: unknown;
-  try {
-    const cleaned = text.replace(/^```(?:json)?\n?/m, '').replace(/\n?```$/m, '').trim();
-    parsed = JSON.parse(cleaned);
-  } catch (e) {
-    throw new Error(`Planning LLM returned invalid JSON: ${text.slice(0, 500)}`);
-  }
-
+  const parsed = extractJson(text, 'summary');
   const plan = PlanSchema.parse(parsed);
   onProgress?.(`Plan ready: ${plan.summary}`);
   const inputTokens = response.usage?.input_tokens ?? 0;
