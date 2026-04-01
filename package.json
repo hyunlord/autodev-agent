@@ -10,6 +10,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "verify": "bash scripts/verify.sh quick",
+    "verify:full": "bash scripts/verify.sh full",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio"

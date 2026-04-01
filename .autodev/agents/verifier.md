@@ -64,7 +64,22 @@ lsof -ti:3000 | xargs kill -9 2>/dev/null
 ## 자동 실행 규칙
 
 이 검증은 모든 코드 변경 후 자동으로 실행되어야 한다.
-Claude Code가 코드를 수정하면, 별도 지시 없이도 이 파일을 읽고 검증을 수행한다.
 
-검증을 건너뛰는 것은 허용되지 않는다.
-"사소한 변경"이라도 pnpm build는 반드시 실행한다.
+### Quick Verify (매번)
+```bash
+pnpm verify
+```
+빌드 + API health check. 15초 이내 완료.
+FAIL이면 커밋하지 않는다.
+
+### Full Verify (UI 변경 시 / 커밋 전)
+```bash
+pnpm verify:full
+```
+빌드 + API + UI 접근 확인. 30초 이내 완료.
+
+### 규칙
+- 검증을 건너뛰는 것은 허용되지 않는다
+- "사소한 변경"이라도 `pnpm verify`는 반드시 실행한다
+- verify FAIL 상태에서 "완료" 보고는 금지
+- 서버를 띄웠으면 반드시 내린다 (스크립트가 자동 처리)

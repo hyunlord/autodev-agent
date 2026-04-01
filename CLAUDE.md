@@ -130,47 +130,41 @@ GitHub 레포에서 구현 패턴을 검색하거나 이슈/PR을 관리한다.
    - PASS → 완료
    - FAIL → Plan으로 돌아가서 원인 분석 → 재시도 (최대 3회)
 
-### 자동 검증 규칙 (필수)
+### 자동 검증 규칙 — 위반 시 작업 미완료 처리
 
-**모든 코드 변경 후 반드시 아래를 실행한다. 예외 없음.**
+**이 규칙은 선택이 아니다. 모든 코드 변경에 반드시 적용한다.**
 
-#### Step 1: Build Check
-```bash
-pnpm build
-```
-exit code 0이 아니면 즉시 수정한다. 커밋하지 않는다.
+#### 검증 레벨
 
-#### Step 2: Import/Type Check
-- 새로 추가한 import가 존재하는 모듈을 가리키는지 확인
-- TypeScript 타입 에러가 없는지 확인
+| 레벨 | 명령어 | 언제 |
+|------|--------|------|
+| quick | `pnpm verify` | 모든 코드 변경 후 |
+| full | `pnpm verify:full` | 커밋 전, UI 변경 시 |
 
-#### Step 3: Regression Check
-변경한 파일이 기존 기능에 영향을 주는지 확인:
-- API route 변경 → 해당 엔드포인트 curl로 200 확인
-- page.tsx 변경 → pnpm dev 시작 후 Playwright로 페이지 렌더링 확인
-- worker/ 변경 → 작업 생성 → 파이프라인 정상 동작 확인
+#### 절차
 
-#### Step 4: UI Check (UI 변경 시)
-Playwright MCP로 실제 브라우저에서 확인:
-```bash
-pnpm dev &
-DEV_PID=$!
-sleep 5
-```
-- localhost:3000 접속
-- 변경된 요소 렌더링 확인
-- 콘솔 에러 0건 확인
-- 검증 완료 후 서버 정리:
-```bash
-kill $DEV_PID 2>/dev/null
-lsof -ti:3000 | xargs kill -9 2>/dev/null
-```
+1. 코드 수정 완료
+2. `pnpm verify` 실행 (hooks가 자동으로 하지만, 안 됐으면 직접 실행)
+3. PASS 확인
+4. UI 변경이 있었으면 `pnpm verify:full` 추가 실행
+5. 모두 PASS → 커밋 가능
+6. FAIL → 즉시 수정 → 다시 verify → PASS 될 때까지 반복
 
-#### 금지
-- "빌드는 아마 통과할 거야" → 반드시 실행해서 확인
-- "UI는 잘 될 거야" → Playwright로 확인
-- 검증 없이 "완료했습니다" 라고 하지 않는다
-- 서버를 띄웠으면 반드시 내린다
+#### 절대 하지 않는 것
+
+- ❌ "빌드가 통과할 것 같아서" verify 스킵
+- ❌ "문서만 수정했으니까" verify 스킵 — 문서도 `pnpm verify` 실행
+- ❌ "사소한 변경이니까" verify 스킵 — 한 줄 변경도 verify
+- ❌ verify 실패 상태에서 "완료했습니다" 보고
+- ❌ verify 없이 커밋
+
+#### verify 실패 시
+
+1. 에러 메시지를 읽는다
+2. 해당 파일을 수정한다
+3. 다시 `pnpm verify` 실행한다
+4. PASS가 나올 때까지 반복한다
+5. "3번 시도했는데 안 됩니다"는 허용 — 사용자에게 보고
 
 ### Harness 설정 변경 (자연어 제어)
 
