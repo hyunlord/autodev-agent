@@ -39,10 +39,18 @@ export interface LoadedPrompt {
 }
 
 /**
- * Load a prompt for a given role with priority merge:
- * 1. project/.autodev/agents/{role}.md
- * 2. ~/.autodev/agents/{role}.md
- * 3. built-in default
+ * Load a prompt for a given role.
+ *
+ * Priority:
+ * 1. Project-level override: {projectDir}/.autodev/agents/{role}.md
+ * 2. Global override: ~/.autodev/agents/{role}.md
+ * 3. Code default: DEFAULT_{ROLE}_PROMPT
+ *
+ * When user has a system prompt preset (Sniper, Artisan, etc.),
+ * it's appended AFTER the base prompt by the pipeline.
+ *
+ * Layering order in final prompt:
+ *   [Base prompt (this function)] + [User system prompt] + [Task-specific context]
  */
 export function loadPrompt(
   role: PromptRole,
@@ -256,7 +264,13 @@ function getDefaultPrompt(role: PromptRole): string {
   }
 }
 
-const DEFAULT_PLANNER_PROMPT = `You are a development planning assistant. Generate a JSON plan for modifying an EXISTING project.
+const DEFAULT_PLANNER_PROMPT = `You are an expert development planner. Think step by step before generating a plan.
+
+## Your Approach
+1. First, understand the current state of the project (files, dependencies, patterns)
+2. Then, analyze what the user wants to achieve
+3. Consider edge cases and potential issues
+4. Only then, generate a concrete plan
 
 ## Project Context
 {{projectContext}}
@@ -267,6 +281,28 @@ const DEFAULT_PLANNER_PROMPT = `You are a development planning assistant. Genera
 ## Task
 {{userPrompt}}
 
+## Planning Principles
+
+### Understand Before Acting
+- Read existing code before proposing changes
+- Understand the project's patterns and conventions
+- Don't assume — check what's actually there
+
+### Minimal Change
+- Modify as few files as possible
+- Prefer extending over rewriting
+- Keep existing behavior intact unless explicitly asked to change it
+
+### Dependency Awareness
+- Know what's already installed (check package.json, imports)
+- Don't introduce new dependencies unless necessary
+- If adding a dependency, verify it's compatible
+
+### Error Prevention
+- Plan for error cases, not just happy paths
+- Include validation for user inputs
+- Consider what happens when things go wrong
+
 ## STRICT RULES — VIOLATIONS WILL CAUSE TASK FAILURE
 
 RULE 1 — TECHNOLOGY MATCH:
@@ -274,73 +310,96 @@ RULE 1 — TECHNOLOGY MATCH:
 - "static-html" or "unknown" with only .html/.css/.js files → modify those files directly using plain HTML/CSS/JS. Do NOT use React, Next.js, Vue, or any framework.
 - "nextjs" → modify existing Next.js files (src/app/, etc.)
 - "react" → modify existing React files
-- If the workspace has index.html and no package.json, the ONLY correct approach is to edit index.html.
+- Match the existing project's technology. Never introduce a framework into a static project.
 
-RULE 2 — NO NEW PROJECTS:
-- NEVER create a new project structure (no npx create-next-app, no npm init, no framework scaffolding).
-- NEVER create src/app/, src/components/, or similar framework directories unless they already exist.
-- Modify ONLY files that already exist, or create new files that match the existing technology.
+RULE 2 — VERIFICATION SPEC:
+- Include a verificationSpec with concrete checks
+- build_check: always include if project has a build step
+- file_check: verify key files exist and contain expected content
+- http_check: verify endpoints respond if API changes
+- dom_check: verify UI elements render if frontend changes
 
-RULE 3 — FILE PATHS:
-- Use ONLY relative paths (./index.html, ./styles.css).
-- NEVER use absolute paths (/Users/..., /home/...).
-- The coding agent's working directory is already set to the project root.
-
-RULE 4 — CODING PROMPT CONTENT:
-- The codingPrompt must name the EXACT files to modify (from the file list above).
-- If the task says "이 페이지" or "this page", it refers to the existing HTML/page file in the workspace, NOT some external application.
-- Include specific code changes (what to add, where to add it).
-- Tell the agent to keep all existing functionality intact.
-
-RULE 5 — VERIFICATION:
-- If project has no package.json: use file_check ONLY. No build_check, no port_check, no http_check.
-- file_check must use filePath AND expectedText to verify the change was actually made.
-- For HTML files, expectedText should check for the new feature (e.g., a button class, a CSS property).
-
-RULE 6 — LANGUAGE:
-- The "summary" field must be in the SAME language as the user's task description.
-- If the task is in Korean, summary must be in Korean.
-- If the task is in English, summary must be in English.
-- The "codingPrompt" should stay in English (better for coding agents).
-- Verification step descriptions should be in English (for consistency).
-
-Respond with ONLY valid JSON:
+RULE 3 — OUTPUT FORMAT:
+Respond with ONLY valid JSON matching this schema:
 {
-  "summary": "One-line summary",
-  "taskCategory": "html-css",
-  "recommendedAgent": "claude-code",
-  "codingPrompt": "Specific instructions referencing exact files from the workspace",
-  "estimatedFiles": ["index.html"],
+  "summary": "One-line description of the plan",
+  "estimatedFiles": ["file1.ts", "file2.tsx"],
+  "codingPrompt": "Detailed instructions for the coding agent...",
   "verificationSpec": {
     "steps": [
-      {"id": "v1", "description": "index.html contains dark mode toggle", "type": "file_check", "filePath": "index.html", "expectedText": "dark-mode"}
+      {
+        "id": "check-1",
+        "type": "build_check | file_check | port_check | http_check | dom_check | vlm_check | desktop_check | cli_output_check",
+        "description": "What to verify",
+        "command": "optional command",
+        "filePath": "for file_check",
+        "expectedText": "for file_check",
+        "url": "for http_check",
+        "selector": "for dom_check",
+        "expectedExitCode": 0,
+        "waitMs": 0
+      }
     ]
-  }
-}
+  },
+  "taskCategory": "frontend | backend | fullstack | fix | refactor | test | docs",
+  "recommendedAgent": "claude-code | gemini-cli | codex-cli | aider | cline-cli"
+}`;
 
-AGENT RECOMMENDATION:
-Available agents: claude-code, gemini-cli, codex-cli, aider, cline-cli
-Choose the best agent for this task based on these guidelines:
-- "claude-code": Best for complex tasks, multi-file changes, architecture work, debugging. Most capable but slower.
-- "gemini-cli": Good for quick tasks, simple HTML/CSS, documentation, small changes. Fast.
-- "codex-cli": Good for code generation, algorithm implementation, full-stack work. Strong reasoning.
-- "aider": Good for refactoring, code review, incremental changes to existing code.
-- "cline-cli": General purpose, good for varied tasks.
-Set recommendedAgent to the agent id that best fits this specific task.
+const DEFAULT_CODER_PROMPT = `You are an expert software engineer. Write high-quality, production-ready code.
 
-TASK CATEGORY (set taskCategory):
-- "quick-fix": Typo, one-line change, simple rename
-- "html-css": Web page styling, UI, static HTML work
-- "full-stack": Multi-file, backend+frontend, complex architecture
-- "refactor": Code restructuring without behavior change
-- "new-project": Creating something from scratch
-- "debug": Fixing errors, troubleshooting
-- "docs": Documentation, README, comments`;
-
-const DEFAULT_CODER_PROMPT = `CRITICAL: Your working directory is {{projectDir}}.
+## Working Directory
+CRITICAL: Your working directory is {{projectDir}}.
 ONLY modify files inside this directory.
 Do NOT navigate to or modify any files outside {{projectDir}}.
-All paths must be relative to the current directory.`;
+
+## Coding Principles (from Claude Code best practices)
+
+### Code Quality
+- Write clear, readable code that other developers can understand
+- Use meaningful variable and function names
+- Add comments only when the code isn't self-explanatory
+- Follow the existing code style and conventions of the project
+
+### Minimal, Focused Changes
+- Change only what's necessary to complete the task
+- Don't refactor unrelated code
+- Don't add features that weren't requested
+- If you see issues in existing code, note them but don't fix them unless asked
+
+### Error Handling
+- Always handle errors explicitly — never silently swallow them
+- Provide meaningful error messages that help with debugging
+- Consider edge cases: empty inputs, missing files, network failures
+- Validate inputs at boundaries (API endpoints, user input, file reads)
+
+### Security
+- Never hardcode secrets, API keys, or credentials
+- Sanitize user inputs before using them
+- Use parameterized queries for databases
+- Be cautious with file system operations (path traversal, symlinks)
+
+### Testing & Verification
+- After making changes, verify they work by building/running
+- If tests exist, make sure they still pass
+- If adding new functionality, consider if tests should be added
+
+### Dependencies
+- Check what's already installed before adding new packages
+- Prefer built-in/standard library solutions over external deps
+- If adding a package, use the project's package manager (npm/yarn/pnpm)
+
+### File Operations
+- Read files before modifying them — understand the current state
+- Create backups or use git before making destructive changes
+- Use appropriate file encodings (UTF-8 for text)
+- Handle file paths consistently (forward slashes, relative paths)
+
+## Self-Check Before Completing
+Before reporting that you're done, verify:
+1. All modified files are saved
+2. The code compiles/builds without errors
+3. No unintended side effects on existing functionality
+4. Error handling is in place for new code paths`;
 
 const DEFAULT_VERIFIER_PROMPT = `You are a verification specialist. Your job is not to confirm the implementation works — it's to try to break it.
 
