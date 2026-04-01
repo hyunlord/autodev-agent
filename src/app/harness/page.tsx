@@ -2,6 +2,93 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 
+const PIPELINE_STAGES = [
+  {
+    id: 'detect',
+    emoji: '🔍',
+    name: 'Project Detection',
+    description: '프로젝트 타입 감지 (static-html, nextjs, react 등)',
+    agentFile: null as string | null,
+    mcpTools: [] as string[],
+    skippable: false,
+    skipCondition: null as string | null,
+    onFail: null as string | null,
+    nextLabel: '',
+  },
+  {
+    id: 'plan',
+    emoji: '📋',
+    name: 'Planning',
+    description: 'LLM이 구현 계획 생성 (codingPrompt + verificationSpec)',
+    agentFile: 'planner.md',
+    mcpTools: ['context7', 'websearch'],
+    skippable: false,
+    skipCondition: null,
+    onFail: 'task failed',
+    nextLabel: '',
+  },
+  {
+    id: 'review',
+    emoji: '👀',
+    name: 'Plan Review',
+    description: '사용자가 계획을 승인/수정/거절',
+    agentFile: null,
+    mcpTools: [],
+    skippable: true,
+    skipCondition: 'auto-approve 활성화 시',
+    onFail: 'task rejected',
+    nextLabel: 'approved',
+  },
+  {
+    id: 'select',
+    emoji: '🤖',
+    name: 'Agent Selection',
+    description: 'LLM 추천 또는 사용자 선택으로 최적 코딩 에이전트 결정',
+    agentFile: null,
+    mcpTools: [],
+    skippable: false,
+    skipCondition: null,
+    onFail: null,
+    nextLabel: '',
+  },
+  {
+    id: 'code',
+    emoji: '💻',
+    name: 'Coding',
+    description: '선택된 에이전트가 코드 생성/수정',
+    agentFile: 'coder.md',
+    mcpTools: ['codex'],
+    skippable: false,
+    skipCondition: null,
+    onFail: 'retry',
+    nextLabel: '',
+  },
+  {
+    id: 'verify',
+    emoji: '✅',
+    name: 'Verification',
+    description: '파일 체크, 빌드, HTTP, DOM 등 8가지 검증',
+    agentFile: 'verifier.md',
+    mcpTools: ['playwright'],
+    skippable: false,
+    skipCondition: null,
+    onFail: 'retry → escalation',
+    nextLabel: '',
+  },
+  {
+    id: 'complete',
+    emoji: '🎉',
+    name: 'Complete',
+    description: '검증 통과 → 작업 완료',
+    agentFile: 'evaluator.md',
+    mcpTools: [],
+    skippable: false,
+    skipCondition: null,
+    onFail: null,
+    nextLabel: '',
+  },
+];
+
 interface AgentFile {
   role: string;
   content: string;
@@ -25,7 +112,8 @@ interface Project {
 }
 
 export default function HarnessPage() {
-  const [tab, setTab] = useState<'agents' | 'mcp' | 'presets'>('agents');
+  const [tab, setTab] = useState<'pipeline' | 'agents' | 'mcp' | 'presets'>('pipeline');
+  const [selectedStage, setSelectedStage] = useState<string | null>(null);
   const [agents, setAgents] = useState<AgentFile[]>([]);
   const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
   const [editingRole, setEditingRole] = useState<string | null>(null);
@@ -155,7 +243,7 @@ export default function HarnessPage() {
 
       {/* Tabs */}
       <div className="flex gap-1 mb-6">
-        {(['agents', 'mcp', 'presets'] as const).map(t => (
+        {(['pipeline', 'agents', 'mcp', 'presets'] as const).map(t => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -163,10 +251,103 @@ export default function HarnessPage() {
               tab === t ? 'bg-gray-800 text-white' : 'text-gray-500 hover:text-gray-300'
             }`}
           >
-            {t === 'agents' ? 'Agents' : t === 'mcp' ? 'MCP Servers' : 'Presets'}
+            {t === 'pipeline' ? 'Pipeline' : t === 'agents' ? 'Agents' : t === 'mcp' ? 'MCP Servers' : 'Presets'}
           </button>
         ))}
       </div>
+
+      {/* Pipeline Tab */}
+      {tab === 'pipeline' && (
+        <div className="space-y-4">
+          <p className="text-xs text-gray-500 mb-4">
+            파이프라인 실행 흐름. 각 단계를 클릭하면 설정을 볼 수 있습니다.
+          </p>
+
+          <div className="flex flex-col items-center gap-2">
+            {PIPELINE_STAGES.map((stage, i) => (
+              <div key={stage.id} className="w-full max-w-lg">
+                <button
+                  onClick={() => setSelectedStage(selectedStage === stage.id ? null : stage.id)}
+                  className={`w-full text-left px-4 py-3 rounded-xl border transition-colors ${
+                    selectedStage === stage.id
+                      ? 'bg-gray-800 border-gray-600'
+                      : 'bg-gray-900/50 border-gray-800 hover:border-gray-700'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <span className="text-lg">{stage.emoji}</span>
+                      <div>
+                        <p className="text-sm font-medium">{stage.name}</p>
+                        <p className="text-[10px] text-gray-500">{stage.description}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {stage.mcpTools.length > 0 && stage.mcpTools.map(mcp => (
+                        <span key={mcp} className="text-[10px] px-1.5 py-0.5 rounded bg-blue-900/30 text-blue-400">
+                          {mcp}
+                        </span>
+                      ))}
+                      {stage.skippable && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-900/30 text-amber-400">
+                          skippable
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {selectedStage === stage.id && (
+                    <div className="mt-3 pt-3 border-t border-gray-700 text-xs text-gray-400 space-y-2">
+                      <div>
+                        <span className="text-gray-500">Agent prompt: </span>
+                        <span>{stage.agentFile ?? 'N/A'}</span>
+                      </div>
+                      <div>
+                        <span className="text-gray-500">MCP tools: </span>
+                        <span>{stage.mcpTools.length > 0 ? stage.mcpTools.join(', ') : 'None'}</span>
+                      </div>
+                      {stage.skipCondition && (
+                        <div>
+                          <span className="text-gray-500">Skip when: </span>
+                          <span>{stage.skipCondition}</span>
+                        </div>
+                      )}
+                      {stage.onFail && (
+                        <div>
+                          <span className="text-gray-500">On fail: </span>
+                          <span>{stage.onFail}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </button>
+
+                {i < PIPELINE_STAGES.length - 1 && (
+                  <div className="flex justify-center py-1">
+                    <div className="w-px h-4 bg-gray-700" />
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-4 p-4 bg-gray-900/30 border border-gray-800 rounded-xl max-w-lg mx-auto">
+            <p className="text-xs text-gray-500 mb-2">재시도 &amp; 에스컬레이션</p>
+            <div className="text-xs text-gray-400 space-y-1">
+              <p>• Verification 실패 → Coding으로 돌아감 (최대 3회)</p>
+              <p>• 3회 실패 → Escalation 리포트 생성 + 롤백</p>
+              <p>• Auto-cycle: 완료 후 다시 Planning (GOAL_COMPLETE까지)</p>
+            </div>
+          </div>
+
+          <div className="mt-4 p-3 bg-gray-900/30 border border-gray-800 rounded-lg max-w-lg mx-auto">
+            <p className="text-[10px] text-gray-600">
+              파이프라인 흐름을 커스터마이징하려면 .autodev/orchestrator.md 파일을 생성하세요.
+              (현재: 코드 기본값 사용)
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Agents Tab */}
       {tab === 'agents' && (
