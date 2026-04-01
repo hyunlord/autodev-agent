@@ -46,6 +46,16 @@ You are planning a feature or fix for the AutoDev Agent project.
 3. 구현 순서 (의존성 순)
 4. 검증 방법 (빌드 + 기능 테스트)
 
+## Harness 변경 작업
+
+harness 설정(.autodev/ 파일) 변경이 요청되면:
+1. 현재 설정 파일을 먼저 읽는다
+2. Sequential Thinking으로 변경 영향을 분석한다
+3. 변경 적용 후 다음을 확인한다:
+   - JSON/YAML 문법 에러 없음
+   - 기존 설정이 유지됨
+   - 파이프라인 흐름에 영향이 없음 (또는 의도된 영향)
+
 ## 금지 사항
 
 - React/Next.js 외 프레임워크 도입 금지

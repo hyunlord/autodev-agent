@@ -121,6 +121,12 @@ export default function HarnessPage() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
 
+  // Harness Command state
+  const [harnessCommand, setHarnessCommand] = useState('');
+  const [commandCli, setCommandCli] = useState<'claude-cli' | 'gemini-cli' | 'api'>('claude-cli');
+  const [commandLoading, setCommandLoading] = useState(false);
+  const [commandResult, setCommandResult] = useState<{ summary: string; changes: string[] } | null>(null);
+
   // Scope selector
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedScope, setSelectedScope] = useState<string>('global'); // 'global' or projectDir
@@ -197,6 +203,40 @@ export default function HarnessPage() {
     setAgents(data.agents ?? []);
     setMessage(`${role}.md reset to default`);
     setTimeout(() => setMessage(''), 3000);
+  };
+
+  const handleHarnessCommand = async () => {
+    if (!harnessCommand.trim()) return;
+    setCommandLoading(true);
+    setCommandResult(null);
+    try {
+      const res = await fetch('/api/harness/command', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          command: harnessCommand,
+          cliMode: commandCli,
+          projectDir: selectedScope !== 'global' ? selectedScope : undefined,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setCommandResult({ summary: data.summary, changes: data.changes });
+        setHarnessCommand('');
+        const params = selectedScope !== 'global'
+          ? `?projectDir=${encodeURIComponent(selectedScope)}`
+          : '';
+        fetch(`/api/harness${params}`)
+          .then(r => r.json())
+          .then(d => setAgents(d.agents ?? []))
+          .catch(() => {});
+      } else {
+        setCommandResult({ summary: `Error: ${data.error}`, changes: [] });
+      }
+    } catch {
+      setCommandResult({ summary: 'Request failed', changes: [] });
+    }
+    setCommandLoading(false);
   };
 
   const sourceColor = (source: string) => {
@@ -345,6 +385,46 @@ export default function HarnessPage() {
               파이프라인 흐름을 커스터마이징하려면 .autodev/orchestrator.md 파일을 생성하세요.
               (현재: 코드 기본값 사용)
             </p>
+          </div>
+
+          {/* Harness Command */}
+          <div className="mt-6 p-4 bg-gray-900/50 border border-gray-800 rounded-xl max-w-lg mx-auto">
+            <p className="text-xs text-gray-500 mb-3">자연어로 harness 설정 변경</p>
+            <div className="flex gap-2 mb-2">
+              <input
+                type="text"
+                value={harnessCommand}
+                onChange={e => setHarnessCommand(e.target.value)}
+                placeholder="예: Planning에서 context7 빼고 firecrawl 추가해줘"
+                className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-200 placeholder-gray-600 outline-none focus:border-indigo-600"
+                onKeyDown={e => { if (e.key === 'Enter' && harnessCommand.trim()) handleHarnessCommand(); }}
+              />
+              <select
+                value={commandCli}
+                onChange={e => setCommandCli(e.target.value as 'claude-cli' | 'gemini-cli' | 'api')}
+                className="px-2 py-2 bg-gray-800 border border-gray-700 rounded-lg text-xs text-gray-300"
+              >
+                <option value="claude-cli">Claude CLI</option>
+                <option value="gemini-cli">Gemini CLI</option>
+                <option value="api">Claude API</option>
+              </select>
+              <button
+                onClick={handleHarnessCommand}
+                disabled={commandLoading || !harnessCommand.trim()}
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs rounded-lg disabled:opacity-50"
+              >
+                {commandLoading ? '...' : 'Apply'}
+              </button>
+            </div>
+
+            {commandResult && (
+              <div className="mt-2 p-2 bg-emerald-900/20 border border-emerald-800/50 rounded-lg text-xs">
+                <p className="text-emerald-400 mb-1">{commandResult.summary}</p>
+                {commandResult.changes.map((c, i) => (
+                  <p key={i} className="text-gray-400">• {c}</p>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
