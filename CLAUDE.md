@@ -126,9 +126,51 @@ GitHub 레포에서 구현 패턴을 검색하거나 이슈/PR을 관리한다.
 
 1. **Plan**: Sequential Thinking으로 계획 수립. agents/planner.md 참조.
 2. **Code**: Context7로 문서 확인하면서 코드 작성. agents/coder.md 참조.
-3. **Verify**: pnpm build + Playwright로 검증. agents/verifier.md 참조.
+3. **Verify**: 코드 수정이 끝나면 반드시 agents/verifier.md를 읽고 검증을 실행한다.
    - PASS → 완료
    - FAIL → Plan으로 돌아가서 원인 분석 → 재시도 (최대 3회)
+
+### 자동 검증 규칙 (필수)
+
+**모든 코드 변경 후 반드시 아래를 실행한다. 예외 없음.**
+
+#### Step 1: Build Check
+```bash
+pnpm build
+```
+exit code 0이 아니면 즉시 수정한다. 커밋하지 않는다.
+
+#### Step 2: Import/Type Check
+- 새로 추가한 import가 존재하는 모듈을 가리키는지 확인
+- TypeScript 타입 에러가 없는지 확인
+
+#### Step 3: Regression Check
+변경한 파일이 기존 기능에 영향을 주는지 확인:
+- API route 변경 → 해당 엔드포인트 curl로 200 확인
+- page.tsx 변경 → pnpm dev 시작 후 Playwright로 페이지 렌더링 확인
+- worker/ 변경 → 작업 생성 → 파이프라인 정상 동작 확인
+
+#### Step 4: UI Check (UI 변경 시)
+Playwright MCP로 실제 브라우저에서 확인:
+```bash
+pnpm dev &
+DEV_PID=$!
+sleep 5
+```
+- localhost:3000 접속
+- 변경된 요소 렌더링 확인
+- 콘솔 에러 0건 확인
+- 검증 완료 후 서버 정리:
+```bash
+kill $DEV_PID 2>/dev/null
+lsof -ti:3000 | xargs kill -9 2>/dev/null
+```
+
+#### 금지
+- "빌드는 아마 통과할 거야" → 반드시 실행해서 확인
+- "UI는 잘 될 거야" → Playwright로 확인
+- 검증 없이 "완료했습니다" 라고 하지 않는다
+- 서버를 띄웠으면 반드시 내린다
 
 ## 현재 진행 상황
 
