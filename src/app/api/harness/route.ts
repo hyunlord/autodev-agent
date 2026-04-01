@@ -5,11 +5,14 @@ import { loadPrompt, loadMcpConfig, type PromptRole } from '@/lib/harness/prompt
 import { NextResponse } from 'next/server';
 
 // GET — load all harness files
-export async function GET() {
+export async function GET(req: Request) {
+  const url = new URL(req.url);
+  const projectDir = url.searchParams.get('projectDir') ?? undefined;
+
   const roles: PromptRole[] = ['planner', 'coder', 'verifier', 'evaluator'];
 
   const agents = roles.map(role => {
-    const loaded = loadPrompt(role);
+    const loaded = loadPrompt(role, projectDir);
     return {
       role,
       content: loaded.rawContent,
@@ -18,7 +21,7 @@ export async function GET() {
     };
   });
 
-  const mcpConfig = loadMcpConfig();
+  const mcpConfig = loadMcpConfig(projectDir);
 
   return NextResponse.json({ agents, mcpConfig });
 }

@@ -19,6 +19,11 @@ interface McpServer {
   stages: string[];
 }
 
+interface Project {
+  projectDir: string;
+  taskCount: number;
+}
+
 export default function HarnessPage() {
   const [tab, setTab] = useState<'agents' | 'mcp' | 'presets'>('agents');
   const [agents, setAgents] = useState<AgentFile[]>([]);
@@ -28,19 +33,30 @@ export default function HarnessPage() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
 
-  useEffect(() => {
-    fetch('/api/harness')
-      .then(r => r.json())
-      .then(data => {
-        setAgents(data.agents ?? []);
-      })
-      .catch(() => {});
+  // Scope selector
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [selectedScope, setSelectedScope] = useState<string>('global'); // 'global' or projectDir
 
+  // Load project list
+  useEffect(() => {
+    fetch('/api/projects').then(r => r.json()).then(setProjects).catch(() => {});
+  }, []);
+
+  // Load agents based on scope
+  useEffect(() => {
+    const params = selectedScope !== 'global'
+      ? `?projectDir=${encodeURIComponent(selectedScope)}`
+      : '';
+    fetch(`/api/harness${params}`)
+      .then(r => r.json())
+      .then(data => setAgents(data.agents ?? []))
+      .catch(() => {});
+  }, [selectedScope]);
+
+  useEffect(() => {
     fetch('/api/mcp')
       .then(r => r.json())
-      .then(data => {
-        setMcpServers(data.servers ?? []);
-      })
+      .then(data => setMcpServers(data.servers ?? []))
       .catch(() => {});
   }, []);
 
@@ -53,10 +69,17 @@ export default function HarnessPage() {
     if (!editingRole) return;
     setSaving(true);
     try {
+      const isProject = selectedScope !== 'global';
       const res = await fetch('/api/harness', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'agent', role: editingRole, content: editContent, scope: 'global' }),
+        body: JSON.stringify({
+          type: 'agent',
+          role: editingRole,
+          content: editContent,
+          scope: isProject ? 'project' : 'global',
+          projectDir: isProject ? selectedScope : undefined,
+        }),
       });
       const data = await res.json();
       if (data.success) {
@@ -75,8 +98,13 @@ export default function HarnessPage() {
 
   const handleReset = async (role: string) => {
     if (!confirm(`Reset ${role}.md to default? Your customizations will be deleted.`)) return;
-    await fetch(`/api/harness?role=${role}&scope=global`, { method: 'DELETE' });
-    const res = await fetch('/api/harness');
+    const isProject = selectedScope !== 'global';
+    const params = new URLSearchParams({ role, scope: isProject ? 'project' : 'global' });
+    if (isProject) params.set('projectDir', selectedScope);
+    await fetch(`/api/harness?${params}`, { method: 'DELETE' });
+    // Reload
+    const fetchParams = isProject ? `?projectDir=${encodeURIComponent(selectedScope)}` : '';
+    const res = await fetch(`/api/harness${fetchParams}`);
     const data = await res.json();
     setAgents(data.agents ?? []);
     setMessage(`${role}.md reset to default`);
@@ -107,6 +135,23 @@ export default function HarnessPage() {
           {message}
         </div>
       )}
+
+      {/* Scope Selector */}
+      <div className="flex items-center gap-3 mb-4">
+        <label className="text-xs text-gray-500">Scope:</label>
+        <select
+          value={selectedScope}
+          onChange={e => setSelectedScope(e.target.value)}
+          className="px-3 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-300 focus:outline-none focus:border-indigo-500"
+        >
+          <option value="global">Global (~/.autodev/)</option>
+          {projects.map(p => (
+            <option key={p.projectDir} value={p.projectDir}>
+              {p.projectDir.split('/').slice(-2).join('/')} ({p.taskCount} tasks)
+            </option>
+          ))}
+        </select>
+      </div>
 
       {/* Tabs */}
       <div className="flex gap-1 mb-6">
@@ -226,7 +271,14 @@ export default function HarnessPage() {
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-8">
           <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-3xl max-h-[80vh] flex flex-col">
             <div className="flex items-center justify-between px-5 py-3 border-b border-gray-800">
-              <h3 className="text-sm font-semibold">{editingRole}.md</h3>
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-semibold">{editingRole}.md</h3>
+                <span className={`text-[10px] px-2 py-0.5 rounded-full ${
+                  selectedScope !== 'global' ? 'text-teal-400 bg-teal-900/30' : 'text-purple-400 bg-purple-900/30'
+                }`}>
+                  → {selectedScope !== 'global' ? 'project' : 'global'}
+                </span>
+              </div>
               <div className="flex gap-2">
                 <button
                   onClick={() => setEditingRole(null)}
@@ -239,7 +291,7 @@ export default function HarnessPage() {
                   disabled={saving}
                   className="px-4 py-1 text-xs bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg disabled:opacity-50"
                 >
-                  {saving ? 'Saving...' : 'Save'}
+                  {saving ? 'Saving...' : selectedScope !== 'global' ? 'Save to Project' : 'Save'}
                 </button>
               </div>
             </div>

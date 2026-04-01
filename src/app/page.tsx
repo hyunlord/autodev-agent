@@ -55,6 +55,7 @@ const [tasks, setTasks] = useState<Task[]>([]);
     totals: { costUsd: number; tokens: number; attempts: number };
     byAgent: Array<{ agentId: string; totalCost: number; totalTokens: number; attemptCount: number }>;
   } | null>(null);
+  const [harnessPreview, setHarnessPreview] = useState<Array<{ role: string; source: string }> | null>(null);
 
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
@@ -89,6 +90,17 @@ const [tasks, setTasks] = useState<Task[]>([]);
   useEffect(() => {
     fetch('/api/usage').then(r => r.json()).then(setUsage).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (projectDir) {
+      fetch(`/api/harness?projectDir=${encodeURIComponent(projectDir)}`)
+        .then(r => r.json())
+        .then(data => setHarnessPreview(data.agents?.map((a: { role: string; source: string }) => ({ role: a.role, source: a.source })) ?? null))
+        .catch(() => setHarnessPreview(null));
+    } else {
+      setHarnessPreview(null);
+    }
+  }, [projectDir]);
 
   const handleSubmit = async () => {
     if (!prompt.trim()) return;
@@ -253,6 +265,20 @@ const [tasks, setTasks] = useState<Task[]>([]);
             ))}
           </select>
         </div>
+        {harnessPreview && (
+          <div className="flex items-center gap-2 mt-2">
+            <span className="text-xs text-gray-500">Harness:</span>
+            {harnessPreview.map(h => (
+              <span key={h.role} className={`text-[10px] px-1.5 py-0.5 rounded ${
+                h.source === 'project' ? 'bg-teal-900/30 text-teal-400' :
+                h.source === 'global' ? 'bg-purple-900/30 text-purple-400' :
+                'bg-gray-800 text-gray-500'
+              }`}>
+                {h.role}: {h.source}
+              </span>
+            ))}
+          </div>
+        )}
         <div className="mt-3 flex items-center gap-2">
           <label className="flex items-center gap-2 cursor-pointer">
             <input

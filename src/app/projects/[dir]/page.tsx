@@ -28,6 +28,13 @@ interface FileEntry {
   size?: number;
 }
 
+interface AgentFile {
+  role: string;
+  content: string;
+  source: string;
+  filePath?: string;
+}
+
 export default function ProjectPage({ params }: { params: Promise<{ dir: string }> }) {
   const { dir } = use(params);
   const projectDir = atob(decodeURIComponent(dir));
@@ -38,6 +45,15 @@ export default function ProjectPage({ params }: { params: Promise<{ dir: string 
   const [previewFile, setPreviewFile] = useState<{ path: string; content: string; language: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
   const router = useRouter();
+
+  // Tabs
+  const [activeTab, setActiveTab] = useState<'tasks' | 'files' | 'harness'>('tasks');
+
+  // Harness state
+  const [harnessAgents, setHarnessAgents] = useState<AgentFile[]>([]);
+  const [editingAgent, setEditingAgent] = useState<string | null>(null);
+  const [editContent, setEditContent] = useState('');
+  const [harnessMessage, setHarnessMessage] = useState('');
 
   useEffect(() => {
     fetch('/api/projects')
@@ -62,6 +78,15 @@ export default function ProjectPage({ params }: { params: Promise<{ dir: string 
       .then(setFiles)
       .catch(() => setFiles([]));
   }, [projectDir]);
+
+  useEffect(() => {
+    if (activeTab === 'harness') {
+      fetch(`/api/harness?projectDir=${encodeURIComponent(projectDir)}`)
+        .then(r => r.json())
+        .then(data => setHarnessAgents(data.agents ?? []))
+        .catch(() => {});
+    }
+  }, [activeTab, projectDir]);
 
   const handleDeleteTask = async (taskId: string) => {
     if (!confirm('Delete this task?')) return;
@@ -93,6 +118,43 @@ export default function ProjectPage({ params }: { params: Promise<{ dir: string 
       const res = await fetch(`/api/files?projectDir=${encodeURIComponent(projectDir)}&file=${encodeURIComponent(filePath)}`);
       if (res.ok) setPreviewFile(await res.json());
     } catch {}
+  };
+
+  const handleSaveAgent = async () => {
+    if (!editingAgent) return;
+    await fetch('/api/harness', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'agent',
+        role: editingAgent,
+        content: editContent,
+        scope: 'project',
+        projectDir,
+      }),
+    });
+    setEditingAgent(null);
+    setHarnessMessage(`Saved ${editingAgent}.md → project (.autodev/agents/)`);
+    setTimeout(() => setHarnessMessage(''), 3000);
+    const res = await fetch(`/api/harness?projectDir=${encodeURIComponent(projectDir)}`);
+    const data = await res.json();
+    setHarnessAgents(data.agents ?? []);
+  };
+
+  const handleResetAgent = async (role: string) => {
+    if (!confirm(`Reset ${role}.md? Will fall back to global or default.`)) return;
+    await fetch(`/api/harness?role=${role}&scope=project&projectDir=${encodeURIComponent(projectDir)}`, { method: 'DELETE' });
+    const res = await fetch(`/api/harness?projectDir=${encodeURIComponent(projectDir)}`);
+    const data = await res.json();
+    setHarnessAgents(data.agents ?? []);
+    setHarnessMessage(`${role}.md reset`);
+    setTimeout(() => setHarnessMessage(''), 3000);
+  };
+
+  const sourceColor = (source: string) => {
+    if (source === 'project') return 'text-teal-400 bg-teal-900/30';
+    if (source === 'global') return 'text-purple-400 bg-purple-900/30';
+    return 'text-gray-400 bg-gray-800';
   };
 
   return (
@@ -154,8 +216,24 @@ export default function ProjectPage({ params }: { params: Promise<{ dir: string 
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2">
+      {/* Tabs */}
+      <div className="flex gap-1 mb-4">
+        {(['tasks', 'files', 'harness'] as const).map(t => (
+          <button
+            key={t}
+            onClick={() => setActiveTab(t)}
+            className={`px-4 py-2 text-sm rounded-lg transition-colors ${
+              activeTab === t ? 'bg-gray-800 text-white' : 'text-gray-500 hover:text-gray-300'
+            }`}
+          >
+            {t === 'tasks' ? `Tasks (${projectTasks.length})` : t === 'files' ? `Files (${files.length})` : 'Harness'}
+          </button>
+        ))}
+      </div>
+
+      {/* Tasks Tab */}
+      {activeTab === 'tasks' && (
+        <div>
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-lg font-semibold">Task History</h2>
             {projectTasks.length > 0 && (
@@ -198,7 +276,10 @@ export default function ProjectPage({ params }: { params: Promise<{ dir: string 
             )}
           </div>
         </div>
+      )}
 
+      {/* Files Tab */}
+      {activeTab === 'files' && (
         <div>
           <h2 className="text-lg font-semibold mb-3">Files</h2>
           <div className="bg-gray-900 rounded-lg border border-gray-800 overflow-hidden">
@@ -237,7 +318,89 @@ export default function ProjectPage({ params }: { params: Promise<{ dir: string 
             </div>
           )}
         </div>
-      </div>
+      )}
+
+      {/* Harness Tab */}
+      {activeTab === 'harness' && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs text-gray-500">
+              프로젝트별 에이전트 프롬프트 설정. 수정하면 이 프로젝트의 .autodev/agents/에 저장됩니다.
+            </p>
+          </div>
+
+          {harnessMessage && (
+            <div className="px-3 py-2 bg-emerald-900/30 text-emerald-400 text-sm rounded-lg border border-emerald-800">
+              {harnessMessage}
+            </div>
+          )}
+
+          {harnessAgents.map(agent => (
+            <div key={agent.role} className="bg-gray-900/50 border border-gray-800 rounded-xl p-4">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-3">
+                  <h3 className="text-sm font-semibold">{agent.role}.md</h3>
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full ${sourceColor(agent.source)}`}>
+                    {agent.source}
+                  </span>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => { setEditingAgent(agent.role); setEditContent(agent.content); }}
+                    className="px-3 py-1 text-xs bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg"
+                  >
+                    Edit
+                  </button>
+                  {agent.source === 'project' && (
+                    <button
+                      onClick={() => handleResetAgent(agent.role)}
+                      className="px-3 py-1 text-xs text-red-400 hover:bg-red-900/20 rounded-lg"
+                    >
+                      Reset
+                    </button>
+                  )}
+                </div>
+              </div>
+              <pre className="text-xs text-gray-400 max-h-24 overflow-y-auto whitespace-pre-wrap bg-gray-950 rounded-lg p-3">
+                {agent.content.slice(0, 300)}{agent.content.length > 300 ? '...' : ''}
+              </pre>
+            </div>
+          ))}
+
+          {/* Edit Modal */}
+          {editingAgent && (
+            <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-8">
+              <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-3xl max-h-[80vh] flex flex-col">
+                <div className="flex items-center justify-between px-5 py-3 border-b border-gray-800">
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-semibold">{editingAgent}.md</h3>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full text-teal-400 bg-teal-900/30">
+                      → project
+                    </span>
+                  </div>
+                  <div className="flex gap-2">
+                    <button onClick={() => setEditingAgent(null)} className="px-3 py-1 text-xs text-gray-400 hover:text-gray-200">
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleSaveAgent}
+                      className="px-4 py-1 text-xs bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg"
+                    >
+                      Save to Project
+                    </button>
+                  </div>
+                </div>
+                <textarea
+                  value={editContent}
+                  onChange={e => setEditContent(e.target.value)}
+                  className="flex-1 p-4 bg-gray-950 text-sm text-gray-200 font-mono resize-none outline-none"
+                  spellCheck={false}
+                />
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
