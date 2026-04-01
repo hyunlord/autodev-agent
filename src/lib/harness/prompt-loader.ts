@@ -261,7 +261,7 @@ const DEFAULT_PLANNER_PROMPT = `You are a development planning assistant. Genera
 ## Project Context
 {{projectContext}}
 
-## Existing Files in Workspace
+## Workspace Context
 {{workspaceContext}}
 
 ## Task

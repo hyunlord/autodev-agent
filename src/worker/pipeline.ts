@@ -10,6 +10,7 @@ import { PluginRegistry } from '../lib/plugins/registry';
 import { selectAgent } from '../lib/agent-selector';
 import { loadPrompt } from '../lib/harness/prompt-loader';
 import { McpManager } from '../lib/harness/mcp-manager';
+import { buildProjectContext, formatContext } from '../lib/harness/context-builder';
 import { RetryController, type AttemptRecord } from './retry';
 import { generateEscalationReport } from './escalation';
 import { loadConfig, type AutoDevConfig } from '../lib/config';
@@ -23,46 +24,6 @@ function filterToolArtifacts(files: string[]): string[] {
   return files.filter(f => !TOOL_ARTIFACTS.some(prefix => f.startsWith(prefix)) && f !== '.DS_Store');
 }
 
-// ─── Workspace scanner (reused across cycles) ───────────
-async function scanWorkspace(projectDir: string, emit: EmitFn): Promise<string> {
-  try {
-    const { getExeca } = await import('../lib/execa');
-    const ex = await getExeca();
-    const { stdout } = await ex('find', [
-      projectDir, '-maxdepth', '3',
-      '-not', '-path', '*/.git/*',
-      '-not', '-path', '*/node_modules/*',
-      '-not', '-path', '*/.next/*',
-      '-not', '-path', '*/.autodev/*',
-      '-not', '-path', '*/.omc/*',
-      '-not', '-path', '*/.omx/*',
-      '-not', '-path', '*/.opencode/*',
-      '-type', 'f',
-    ], { reject: false, timeout: 5_000 });
-
-    if (stdout.trim()) {
-      const files = stdout.trim().split('\n')
-        .map((f: string) => f.replace(projectDir + '/', '').replace(projectDir, ''))
-        .filter((f: string) => f && !f.startsWith('.'));
-      if (files.length > 0 && files.length <= 50) {
-        let context = `\nExisting files in project:\n${files.map((f: string) => `- ${f}`).join('\n')}`;
-        const { readFileSync, statSync } = await import('fs');
-        for (const f of files.slice(0, 5)) {
-          try {
-            const fullPath = join(projectDir, f);
-            const stat = statSync(fullPath);
-            if (stat.size < 10_000) {
-              const content = readFileSync(fullPath, 'utf-8');
-              context += `\n\nFile: ${f}\n\`\`\`\n${content.slice(0, 3000)}\n\`\`\``;
-            }
-          } catch { /* file read failed — skip */ }
-        }
-        return context;
-      }
-    }
-  } catch { /* workspace scan failed — ok */ }
-  return '';
-}
 
 // ─── Single cycle result type ────────────────────────────
 interface SingleCycleResult {
@@ -170,12 +131,26 @@ export async function runPipeline(taskId: string, rawEmit: EmitFn): Promise<void
       }).where(eq(tasks.id, taskId)).run();
     }
 
-    // ─── 2. Parse config and scan workspace ──────────────
+    // ─── 2. Parse config and build project context ───────
     const taskConfig = task.config
       ? (typeof task.config === 'string' ? JSON.parse(task.config) : task.config) as Record<string, any>
       : {};
 
-    const workspaceContext = await scanWorkspace(projectDir, emit);
+    emit({ type: 'log', level: 'info', message: 'Building project context...' });
+    let previousTaskSummary: string | undefined;
+    if (projectHistory.length > 0) {
+      try {
+        const lastResult = projectHistory[0].result;
+        const parsed = lastResult ? (typeof lastResult === 'string' ? JSON.parse(lastResult) : lastResult) : {};
+        previousTaskSummary = parsed?.summary;
+      } catch { /* ignore */ }
+    }
+    const projectCtx = await buildProjectContext(projectDir, previousTaskSummary);
+    const workspaceContext = formatContext(projectCtx);
+    emit({ type: 'log', level: 'info', message: `Context: branch=${projectCtx.gitBranch ?? 'n/a'}, files=${projectCtx.fileCount}, changed=${projectCtx.changedFiles.length}` });
+    if (projectCtx.packageInfo) {
+      emit({ type: 'log', level: 'info', message: `Package: ${projectCtx.packageInfo.name} (${projectCtx.packageInfo.dependencies.length} deps, scripts: ${projectCtx.packageInfo.scripts.join(', ')})` });
+    }
 
     // ─── 3. Determine execution mode ─────────────────────
     const executionMode = (task as any).executionMode ?? 'single';
@@ -685,10 +660,10 @@ async function runAutoCycle(
       updatedAt: new Date().toISOString(),
     }).where(eq(tasks.id, taskId)).run();
 
-    // Re-scan workspace (files may have changed from previous cycle)
+    // Re-build context (files may have changed from previous cycle)
     const workspaceContext = cycle === 1
       ? initialWorkspaceContext
-      : await scanWorkspace(projectDir, emit);
+      : formatContext(await buildProjectContext(projectDir));
 
     // Build a continuation prompt that includes progress so far
     const cyclePrompt = cycle === 1
