@@ -177,14 +177,59 @@ export async function runPipeline(taskId: string, rawEmit: EmitFn, signal?: Abor
     if (executionMode === 'auto-cycle') {
       await runAutoCycle(taskId, task, projectDir, projectConfig, workspaceContext, systemPrompt, taskConfig, config, maxCycles, emit, projectHistory, codingMcpServers, codingMcpPrompt, verifyMcpPrompt);
     } else if (executionMode === 'interview' && !(taskConfig as any).interviewAnswers) {
-      // ─── Interview Mode: generate questions first, wait for answers ───
+      // ─── Interview Mode: check if prompt is already specific enough ───
+      const promptWords = task.prompt.split(/\s+/).length;
+      const hasStack = /react|vue|next|angular|html|python|node|typescript|flutter/i.test(task.prompt);
+      const hasAction = /만들|생성|추가|수정|구현|개발|build|create|add|fix|implement/i.test(task.prompt);
+      const isSpecific = promptWords > 15 || (hasStack && hasAction);
+
+      if (isSpecific) {
+        emit({ type: 'log', level: 'info', message: `Prompt is specific enough (${promptWords} words, stack: ${hasStack}). Skipping interview.` });
+        const result = await runSingleCycle(
+          taskId, task, projectDir, projectConfig, workspaceContext,
+          systemPrompt, taskConfig, config, emit,
+          { projectHistory, codingMcpServers, codingMcpPrompt, verifyMcpPrompt, signal },
+        );
+        if (result.success) {
+          if (projectDir) {
+            const nameFile = join(projectDir, '.autodev', 'project-name.txt');
+            if (!existsSync(nameFile)) {
+              try {
+                mkdirSync(join(projectDir, '.autodev'), { recursive: true });
+                const planDataObj = typeof task.plan === 'string' ? JSON.parse(task.plan as string) : task.plan;
+                const summary = (planDataObj as any)?.summary ?? task.prompt ?? '';
+                const projectName = summary.slice(0, 50).replace(/[/\\:*?"<>|]/g, '');
+                if (projectName) writeFileSync(nameFile, projectName, 'utf-8');
+              } catch { /* non-critical */ }
+            }
+          }
+          updateTaskStatus(taskId, 'completed', { summary: result.summary, modifiedFiles: result.modifiedFiles, costUsd: result.costUsd, attempts: result.attemptCount, verificationPassed: true });
+          emit({ type: 'task_complete', success: true, summary: result.summary });
+        } else if (result.stopReason === 'plan_rejected') {
+          updateTaskStatus(taskId, 'failed', { error: 'Plan rejected by user' });
+          emit({ type: 'task_complete', success: false, summary: 'Plan rejected by user' });
+        } else {
+          await escalate(taskId, task.prompt, result.summary, result.attemptRecords, result.failedChecks, result.modifiedFiles, result.costUsd, result.totalDurationMs, result.stopReason ?? 'max_attempts', emit, projectDir);
+        }
+        return;
+      }
+
+      // ─── Generate clarifying questions ───────────────────
       emit({ type: 'status_change', status: 'interview' as TaskStatus, message: 'Generating clarifying questions...' });
 
-      const interviewPrompt = `The user wants to build something. Generate 3-5 clarifying questions to better understand their needs.
+      const interviewPrompt = `The user wants to build something but needs more detail. Generate 3-5 clarifying questions.
 
 User request: "${task.prompt}"
 
-Respond with ONLY a JSON array of question strings (no explanation):
+IMPORTANT RULES:
+- Do NOT ask about things already mentioned in the request
+- If they said "React" → don't ask about tech stack
+- If they described specific features → don't ask about features
+- Only ask about genuinely MISSING information
+- Questions should be in Korean if the user's request is in Korean
+- Each question should help narrow down the implementation
+
+Respond with ONLY a JSON array of question strings:
 ["Question 1?", "Question 2?", "Question 3?"]`;
 
       let questions: string[] = [];
@@ -405,20 +450,22 @@ async function runSingleCycle(
     updatedAt: new Date().toISOString(),
   }).where(eq(tasks.id, taskId)).run();
 
+  // Always emit plan_ready so UI can display it regardless of autoApprove
+  emit({ type: 'plan_ready', plan: {
+    summary: plan.summary,
+    codingPrompt: plan.codingPrompt,
+    estimatedFiles: plan.estimatedFiles,
+    verificationSpec: plan.verificationSpec,
+    taskCategory,
+    recommendedAgent: plan.recommendedAgent,
+    agentName: agent.name,
+    agentId,
+    autoSelected,
+  }});
+
   if (!autoApprove) {
     updateTaskStatus(taskId, 'plan_review');
     emit({ type: 'status_change', status: 'plan_review', message: 'Plan ready for review. Approve to continue.' });
-    emit({ type: 'plan_ready', plan: {
-      summary: plan.summary,
-      codingPrompt: plan.codingPrompt,
-      estimatedFiles: plan.estimatedFiles,
-      verificationSpec: plan.verificationSpec,
-      taskCategory,
-      recommendedAgent: plan.recommendedAgent,
-      agentName: agent.name,
-      agentId,
-      autoSelected,
-    }});
 
     const approved = await waitForApproval(taskId);
     if (!approved) {
@@ -446,6 +493,8 @@ async function runSingleCycle(
     }
 
     emit({ type: 'log', level: 'info', message: 'Plan approved. Starting coding...' });
+  } else {
+    emit({ type: 'log', level: 'info', message: 'Auto-approved. Starting coding...' });
   }
 
   // ─── GOAL_COMPLETE: skip coding entirely ────────────────

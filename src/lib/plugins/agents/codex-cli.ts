@@ -19,10 +19,24 @@ export class CodexCliAgent implements ICodingAgent {
     const startTime = Date.now();
     const execa = await getExeca();
     opts.onProgress?.({ type: 'log', level: 'info', message: '[Codex CLI] Running task...' });
-    const args = ['exec', opts.task, '--full-auto', '--json'];
-    const result = await execa(cliPath, args, {
+
+    // Truncate prompt to avoid shell argument length limits
+    const truncatedTask = opts.task.slice(0, 8000);
+
+    // Method 1: try with --json flag
+    let result = await execa(cliPath, ['exec', truncatedTask, '--full-auto', '--json'], {
       cwd: opts.projectDir, timeout: opts.timeoutMs ?? 300_000, reject: false, env: { ...process.env },
     });
+
+    // Method 2: if no files modified, retry without --json
+    const firstModifiedFiles = await getModifiedFiles(opts.projectDir);
+    if (firstModifiedFiles.length === 0 && result.exitCode === 0) {
+      opts.onProgress?.({ type: 'log', level: 'warn', message: '[Codex CLI] No files modified with --json. Retrying without --json...' });
+      result = await execa(cliPath, ['exec', truncatedTask, '--full-auto'], {
+        cwd: opts.projectDir, timeout: opts.timeoutMs ?? 300_000, reject: false, env: { ...process.env },
+      });
+    }
+
     let resultText = result.stdout;
     let costUsd = 0;
     let inputTokens = 0;
@@ -39,9 +53,14 @@ export class CodexCliAgent implements ICodingAgent {
             outputTokens = parsed.usage?.output_tokens ?? 0;
             break;
           }
+          // Codex JSONL: extract from item.completed
+          if (parsed.type === 'item.completed' && parsed.item?.text) {
+            resultText = parsed.item.text;
+          }
         } catch { continue; }
       }
     } catch { /* use raw stdout */ }
+
     // Always estimate cost — CLI rarely provides accurate cost data
     // o4-mini pricing: $1.10/M input, $4.40/M output
     const estimatedInput = Math.max(inputTokens, Math.ceil(opts.task.length / 4));
@@ -51,7 +70,12 @@ export class CodexCliAgent implements ICodingAgent {
       outputTokens = estimatedOutput;
       costUsd = (inputTokens / 1_000_000) * 1.10 + (outputTokens / 1_000_000) * 4.40;
     }
+
     const modifiedFiles = await getModifiedFiles(opts.projectDir);
+    if (modifiedFiles.length === 0) {
+      opts.onProgress?.({ type: 'log', level: 'warn', message: '[Codex CLI] WARNING: No files were created/modified. Codex may not have executed file operations.' });
+    }
+
     return { success: result.exitCode === 0, text: resultText, modifiedFiles, costUsd, tokenUsage: { inputTokens, outputTokens }, durationMs: Date.now() - startTime, rawOutput: result.stdout };
   }
 }

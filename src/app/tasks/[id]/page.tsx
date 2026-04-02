@@ -415,6 +415,61 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
         </div>
       )}
 
+      {/* Task Configuration */}
+      <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-4 mb-4">
+        <h3 className="text-xs text-gray-500 uppercase tracking-wider mb-2">Task Configuration</h3>
+        <div className="grid grid-cols-2 gap-2 text-xs">
+          <div>
+            <span className="text-gray-500">Planning: </span>
+            <span className="text-gray-300">{(task as any).planningMode ?? 'auto'}</span>
+          </div>
+          <div>
+            <span className="text-gray-500">Agent: </span>
+            <span className="text-gray-300">{(task as any).agentId ?? 'auto'}</span>
+          </div>
+          <div>
+            <span className="text-gray-500">Mode: </span>
+            <span className="text-gray-300">{(task as any).executionMode ?? 'single'}</span>
+          </div>
+          <div>
+            <span className="text-gray-500">Auto-approve: </span>
+            <span className="text-gray-300">
+              {(() => {
+                try {
+                  const cfg = typeof (task as any).config === 'string' ? JSON.parse((task as any).config as string) : (task as any).config;
+                  return (cfg as any)?.autoApprove ? 'Yes' : 'No';
+                } catch { return 'No'; }
+              })()}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Interview Q&A — show recorded Q&A from config */}
+      {(() => {
+        try {
+          const cfg = typeof (task as any).config === 'string' ? JSON.parse((task as any).config as string) : (task as any).config;
+          const questions = (cfg as any)?.interviewQuestions as string[] | undefined;
+          const answers = (cfg as any)?.interviewAnswers;
+          if (questions && questions.length > 0) {
+            return (
+              <div className="bg-amber-900/10 border border-amber-800/50 rounded-xl p-4 mb-4">
+                <h3 className="text-xs text-amber-400 uppercase tracking-wider mb-2">💬 Interview</h3>
+                <div className="space-y-2">
+                  {questions.map((q: string, i: number) => (
+                    <div key={i} className="text-xs">
+                      <p className="text-gray-400">Q: {q}</p>
+                      <p className="text-gray-200">A: {answers?.[i] ?? answers?.[String(i)] ?? '(no answer)'}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          }
+        } catch {}
+        return null;
+      })()}
+
       {planData && (
         <section className="mb-6 p-5 bg-indigo-950/20 rounded-lg border border-indigo-800/50">
           <div className="flex items-center justify-between mb-4">

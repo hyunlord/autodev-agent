@@ -332,7 +332,7 @@ const [tasks, setTasks] = useState<Task[]>([]);
             ))}
           </div>
         )}
-        <div className="mt-3 flex items-center gap-2">
+        <div className="mt-3">
           <label className="flex items-center gap-2 cursor-pointer">
             <input
               type="checkbox"
@@ -342,6 +342,11 @@ const [tasks, setTasks] = useState<Task[]>([]);
             />
             <span className="text-sm text-gray-400">Auto-approve plan (skip review)</span>
           </label>
+          {autoApprove && (
+            <p className="text-[10px] text-amber-500 mt-1 ml-5">
+              ⚠ Plan review를 건너뛰고 바로 코딩을 시작합니다
+            </p>
+          )}
         </div>
         <div className="mt-3 flex items-center gap-3">
           <label className="text-xs text-gray-500">Execution:</label>
