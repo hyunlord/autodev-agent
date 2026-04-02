@@ -1,6 +1,6 @@
 import { db } from '../lib/db/client';
 import { tasks, attempts, events, verifications } from '../lib/db/schema';
-import { join, resolve } from 'path';
+import { join, resolve, isAbsolute } from 'path';
 import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { eq, and, not, desc } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
@@ -288,6 +288,20 @@ async function runSingleCycle(
   emit({ type: 'log', level: 'info', message: `Coding prompt: ${plan.codingPrompt.slice(0, 500)}` });
   emit({ type: 'log', level: 'info', message: `Verification: ${plan.verificationSpec.steps.map(s => `${s.id}:${s.type}(${s.description})`).join(', ')}` });
   recordEvent(taskId, 'plan_complete', { summary: plan.summary, files: plan.estimatedFiles });
+
+  // Normalize verification filePaths — convert absolute paths to relative
+  if (plan.verificationSpec?.steps) {
+    for (const step of plan.verificationSpec.steps) {
+      if (step.filePath && isAbsolute(step.filePath)) {
+        if (step.filePath.startsWith(projectDir)) {
+          step.filePath = step.filePath.slice(projectDir.length).replace(/^\//, '');
+        } else {
+          step.filePath = step.filePath.split('/').pop() ?? step.filePath;
+        }
+        emit({ type: 'log', level: 'info', message: `Normalized filePath: ${step.filePath}` });
+      }
+    }
+  }
 
   // ─── Agent Selection (from LLM recommendation) ────────
   const taskCategory = plan.taskCategory ?? 'unknown';

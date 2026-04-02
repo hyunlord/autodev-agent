@@ -314,6 +314,8 @@ RULE 1 — TECHNOLOGY MATCH:
 
 RULE 2 — VERIFICATION SPEC:
 - Include a verificationSpec with concrete checks
+- **filePath must be RELATIVE to the project root** (e.g. "index.html", "src/app.ts")
+- NEVER use absolute paths in filePath (e.g. NEVER "/Users/xxx/workspaces/xxx/index.html")
 - build_check: always include if project has a build step
 - file_check: verify key files exist and contain expected content
 - http_check: verify endpoints respond if API changes
