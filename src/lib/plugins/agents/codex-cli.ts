@@ -20,36 +20,27 @@ export class CodexCliAgent implements ICodingAgent {
     const execa = await getExeca();
     opts.onProgress?.({ type: 'log', level: 'info', message: '[Codex CLI] Running task...' });
 
-    // ─── Method 1: codex exec with proper sandbox flags ─────
+    // ─── Codex CLI: always pass prompt as argument (stdin doesn't reliably create files) ─
     // --sandbox workspace-write is CRITICAL: default sandbox is read-only
-    const baseArgs = [
+    const MAX_PROMPT_LENGTH = 12000;
+    let promptForCli = opts.task;
+    if (promptForCli.length > MAX_PROMPT_LENGTH) {
+      opts.onProgress?.({ type: 'log', level: 'info', message: `[Codex CLI] Truncating prompt from ${promptForCli.length} to ${MAX_PROMPT_LENGTH} chars` });
+      promptForCli = promptForCli.slice(0, MAX_PROMPT_LENGTH) + '\n\n[... truncated for CLI length limit]';
+    }
+
+    const result = await execa(cliPath, [
       'exec',
       '--full-auto',
       '--sandbox', 'workspace-write',
       '--json',
-    ];
-
-    let result;
-
-    if (opts.task.length > 4000) {
-      // Long prompt: pipe via stdin using '-' as prompt argument
-      opts.onProgress?.({ type: 'log', level: 'info', message: '[Codex CLI] Using stdin for long prompt...' });
-      result = await execa(cliPath, [...baseArgs, '-'], {
-        cwd: opts.projectDir,
-        timeout: opts.timeoutMs ?? 300_000,
-        reject: false,
-        env: { ...process.env },
-        input: opts.task,
-      });
-    } else {
-      // Short prompt: pass as final argument (flags first, prompt last)
-      result = await execa(cliPath, [...baseArgs, opts.task], {
-        cwd: opts.projectDir,
-        timeout: opts.timeoutMs ?? 300_000,
-        reject: false,
-        env: { ...process.env },
-      });
-    }
+      promptForCli,
+    ], {
+      cwd: opts.projectDir,
+      timeout: opts.timeoutMs ?? 300_000,
+      reject: false,
+      env: { ...process.env },
+    });
 
     const parsed = await this.parseResult(result, opts, startTime);
 
@@ -61,7 +52,7 @@ export class CodexCliAgent implements ICodingAgent {
         'exec',
         '--full-auto',
         '--sandbox', 'workspace-write',
-        opts.task.slice(0, 8000),
+        promptForCli,
       ], {
         cwd: opts.projectDir,
         timeout: opts.timeoutMs ?? 300_000,
