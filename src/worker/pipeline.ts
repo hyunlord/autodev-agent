@@ -547,7 +547,8 @@ async function runSingleCycle(
 
   let lastModifiedFiles: string[] = [];
   let totalCostUsd = planResult.costUsd;
-  let lastFailedChecks: Array<{ id: string; description: string; actual?: string }> = [];
+  let lastFailedChecks: Array<{ id: string; description: string; actual?: string; expected?: string; type?: string; filePath?: string }> = [];
+  let lastPassedChecks: Array<{ description: string }> = [];
 
   if (planResult.costUsd > 0) {
     emit({
@@ -632,9 +633,9 @@ ${plan.codingPrompt}`;
       emit({ type: 'log', level: 'info', message: `Project history: ${projectHistory.length} previous task(s) found` });
     }
     if (isRetry && lastFailedChecks.length > 0) {
-      const retryContext = retryCtrl.buildRetryContext(lastFailedChecks);
+      const retryContext = retryCtrl.buildRetryContext(lastFailedChecks, lastPassedChecks);
       codingPrompt = `${plan.codingPrompt}\n\n---\n\n${retryContext}`;
-      emit({ type: 'log', level: 'info', message: `Retry context: ${lastFailedChecks.length} failed checks from previous attempt` });
+      emit({ type: 'log', level: 'info', message: `Retry context: ${lastFailedChecks.length} failed, ${lastPassedChecks.length} passed checks from previous attempt` });
     }
 
     const coderPrompt = loadPrompt('coder', projectDir, { projectDir });
@@ -794,7 +795,13 @@ ${plan.codingPrompt}`;
       id: r.checkId,
       description: r.description,
       actual: r.actual,
+      expected: r.expected ?? plan.verificationSpec.steps.find(s => s.id === r.checkId)?.expectedText,
+      type: r.type ?? plan.verificationSpec.steps.find(s => s.id === r.checkId)?.type,
+      filePath: plan.verificationSpec.steps.find(s => s.id === r.checkId)?.filePath,
     }));
+    lastPassedChecks = verifyResult.results
+      .filter(r => r.status === 'pass')
+      .map(r => ({ description: r.description }));
 
     const failSummary = failedChecks.map(c => c.description).join('; ');
     emit({ type: 'log', level: 'warn', message: `Attempt ${attempt} verification failed: ${failSummary}` });

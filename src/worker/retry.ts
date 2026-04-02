@@ -100,28 +100,56 @@ export class RetryController {
     return 'fixable';
   }
 
-  buildRetryContext(failedChecks: Array<{ description: string; actual?: string }>): string {
+  buildRetryContext(
+    failedChecks: Array<{ description: string; actual?: string; expected?: string; type?: string; filePath?: string }>,
+    passedChecks?: Array<{ description: string }>,
+  ): string {
     const prevAttempts = this._attempts.map(a =>
       `Attempt ${a.attemptNum}: ${a.errorMessage.slice(0, 300)}`
     ).join('\n');
 
-    const failedList = failedChecks.map(c =>
-      `- ${c.description}${c.actual ? `: ${c.actual}` : ''}`
-    ).join('\n');
+    // Build specific fix instructions
+    const fixInstructions = failedChecks.map((c, i) => {
+      let instruction = `${i + 1}. ${c.description}`;
 
-    return `Previous attempts failed. Here is the context for your retry:
+      if (c.type === 'file_check' && c.expected && c.filePath) {
+        instruction += `\n   → File "${c.filePath}" must contain the text: ${c.expected}`;
+        instruction += `\n   → Add or modify the file so it includes exactly: ${c.expected}`;
+      } else if (c.type === 'file_check' && c.actual?.includes('File not found')) {
+        instruction += `\n   → The file does not exist. Create it.`;
+      } else if (c.type === 'file_check' && c.actual?.includes('nearly empty')) {
+        instruction += `\n   → The file exists but is nearly empty. Add the required content.`;
+      } else if (c.type === 'build_check') {
+        instruction += `\n   → The build command failed. Fix the build errors.`;
+      } else if (c.type === 'dom_check') {
+        instruction += `\n   → The expected element was not found in the rendered page.`;
+      } else if (c.actual) {
+        instruction += `\n   → ${c.actual}`;
+      }
 
-## Failed verification checks:
-${failedList}
+      return instruction;
+    }).join('\n\n');
+
+    const passedSection = (passedChecks && passedChecks.length > 0)
+      ? `\n\n## ALREADY PASSING — do NOT break these:\n${passedChecks.map(c => `✓ ${c.description}`).join('\n')}`
+      : '';
+
+    return `Your previous attempt created files but verification FAILED.
+
+## SPECIFIC FIXES NEEDED:
+${fixInstructions}
 
 ## Previous attempt history:
 ${prevAttempts}
+${passedSection}
 
-## Instructions:
-- Fix the issues identified in the failed checks above
-- Do NOT repeat the same approach that failed before
-- Focus specifically on the verification failures
-- If a previous attempt caused a regression, revert that change first`;
+## Rules:
+- Fix ONLY the failing checks listed above
+- Do NOT rewrite everything from scratch — modify the existing files
+- The verification will check for the EXACT text patterns shown above
+- If a check expects a specific string, your file must contain it exactly
+- Make minimal changes to pass the failing checks
+- Preserve everything that is already working`;
   }
 
   getAttemptCount(): number {
