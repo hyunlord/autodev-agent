@@ -9,18 +9,26 @@ echo ""
 
 # ─── Step 1: 서버 시작 ──────────────────────────
 echo "=== Step 1: Starting dev server ==="
-pnpm dev > /dev/null 2>&1 &
-DEV_PID=$!
-sleep 8
+DEV_PID=""
+EXTERNAL_SERVER=false
 
-# Health check
+# Check if server is already running
 STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:3000/api/status" 2>/dev/null || echo "000")
-if [ "$STATUS" != "200" ]; then
-  echo "❌ Dev server failed to start"
-  kill $DEV_PID 2>/dev/null
-  exit 1
+if [ "$STATUS" = "200" ]; then
+  echo "✅ Dev server already running on port 3000"
+  EXTERNAL_SERVER=true
+else
+  pnpm dev > /dev/null 2>&1 &
+  DEV_PID=$!
+  sleep 8
+  STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:3000/api/status" 2>/dev/null || echo "000")
+  if [ "$STATUS" != "200" ]; then
+    echo "❌ Dev server failed to start"
+    kill $DEV_PID 2>/dev/null
+    exit 1
+  fi
+  echo "✅ Dev server started (PID: $DEV_PID)"
 fi
-echo "✅ Dev server running (PID: $DEV_PID)"
 echo ""
 
 # ─── Step 2: 작업 생성 (카운터 만들어줘) ─────────
@@ -36,7 +44,6 @@ TASK_RESPONSE=$(curl -s -X POST http://localhost:3000/api/tasks \
   }')
 
 TASK_ID=$(echo "$TASK_RESPONSE" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
-WORKSPACE=$(echo "$TASK_RESPONSE" | grep -o '"projectDir":"[^"]*"' | head -1 | cut -d'"' -f4)
 
 if [ -z "$TASK_ID" ]; then
   echo "❌ Failed to create task"
@@ -46,7 +53,6 @@ if [ -z "$TASK_ID" ]; then
 fi
 
 echo "✅ Task created: $TASK_ID"
-echo "   Workspace: $WORKSPACE"
 echo ""
 
 # ─── Step 3: 완료 대기 (최대 5분) ────────────────
@@ -85,6 +91,11 @@ if [ $WAITED -ge $MAX_WAIT ]; then
   lsof -ti:3000 | xargs kill -9 2>/dev/null || true
   exit 1
 fi
+
+# Fetch workspace from completed task
+TASK_DETAIL=$(curl -s "http://localhost:3000/api/tasks/${TASK_ID}" 2>/dev/null)
+WORKSPACE=$(echo "$TASK_DETAIL" | grep -o '"projectDir":"[^"]*"' | head -1 | cut -d'"' -f4)
+echo "   Workspace: $WORKSPACE"
 echo ""
 
 # ─── Step 4: 결과 파일 검증 ──────────────────────
@@ -129,7 +140,6 @@ else
 fi
 
 # Check 4: verification checks passed (25점)
-TASK_DETAIL=$(curl -s "http://localhost:3000/api/tasks/${TASK_ID}" 2>/dev/null)
 VERIFY_PASS=$(echo "$TASK_DETAIL" | grep -o '"status":"pass"' | wc -l)
 VERIFY_FAIL=$(echo "$TASK_DETAIL" | grep -o '"status":"fail"' | wc -l)
 
@@ -170,10 +180,14 @@ echo ""
 
 # ─── Cleanup ─────────────────────────────────────
 echo "=== Cleanup ==="
-kill $DEV_PID 2>/dev/null
-sleep 1
-lsof -ti:3000 | xargs kill -9 2>/dev/null || true
-echo "✅ Dev server stopped"
+if [ "$EXTERNAL_SERVER" = "false" ] && [ -n "$DEV_PID" ]; then
+  kill $DEV_PID 2>/dev/null
+  sleep 1
+  lsof -ti:3000 | xargs kill -9 2>/dev/null || true
+  echo "✅ Dev server stopped"
+else
+  echo "✅ External server left running"
+fi
 echo ""
 
 # ─── Score Summary ───────────────────────────────
