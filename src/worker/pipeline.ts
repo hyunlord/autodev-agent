@@ -412,6 +412,22 @@ async function runSingleCycle(
       outputTokens: planResult.outputTokens,
       agentId: `planning-${(task as any).planningMode ?? 'claude-cli'}`,
     });
+    db.insert(attempts).values({
+      id: nanoid(),
+      taskId,
+      attemptNum: 0,
+      agentId: `planning-${(task as any).planningMode ?? 'claude-cli'}`,
+      phase: 'planning',
+      status: 'success',
+      input: JSON.stringify({ prompt: task.prompt?.slice(0, 2000) }),
+      output: JSON.stringify({ summary: plan.summary }),
+      errorLog: null,
+      errorHash: null,
+      costUsd: planResult.costUsd,
+      tokenCount: planResult.inputTokens + planResult.outputTokens,
+      durationMs: null,
+      createdAt: new Date().toISOString(),
+    }).run();
   }
 
   // ─── Git dirty state check ──────────────────────────

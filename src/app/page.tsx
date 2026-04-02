@@ -54,6 +54,10 @@ const [tasks, setTasks] = useState<Task[]>([]);
   const [usage, setUsage] = useState<{
     totals: { costUsd: number; tokens: number; attempts: number };
     byAgent: Array<{ agentId: string; totalCost: number; totalTokens: number; attemptCount: number }>;
+    byPhase?: Array<{ phase: string; totalCost: number; totalTokens: number; count: number }>;
+    byDay?: Array<{ date: string; totalCost: number; totalTokens: number; count: number }>;
+    byStatus?: Array<{ status: string; count: number }>;
+    harness?: { totalCost: number; totalCommands: number };
   } | null>(null);
   const [harnessPreview, setHarnessPreview] = useState<Array<{ role: string; source: string }> | null>(null);
 
@@ -148,29 +152,74 @@ const [tasks, setTasks] = useState<Task[]>([]);
       </header>
 
       {usage && usage.totals.costUsd > 0 && (
-        <div className="mb-6 flex items-center gap-6 px-4 py-3 bg-gray-900/50 rounded-lg border border-gray-800">
-          <div>
-            <p className="text-[10px] text-gray-500 uppercase tracking-wider">Total cost</p>
-            <p className="text-lg font-bold text-gray-200">${usage.totals.costUsd.toFixed(4)}</p>
-          </div>
-          <div>
-            <p className="text-[10px] text-gray-500 uppercase tracking-wider">Total tokens</p>
-            <p className="text-lg font-bold text-gray-200">{usage.totals.tokens.toLocaleString()}</p>
-          </div>
-          <div>
-            <p className="text-[10px] text-gray-500 uppercase tracking-wider">Attempts</p>
-            <p className="text-lg font-bold text-gray-200">{usage.totals.attempts}</p>
-          </div>
-          {usage.byAgent.length > 1 && (
-            <div className="flex-1">
-              <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">By agent</p>
-              <div className="flex gap-3">
-                {usage.byAgent.map(a => (
-                  <span key={a.agentId} className="text-xs text-gray-400">
-                    {a.agentId}: ${a.totalCost.toFixed(4)} ({a.attemptCount})
-                  </span>
-                ))}
+        <div className="mb-6 bg-gray-900/50 rounded-xl border border-gray-800 p-4">
+          {/* Top row: totals */}
+          <div className="flex items-center gap-6 mb-4">
+            <div>
+              <p className="text-[10px] text-gray-500 uppercase tracking-wider">Total cost</p>
+              <p className="text-lg font-bold text-gray-200">${usage.totals.costUsd.toFixed(4)}</p>
+            </div>
+            <div>
+              <p className="text-[10px] text-gray-500 uppercase tracking-wider">Total tokens</p>
+              <p className="text-lg font-bold text-gray-200">{usage.totals.tokens.toLocaleString()}</p>
+            </div>
+            <div>
+              <p className="text-[10px] text-gray-500 uppercase tracking-wider">Attempts</p>
+              <p className="text-lg font-bold text-gray-200">{usage.totals.attempts}</p>
+            </div>
+            {usage.harness && usage.harness.totalCommands > 0 && (
+              <div>
+                <p className="text-[10px] text-gray-500 uppercase tracking-wider">Harness commands</p>
+                <p className="text-lg font-bold text-gray-200">{usage.harness.totalCommands}</p>
               </div>
+            )}
+          </div>
+
+          {/* Agent bars */}
+          {usage.byAgent.length > 0 && (
+            <div className="space-y-1.5">
+              <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">By Agent</p>
+              {usage.byAgent
+                .sort((a, b) => b.totalCost - a.totalCost)
+                .map((agent) => {
+                  const maxCost = Math.max(...usage.byAgent.map((a) => a.totalCost));
+                  const width = maxCost > 0 ? (agent.totalCost / maxCost) * 100 : 0;
+                  const isPlanning = agent.agentId.startsWith('planning-');
+                  return (
+                    <div key={agent.agentId} className="flex items-center gap-2">
+                      <span className="text-[10px] text-gray-400 w-36 truncate">
+                        {isPlanning ? `📋 ${agent.agentId.replace('planning-', '')}` : `💻 ${agent.agentId}`}
+                      </span>
+                      <div className="flex-1 bg-gray-800 rounded-full h-2 overflow-hidden">
+                        <div
+                          className={`h-full rounded-full ${isPlanning ? 'bg-amber-500' : 'bg-indigo-500'}`}
+                          style={{ width: `${Math.max(width, 2)}%` }}
+                        />
+                      </div>
+                      <span className="text-[10px] text-gray-500 w-24 text-right">
+                        ${agent.totalCost.toFixed(4)} ({agent.attemptCount})
+                      </span>
+                    </div>
+                  );
+                })}
+            </div>
+          )}
+
+          {/* Phase breakdown */}
+          {usage.byPhase && usage.byPhase.length > 0 && (
+            <div className="mt-3 pt-3 border-t border-gray-800 flex gap-4">
+              {usage.byPhase.map((phase) => (
+                <div key={phase.phase} className="flex items-center gap-1.5">
+                  <span className={`w-2 h-2 rounded-full ${
+                    phase.phase === 'planning' ? 'bg-amber-500' :
+                    phase.phase === 'coding' ? 'bg-indigo-500' :
+                    'bg-emerald-500'
+                  }`} />
+                  <span className="text-[10px] text-gray-400">
+                    {phase.phase}: ${phase.totalCost.toFixed(4)} ({phase.count})
+                  </span>
+                </div>
+              ))}
             </div>
           )}
         </div>

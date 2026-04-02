@@ -159,7 +159,21 @@ Rules:
       }
     }
 
-    // Log harness changes
+    // Estimate cost for harness command
+    const estimatedInputTokens = Math.ceil(prompt.length / 4);
+    const estimatedOutputTokens = Math.ceil(stdout.length / 4);
+    let estimatedCost = 0;
+    if (mode === 'claude-cli') {
+      estimatedCost = (estimatedInputTokens / 1_000_000) * 3.0 + (estimatedOutputTokens / 1_000_000) * 15.0;
+    } else if (mode === 'gemini-cli') {
+      estimatedCost = (estimatedInputTokens / 1_000_000) * 1.25 + (estimatedOutputTokens / 1_000_000) * 10.0;
+    } else if (mode === 'codex-cli') {
+      estimatedCost = (estimatedInputTokens / 1_000_000) * 1.10 + (estimatedOutputTokens / 1_000_000) * 4.40;
+    } else if (mode === 'api') {
+      estimatedCost = (estimatedInputTokens / 1_000_000) * 3.0 + (estimatedOutputTokens / 1_000_000) * 15.0;
+    }
+
+    // Log harness changes with cost
     const logPath = join(autodevDir, 'harness-log.jsonl');
     const logEntry = JSON.stringify({
       timestamp: new Date().toISOString(),
@@ -168,6 +182,9 @@ Rules:
       cliMode: mode,
       summary: resultJson.summary,
       changes: applied,
+      costUsd: estimatedCost,
+      inputTokens: estimatedInputTokens,
+      outputTokens: estimatedOutputTokens,
     });
     try { appendFileSync(logPath, logEntry + '\n'); } catch { /* non-critical */ }
 
@@ -177,6 +194,9 @@ Rules:
       changes: applied,
       cliMode: mode,
       durationMs: Date.now() - startTime,
+      costUsd: estimatedCost,
+      inputTokens: estimatedInputTokens,
+      outputTokens: estimatedOutputTokens,
     });
   } catch (error) {
     return NextResponse.json(
