@@ -78,6 +78,9 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
   const [editedCodingPrompt, setEditedCodingPrompt] = useState('');
   const [previewFile, setPreviewFile] = useState<{ path: string; content: string; language: string } | null>(null);
   const [projectTasks, setProjectTasks] = useState<Array<{ id: string; prompt: string; status: string; createdAt: string }>>([]);
+  const [interviewQuestions, setInterviewQuestions] = useState<string[]>([]);
+  const [interviewAnswers, setInterviewAnswers] = useState<Record<number, string>>({});
+  const [submittingAnswers, setSubmittingAnswers] = useState(false);
   const [cycleInfo, setCycleInfo] = useState<{ current: number; max: number; steps: string[] }>({ current: 0, max: 0, steps: [] });
   const [liveUsage, setLiveUsage] = useState<{
     totalCostUsd: number;
@@ -148,6 +151,9 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
                 setPlanData(parsed.plan as any);
                 setEditedCodingPrompt((parsed.plan as any)?.codingPrompt ?? '');
               }
+              if (parsed.type === 'interview_questions') {
+                setInterviewQuestions((parsed as any).questions ?? []);
+              }
               if (parsed.type === 'cost_update') {
                 storedUsage.totalCostUsd = (parsed as any).totalCostUsd ?? storedUsage.totalCostUsd;
                 storedUsage.totalInputTokens += (parsed as any).inputTokens ?? 0;
@@ -201,6 +207,9 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
       if (event.type === 'plan_ready') {
         setPlanData(event.plan as any);
         setEditedCodingPrompt((event.plan as any)?.codingPrompt ?? '');
+      }
+      if (event.type === 'interview_questions') {
+        setInterviewQuestions((event as any).questions ?? []);
       }
       if (event.type === 'attempt_start') {
         setAttemptCount(event.attemptNum);
@@ -350,6 +359,59 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {currentStatus === 'interview' && interviewQuestions.length > 0 && (
+        <div className="bg-teal-900/20 border border-teal-800 rounded-xl p-4 mb-4">
+          <h3 className="text-sm font-semibold text-teal-400 mb-3">
+            💬 작업을 더 잘 이해하기 위해 몇 가지 질문이 있어요
+          </h3>
+          <div className="space-y-3">
+            {interviewQuestions.map((q, i) => (
+              <div key={i}>
+                <p className="text-xs text-gray-300 mb-1">{i + 1}. {q}</p>
+                <input
+                  type="text"
+                  value={interviewAnswers[i] ?? ''}
+                  onChange={e => setInterviewAnswers(prev => ({ ...prev, [i]: e.target.value }))}
+                  placeholder="답변을 입력하세요..."
+                  className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-200 placeholder-gray-600 outline-none focus:border-teal-600"
+                />
+              </div>
+            ))}
+          </div>
+          <div className="flex gap-2 mt-4">
+            <button
+              onClick={async () => {
+                setSubmittingAnswers(true);
+                await fetch(`/api/tasks/${id}/interview`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ answers: interviewAnswers }),
+                });
+                setSubmittingAnswers(false);
+                setCurrentStatus('pending');
+              }}
+              disabled={submittingAnswers || Object.keys(interviewAnswers).length === 0}
+              className="px-4 py-2 bg-teal-600 hover:bg-teal-500 text-white text-sm rounded-lg disabled:opacity-50 transition-colors"
+            >
+              {submittingAnswers ? '제출 중...' : '답변 제출 → Planning 시작'}
+            </button>
+            <button
+              onClick={async () => {
+                await fetch(`/api/tasks/${id}/interview`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ answers: {} }),
+                });
+                setCurrentStatus('pending');
+              }}
+              className="px-4 py-2 text-gray-400 hover:text-gray-200 text-sm transition-colors"
+            >
+              건너뛰기
+            </button>
+          </div>
         </div>
       )}
 
@@ -620,7 +682,7 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
                     [💰] ${((event as any).costUsd ?? 0).toFixed(4)} (total: ${((event as any).totalCostUsd ?? 0).toFixed(4)}) — {(event as any).agentId}
                   </span>
                 )}
-                {!['status_change', 'log', 'task_complete', 'attempt_start', 'attempt_complete', 'verification_result', 'screenshot', 'escalation', 'cycle_start', 'cycle_complete', 'auto_cycle_complete', 'cost_update'].includes(event.type) && (
+                {!['status_change', 'log', 'task_complete', 'attempt_start', 'attempt_complete', 'verification_result', 'screenshot', 'escalation', 'cycle_start', 'cycle_complete', 'auto_cycle_complete', 'cost_update', 'interview_questions'].includes(event.type) && (
                   <span className="text-gray-500">[{event.type}] {JSON.stringify(event)}</span>
                 )}
               </div>

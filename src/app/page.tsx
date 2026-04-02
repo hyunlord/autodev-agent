@@ -49,7 +49,7 @@ const [tasks, setTasks] = useState<Task[]>([]);
   const [showPromptSettings, setShowPromptSettings] = useState(false);
   const [promptPreset, setPromptPreset] = useState('default');
   const [systemPrompt, setSystemPrompt] = useState('');
-  const [executionMode, setExecutionMode] = useState<'single' | 'auto-cycle'>('single');
+  const [executionMode, setExecutionMode] = useState<'single' | 'auto-cycle' | 'interview'>('single');
   const [maxCycles, setMaxCycles] = useState(10);
   const [usage, setUsage] = useState<{
     totals: { costUsd: number; tokens: number; attempts: number };
@@ -367,6 +367,17 @@ const [tasks, setTasks] = useState<Task[]>([]);
               }`}
             >
               Auto-cycle
+            </button>
+            <button
+              type="button"
+              onClick={() => setExecutionMode('interview')}
+              className={`px-3 py-1 text-xs rounded-lg transition-colors ${
+                executionMode === 'interview'
+                  ? 'bg-teal-600 text-white'
+                  : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+              }`}
+            >
+              💬 Interview
             </button>
           </div>
           {executionMode === 'auto-cycle' && (

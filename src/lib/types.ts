@@ -1,6 +1,8 @@
-export type TaskStatus = 'pending' | 'planning' | 'plan_review' | 'coding' | 'verifying' | 'retrying' | 'completed' | 'failed' | 'escalated';
+export type TaskStatus = 'pending' | 'planning' | 'plan_review' | 'coding' | 'verifying' | 'retrying' | 'completed' | 'failed' | 'escalated' | 'interview';
 
 export type PlanningMode = 'claude-cli' | 'gemini-cli' | 'codex-cli' | 'api' | 'manual';
+
+export type ExecutionMode = 'single' | 'auto-cycle' | 'interview';
 
 export type PipelineEvent =
   | { type: 'status_change'; status: TaskStatus; message: string }
@@ -15,4 +17,5 @@ export type PipelineEvent =
   | { type: 'cycle_start'; cycleNum: number; totalCycles: number; message: string }
   | { type: 'cycle_complete'; cycleNum: number; success: boolean; summary: string }
   | { type: 'auto_cycle_complete'; totalCycles: number; summary: string }
-  | { type: 'cost_update'; attemptNum: number; costUsd: number; totalCostUsd: number; inputTokens: number; outputTokens: number; agentId: string };
+  | { type: 'cost_update'; attemptNum: number; costUsd: number; totalCostUsd: number; inputTokens: number; outputTokens: number; agentId: string }
+  | { type: 'interview_questions'; questions: string[]; message: string };

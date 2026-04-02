@@ -4,7 +4,7 @@ export const tasks = sqliteTable('tasks', {
   id:          text('id').primaryKey(),
   prompt:      text('prompt').notNull(),
   status:      text('status', {
-    enum: ['pending', 'planning', 'plan_review', 'coding', 'verifying', 'retrying', 'completed', 'failed', 'escalated'],
+    enum: ['pending', 'planning', 'plan_review', 'coding', 'verifying', 'retrying', 'completed', 'failed', 'escalated', 'interview'],
   }).notNull().default('pending'),
   planningMode: text('planning_mode', {
     enum: ['auto', 'claude-cli', 'gemini-cli', 'codex-cli', 'api', 'manual'],
@@ -17,7 +17,7 @@ export const tasks = sqliteTable('tasks', {
   planningSystemPrompt: text('planning_system_prompt'),
   codingSystemPrompt:   text('coding_system_prompt'),
   executionMode: text('execution_mode', {
-    enum: ['single', 'auto-cycle'],
+    enum: ['single', 'auto-cycle', 'interview'],
   }).notNull().default('single'),
   cycleCount:  integer('cycle_count').notNull().default(0),
   maxCycles:   integer('max_cycles').notNull().default(10),
