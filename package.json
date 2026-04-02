@@ -13,6 +13,7 @@
     "verify": "bash scripts/verify.sh quick",
     "verify:full": "bash scripts/verify.sh full",
     "verify:cross": "bash scripts/verify.sh cross",
+    "verify:e2e": "bash scripts/e2e-test.sh",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio"

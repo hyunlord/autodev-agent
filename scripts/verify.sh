@@ -196,6 +196,14 @@ Respond with ONLY a JSON: {\"score\": N, \"issues\": [\"issue1\", ...], \"verdic
   fi
 fi
 
+# ─── Step 6: E2E 안내 (cross만) ──────────────
+if [ "$MODE" = "cross" ]; then
+  echo "=== Step 6: E2E Test ==="
+  echo "  파이프라인 변경 시 별도 실행: pnpm verify:e2e"
+  echo "  (자동 실행 시 5분+ 소요 — cross에서는 안내만)"
+  echo ""
+fi
+
 # ─── Score Summary ────────────────────────────
 PERCENT=$((TOTAL_SCORE * 100 / MAX_SCORE))
 

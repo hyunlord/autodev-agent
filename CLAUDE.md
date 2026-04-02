@@ -141,6 +141,7 @@ GitHub 레포에서 구현 패턴을 검색하거나 이슈/PR을 관리한다.
 | quick | `pnpm verify` | 모든 코드 변경 후 | 70점 만점 |
 | full | `pnpm verify:full` | UI 변경 시 | 85점 만점 |
 | cross | `pnpm verify:cross` | 커밋 전 (필수) | 100점 만점 |
+| e2e | `pnpm verify:e2e` | 파이프라인 변경 시 | 100점 만점 |
 
 #### 등급 기준
 
