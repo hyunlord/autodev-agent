@@ -1,9 +1,10 @@
 /**
  * Extract valid JSON from messy CLI output.
- * 4-stage fallback:
+ * 5-stage fallback:
  *   1. Direct JSON.parse
  *   2. Strip markdown fences, then parse
  *   3. Brace-matching extract largest {...} block
+ *   3.5. Codex JSONL event stream — extract text from item.completed/agent_message
  *   4. Line-by-line scan for JSON objects (JSONL, Codex envelope)
  */
 export function extractJson<T = any>(raw: string, requiredField?: string): T {
@@ -50,6 +51,72 @@ export function extractJson<T = any>(raw: string, requiredField?: string): T {
     attempts.push(`Stage 3: found ${jsonBlocks.length} JSON blocks but none valid`);
   } else {
     attempts.push('Stage 3: no JSON blocks found');
+  }
+
+  // Stage 3.5: Codex CLI JSONL event stream
+  // Codex --json outputs {"type":"item.completed","item":{"type":"agent_message","text":"..."}}
+  // The actual response (and plan JSON) lives inside item.text
+  {
+    const jsonlLines = raw.split('\n');
+    const agentTexts: string[] = [];
+    for (const line of jsonlLines) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith('{')) continue;
+      try {
+        const event = JSON.parse(trimmed);
+        if (event.type === 'item.completed') {
+          if (
+            (event.item?.type === 'agent_message' || event.item?.type === 'result') &&
+            typeof event.item?.text === 'string'
+          ) {
+            agentTexts.push(event.item.text);
+          }
+        }
+        // response.completed with output array
+        if (event.type === 'response.completed' && Array.isArray(event.response?.output)) {
+          for (const out of event.response.output) {
+            if (out.type === 'message' && typeof out.text === 'string') {
+              agentTexts.push(out.text);
+            }
+          }
+        }
+      } catch { continue; }
+    }
+
+    if (agentTexts.length > 0) {
+      // Try each agent text from last to first (final message is most likely the plan)
+      for (let i = agentTexts.length - 1; i >= 0; i--) {
+        const text = agentTexts[i];
+        // Direct parse
+        try {
+          const parsed = JSON.parse(text);
+          if (!requiredField || (parsed && typeof parsed === 'object' && requiredField in parsed)) {
+            return parsed;
+          }
+        } catch { /* not bare JSON */ }
+        // Extract from within text (may be wrapped in markdown fences, prose, etc.)
+        const innerBlocks = findJsonBlocks(text);
+        for (const block of innerBlocks) {
+          try {
+            const parsed = JSON.parse(block);
+            if (!requiredField || (parsed && typeof parsed === 'object' && requiredField in parsed)) {
+              return parsed;
+            }
+          } catch { continue; }
+        }
+      }
+      // Last resort: combine all texts and try brace-matching
+      const combined = agentTexts.join('\n');
+      for (const block of findJsonBlocks(combined)) {
+        try {
+          const parsed = JSON.parse(block);
+          if (!requiredField || (parsed && typeof parsed === 'object' && requiredField in parsed)) {
+            return parsed;
+          }
+        } catch { continue; }
+      }
+      attempts.push(`Stage 3.5: found ${agentTexts.length} agent message(s) but no valid JSON`);
+    }
   }
 
   // Stage 4: Line-by-line scan (for JSONL / Codex envelope)
