@@ -73,6 +73,7 @@ Be critical — your job is to find problems, not confirm the code works.`;
     modifiedFiles: changedFiles.filter(f => existsSync(join(projectDir, f))),
     projectDir,
     tools: [],
+    skipMechanical: true,
     context: {
       projectDir,
       projectType: 'nextjs',

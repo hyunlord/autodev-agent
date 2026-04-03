@@ -32,7 +32,7 @@ export class VerifyAgent implements IAgent {
    * Coding Agent와 다른 LLM을 자동 선택
    */
   static async selectDifferentFrom(codingAgentId: string): Promise<VerifyAgent> {
-    const candidates = ['claude-cli', 'gemini-cli', 'codex-cli', 'claude-api'];
+    const candidates = ['codex-cli', 'gemini-cli'];
     const codingLlm = codingAgentId.replace('claude-code', 'claude-cli');
 
     for (const candidate of candidates) {
@@ -43,8 +43,8 @@ export class VerifyAgent implements IAgent {
       }
     }
 
-    // Fallback: claude-api
-    if (process.env.ANTHROPIC_API_KEY) {
+    // claude-api는 Coding이 Claude가 아닐 때만
+    if (!codingLlm.includes('claude') && process.env.ANTHROPIC_API_KEY) {
       return new VerifyAgent('claude-api');
     }
 
@@ -60,17 +60,21 @@ export class VerifyAgent implements IAgent {
     emit({ type: 'log', level: 'info', message: `[Verify Agent] Using ${this.llm}` } as PipelineEvent);
 
     // ─── Stage 1: Mechanical checks (토큰 0) ──────────
-    emit({ type: 'log', level: 'info', message: '[Verify] Stage 1: Mechanical checks...' } as PipelineEvent);
+    if (!verifyInput.skipMechanical) {
+      emit({ type: 'log', level: 'info', message: '[Verify] Stage 1: Mechanical checks...' } as PipelineEvent);
 
-    const mechanicalResult = await this.runMechanicalChecks(verifyInput, emit);
-    if (!mechanicalResult.passed) {
-      return {
-        success: true,
-        result: mechanicalResult,
-        costUsd: 0,
-        tokenUsage: { input: 0, output: 0 },
-        durationMs: Date.now() - startTime,
-      };
+      const mechanicalResult = await this.runMechanicalChecks(verifyInput, emit);
+      if (!mechanicalResult.passed) {
+        return {
+          success: true,
+          result: mechanicalResult,
+          costUsd: 0,
+          tokenUsage: { input: 0, output: 0 },
+          durationMs: Date.now() - startTime,
+        };
+      }
+    } else {
+      emit({ type: 'log', level: 'info', message: '[Verify] Stage 1: Skipped (layer 1)' } as PipelineEvent);
     }
 
     // ─── Stage 2: Collect evidence for LLM ────────────
@@ -168,15 +172,21 @@ export class VerifyAgent implements IAgent {
   ): Promise<Record<string, unknown>> {
     const evidence: Record<string, unknown> = {};
 
-    // Read file contents
+    // Read file contents (limit total size for CLI prompt)
     const fileContents: Record<string, string> = {};
+    let totalContentSize = 0;
+    const maxTotalContent = 30000;
     for (const file of input.modifiedFiles) {
+      if (totalContentSize >= maxTotalContent) break;
       const fullPath = join(input.projectDir, file);
       if (existsSync(fullPath)) {
         const content = readFileSync(fullPath, 'utf-8');
-        fileContents[file] = content.length > 10000
-          ? content.slice(0, 5000) + '\n...[truncated]...\n' + content.slice(-2000)
+        const remaining = maxTotalContent - totalContentSize;
+        const maxPerFile = Math.min(remaining, 5000);
+        fileContents[file] = content.length > maxPerFile
+          ? content.slice(0, maxPerFile) + '\n...[truncated]...'
           : content;
+        totalContentSize += fileContents[file].length;
       }
     }
     evidence.fileContents = fileContents;
@@ -292,8 +302,10 @@ If key features are missing, score below 60 and verdict "re-code" or "re-plan".`
       } else if (this.llm === 'gemini-cli') {
         const cliPath = await resolveCli('gemini');
         if (!cliPath) throw new Error('Gemini CLI not found');
-        const result = await ex(cliPath, ['-p', verifyPrompt], {
-          cwd: input.projectDir, reject: false, timeout: 120_000,
+        const truncatedPrompt = verifyPrompt.length > 40000 ? verifyPrompt.slice(0, 40000) + '\n...[prompt truncated]' : verifyPrompt;
+        // Gemini CLI indexes the cwd — use /tmp to avoid hang on large projects
+        const result = await ex(cliPath, ['-p', truncatedPrompt], {
+          cwd: '/tmp', reject: false, timeout: 120_000,
         } as any);
         stdout = (result as any).stdout ?? '';
       } else if (this.llm === 'codex-cli') {

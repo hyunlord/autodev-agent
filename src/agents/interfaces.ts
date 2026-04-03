@@ -46,6 +46,7 @@ export interface VerifyInput extends AgentInput {
   modifiedFiles: string[];
   projectDir: string;
   tools: VerifyTool[];
+  skipMechanical?: boolean;
 }
 
 export interface VerifyResult {
