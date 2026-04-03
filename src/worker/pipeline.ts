@@ -442,6 +442,17 @@ async function runSingleCycle(
   );
   emit({ type: 'log', level: 'info', message: `${autoSelected ? 'Auto-selected' : 'Using'} agent: ${agent.name} (${taskCategory})` });
 
+  // ─── Verify Agent Selection ────────────────────────────
+  const { VerifyAgent } = await import('../agents/verify/verify-agent');
+  const verifyAgent = await VerifyAgent.selectDifferentFrom(agentId);
+  const useVerifyAgent = await verifyAgent.isAvailable();
+
+  if (useVerifyAgent) {
+    emit({ type: 'log', level: 'info', message: `[Pipeline] Verify Agent: ${verifyAgent.name} (different from coding: ${agentId})` });
+  } else {
+    emit({ type: 'log', level: 'info', message: '[Pipeline] Verify Agent not available, falling back to mechanical checks' });
+  }
+
   // ─── Plan Review ───────────────────────────────────────
   const autoApprove = options?.forceAutoApprove || taskConfig.autoApprove === true;
 
@@ -549,6 +560,9 @@ async function runSingleCycle(
   let totalCostUsd = planResult.costUsd;
   let lastFailedChecks: Array<{ id: string; description: string; actual?: string; expected?: string; type?: string; filePath?: string }> = [];
   let lastPassedChecks: Array<{ description: string }> = [];
+  let lastVerdict = '';
+  let lastIssues: string[] = [];
+  let lastSuggestions: string[] = [];
 
   if (planResult.costUsd > 0) {
     emit({
@@ -636,6 +650,9 @@ ${plan.codingPrompt}`;
       const retryContext = retryCtrl.buildRetryContext(lastFailedChecks, lastPassedChecks);
       codingPrompt = `${plan.codingPrompt}\n\n---\n\n${retryContext}`;
       emit({ type: 'log', level: 'info', message: `Retry context: ${lastFailedChecks.length} failed, ${lastPassedChecks.length} passed checks from previous attempt` });
+    }
+    if (isRetry && useVerifyAgent && lastIssues.length > 0) {
+      codingPrompt += `\n\n---\n\nPrevious verification FAILED.\n\n## Verdict: ${lastVerdict}\n## Issues found by Verify Agent:\n${lastIssues.map((issue, i) => `${i + 1}. ${issue}`).join('\n')}\n\n## Suggestions:\n${lastSuggestions.map((s, i) => `${i + 1}. ${s}`).join('\n')}\n\nFix ONLY the issues listed above. Do NOT rewrite everything.`;
     }
 
     const coderPrompt = loadPrompt('coder', projectDir, { projectDir });
@@ -750,15 +767,101 @@ ${plan.codingPrompt}`;
     emit({ type: 'status_change', status: 'verifying', message: `Verifying (attempt ${attempt})...` });
 
     const screenshotDir = join(process.cwd(), '.autodev', 'screenshots', taskId, `attempt-${attempt}`);
-    const { runVerification } = await import('./verification');
+    let verifyResult: any;
 
-    const verifyResult = await runVerification(
-      plan.verificationSpec,
-      projectDir,
-      projectConfig,
-      screenshotDir,
-      emit,
-    );
+    if (useVerifyAgent) {
+      // ─── NEW: LLM-based Verify Agent ────────────────
+      const verifyOutput = await verifyAgent.invoke({
+        prompt: 'Verify the coding result',
+        originalPrompt: task.prompt,
+        modifiedFiles: lastModifiedFiles,
+        projectDir,
+        tools: [],
+        context: {
+          projectDir,
+          projectType: projectConfig?.type,
+          files: lastModifiedFiles,
+          verifyFeedback: attempt > 1 ? {
+            previousVerdict: lastVerdict,
+            issues: lastIssues,
+            suggestions: lastSuggestions,
+            attemptCount: attempt,
+          } : undefined,
+        },
+        config: { timeoutMs: 120_000 },
+        onProgress: emit,
+      } as any);
+
+      const vr = verifyOutput.result as any;
+      totalCostUsd += verifyOutput.costUsd;
+
+      emit({
+        type: 'cost_update',
+        attemptNum: attempt,
+        costUsd: verifyOutput.costUsd,
+        totalCostUsd,
+        inputTokens: verifyOutput.tokenUsage?.input ?? 0,
+        outputTokens: verifyOutput.tokenUsage?.output ?? 0,
+        agentId: verifyAgent.id,
+      });
+
+      // Save verify agent result to attempts table
+      db.insert(attempts).values({
+        id: nanoid(),
+        taskId,
+        attemptNum: attempt,
+        agentId: verifyAgent.id,
+        phase: 'verifying',
+        status: vr.passed ? 'success' : 'error',
+        input: JSON.stringify({ originalPrompt: task.prompt?.slice(0, 1000) }),
+        output: JSON.stringify(vr),
+        errorLog: vr.passed ? null : (vr.reason ?? '').slice(0, 5000),
+        errorHash: null,
+        costUsd: verifyOutput.costUsd,
+        tokenCount: (verifyOutput.tokenUsage?.input ?? 0) + (verifyOutput.tokenUsage?.output ?? 0),
+        durationMs: verifyOutput.durationMs,
+        createdAt: new Date().toISOString(),
+      }).run();
+
+      // Convert to legacy format for DB compatibility
+      verifyResult = {
+        allPassed: vr.passed,
+        results: [{
+          checkId: 'verify-agent',
+          type: 'llm_verify',
+          status: vr.passed ? 'pass' : 'fail',
+          description: vr.reason,
+          expected: 'Requirements met',
+          actual: `Score: ${vr.score}/100 — ${vr.reason}`,
+          durationMs: verifyOutput.durationMs,
+        }],
+        consoleErrors: vr.evidence?.consoleErrors ?? [],
+      };
+
+      // Track verdict for retry
+      lastVerdict = vr.verdict;
+      lastIssues = vr.issues ?? [];
+      lastSuggestions = vr.suggestions ?? [];
+
+      emit({ type: 'log', level: vr.passed ? 'info' : 'warn',
+        message: `[Verify Agent] ${(vr.verdict ?? 'unknown').toUpperCase()} — Score: ${vr.score}/100 — ${vr.reason}` });
+
+      // Handle re-plan verdict
+      if (vr.verdict === 're-plan') {
+        emit({ type: 'log', level: 'warn', message: '[Verify Agent] Re-plan needed. Stopping coding retries.' });
+        break;
+      }
+    } else {
+      // ─── LEGACY: mechanical verification ────────────
+      const { runVerification } = await import('./verification');
+      verifyResult = await runVerification(
+        plan.verificationSpec,
+        projectDir,
+        projectConfig,
+        screenshotDir,
+        emit,
+      );
+    }
 
     for (const r of verifyResult.results) {
       db.insert(verifications).values({
@@ -790,20 +893,20 @@ ${plan.codingPrompt}`;
       };
     }
 
-    const failedChecks = verifyResult.results.filter(r => r.status === 'fail');
-    lastFailedChecks = failedChecks.map(r => ({
+    const failedChecks = verifyResult.results.filter((r: any) => r.status === 'fail');
+    lastFailedChecks = failedChecks.map((r: any) => ({
       id: r.checkId,
       description: r.description,
       actual: r.actual,
-      expected: r.expected ?? plan.verificationSpec.steps.find(s => s.id === r.checkId)?.expectedText,
-      type: r.type ?? plan.verificationSpec.steps.find(s => s.id === r.checkId)?.type,
-      filePath: plan.verificationSpec.steps.find(s => s.id === r.checkId)?.filePath,
+      expected: r.expected ?? plan.verificationSpec.steps.find((s: any) => s.id === r.checkId)?.expectedText,
+      type: r.type ?? plan.verificationSpec.steps.find((s: any) => s.id === r.checkId)?.type,
+      filePath: plan.verificationSpec.steps.find((s: any) => s.id === r.checkId)?.filePath,
     }));
     lastPassedChecks = verifyResult.results
-      .filter(r => r.status === 'pass')
-      .map(r => ({ description: r.description }));
+      .filter((r: any) => r.status === 'pass')
+      .map((r: any) => ({ description: r.description }));
 
-    const failSummary = failedChecks.map(c => c.description).join('; ');
+    const failSummary = failedChecks.map((c: any) => c.description).join('; ');
     emit({ type: 'log', level: 'warn', message: `Attempt ${attempt} verification failed: ${failSummary}` });
 
     retryCtrl.recordAttempt({

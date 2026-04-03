@@ -119,6 +119,77 @@ Evaluate Agent:
   대시보드에서 각 단계별 에이전트 직접 지정 가능
 ```
 
+### 3.4 Planning 토론 모드 (Debate Mode)
+
+Planning Agent가 혼자 계획을 짜면 빠뜨리는 게 생긴다.
+복잡한 작업에서는 여러 역할의 에이전트가 토론하면서 계획을 다듬는다.
+
+#### 토론 참여 에이전트
+
+```
+Planner: 계획을 제안한다
+  "index.html, style.css, script.js 3개 만들자"
+
+Questioner: 빠뜨린 부분을 질문한다
+  "DOM 로드 타이밍은? 모바일 레이아웃은? 에러 핸들링은?"
+
+Skeptic: 계획의 약점을 공격한다
+  "3개 파일 따로 만들면 경로 참조 틀릴 수 있어.
+   하나의 index.html이 더 안전하지 않아?"
+
+→ Planner가 피드백을 반영해서 최종 계획 확정
+```
+
+#### 토론 흐름
+
+```
+Round 1: Planner → 초안
+Round 2: Questioner → 질문 → Planner → 답변/수정
+Round 3: Skeptic → 약점 지적 → Planner → 방어/수정
+Round 4: (필요시) 추가 라운드
+Final: Planner → 확정된 계획 출력
+```
+
+#### Planning 모드 선택
+
+```
+Quick (기본):
+  Planner 혼자. 빠르고 저렴.
+  간단한 작업에 적합 ("카운터 만들어줘")
+
+Deliberate:
+  Planner + Questioner. 빠뜨린 부분 체크.
+  중간 복잡도 ("로그인 + 대시보드 만들어줘")
+
+Debate:
+  Planner + Questioner + Skeptic. 계획을 공격하고 방어.
+  복잡한 작업에 적합 ("OAuth + 결제 + 대시보드")
+```
+
+#### 자동 선택 기준
+
+```
+프롬프트 길이 + 기술 스택 수 + 예상 파일 수로 복잡도 추정:
+  간단 (1-3 파일, 단일 스택) → Quick
+  중간 (4-10 파일, 2+ 스택) → Deliberate
+  복잡 (10+ 파일, 다중 스택, 인프라 포함) → Debate
+사용자가 직접 선택도 가능.
+```
+
+#### 비용 고려
+
+```
+Quick: LLM 1회 호출
+Deliberate: LLM 3-4회 호출 (Planner + Questioner + 수정)
+Debate: LLM 5-7회 호출 (Planner + Questioner + Skeptic + 수정들)
+→ 복잡한 작업은 Planning에 돈을 써서 Coding 재작업을 줄이는 전략
+```
+
+#### 구현 시점
+
+Phase R2 (Planning Agent를 IAgent로 분리할 때) 에서 구현.
+R1 (Verify Agent)이 먼저.
+
 ---
 
 ## 4. 파이프라인 — 에이전트 오케스트레이션
