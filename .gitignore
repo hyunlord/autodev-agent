@@ -13,3 +13,5 @@ node_modules/
 .playwright-mcp/
 tsconfig.tsbuildinfo
 .omx/
+.DS_Store
+.autodev/screenshots/

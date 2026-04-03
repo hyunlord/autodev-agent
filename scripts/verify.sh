@@ -131,69 +131,43 @@ if [ "$MODE" = "full" ] || [ "$MODE" = "cross" ]; then
   echo ""
 fi
 
-# ─── Step 5: Cross-Check (cross만, 15점) ──────
+# ─── Step 5: Verify Agent Review (cross만, 15점) ──────
 if [ "$MODE" = "cross" ]; then
-  echo "=== Step 5: Cross-Check (다른 CLI로 코드 리뷰) ==="
+  echo "=== Step 5: Verify Agent Review (다른 LLM이 코드 리뷰) ==="
 
-  # Get recent git diff
-  DIFF=$(git diff HEAD~1 --stat 2>/dev/null || echo "no diff")
-  CHANGED=$(git diff HEAD~1 --name-only 2>/dev/null | head -10 || echo "")
+  CHANGED=$(git diff HEAD~1 --name-only 2>/dev/null | head -20 || echo "")
 
   if [ -n "$CHANGED" ]; then
-    REVIEW_PROMPT="Review this code change for issues. Be critical — try to find bugs, type errors, missing error handling, or regressions.
+    # Run Verify Agent via Node.js script
+    AGENT_OUTPUT=$(npx tsx scripts/verify-agent.ts 2>&1 || echo "")
 
-Changed files:
-$CHANGED
+    # Extract JSON result from output
+    AGENT_JSON=$(echo "$AGENT_OUTPUT" | grep "VERIFY_AGENT_RESULT=" | sed 's/VERIFY_AGENT_RESULT=//')
 
-Diff summary:
-$DIFF
+    if [ -n "$AGENT_JSON" ]; then
+      AGENT_SCORE=$(echo "$AGENT_JSON" | grep -o '"score":[0-9]*' | grep -o '[0-9]*' | head -1)
+      AGENT_VERDICT=$(echo "$AGENT_JSON" | grep -o '"verdict":"[^"]*"' | cut -d'"' -f4)
 
-Score the change 0-15:
-- 15: No issues found
-- 10-14: Minor style issues only
-- 5-9: Missing error handling or edge cases
-- 0-4: Likely bugs or regressions
-
-Respond with ONLY a JSON: {\"score\": N, \"issues\": [\"issue1\", ...], \"verdict\": \"ok|warn|fail\"}"
-
-    CROSS_RESULT=""
-
-    # Try gemini CLI
-    if command -v gemini &> /dev/null; then
-      echo "  Using Gemini CLI for cross-check..."
-      CROSS_RESULT=$(gemini -p "$REVIEW_PROMPT" 2>/dev/null | tail -20 || echo "")
-    fi
-
-    # Fallback: try claude API via curl
-    if [ -z "$CROSS_RESULT" ] && [ -n "$ANTHROPIC_API_KEY" ]; then
-      echo "  Using Claude API for cross-check..."
-      CROSS_RESULT=$(curl -s https://api.anthropic.com/v1/messages \
-        -H "content-type: application/json" \
-        -H "x-api-key: $ANTHROPIC_API_KEY" \
-        -H "anthropic-version: 2023-06-01" \
-        -d "{\"model\":\"claude-sonnet-4-20250514\",\"max_tokens\":500,\"messages\":[{\"role\":\"user\",\"content\":\"$REVIEW_PROMPT\"}]}" 2>/dev/null | grep -o '"text":"[^"]*"' | head -1 || echo "")
-    fi
-
-    if [ -n "$CROSS_RESULT" ]; then
-      CROSS_SCORE=$(echo "$CROSS_RESULT" | grep -o '"score":[[:space:]]*[0-9]*' | grep -o '[0-9]*' | head -1)
-      if [ -n "$CROSS_SCORE" ] && [ "$CROSS_SCORE" -le 15 ]; then
-        add_score "Cross-Check" "$CROSS_SCORE" 15 "다른 LLM 리뷰"
-        echo "  Score: ${CROSS_SCORE}/15"
-        echo "$CROSS_RESULT" | grep -o '"issues":\[[^]]*\]' | head -1 || true
+      if [ -n "$AGENT_SCORE" ] && [ "$AGENT_SCORE" -le 15 ]; then
+        add_score "Verify Agent" "$AGENT_SCORE" 15 "$AGENT_VERDICT"
+        echo "  Score: ${AGENT_SCORE}/15 (${AGENT_VERDICT})"
       else
-        add_score "Cross-Check" 10 15 "파싱 실패, 기본 점수"
+        add_score "Verify Agent" 10 15 "파싱 실패, 기본 점수"
         echo "  ⚠ 점수 파싱 실패, 기본 10점"
       fi
+
+      # Show issues if any
+      echo "$AGENT_OUTPUT" | grep "Issues:" -A 20 | head -15
     else
-      add_score "Cross-Check" 0 15 "CLI 없음"
-      echo "  ⚠ Cross-check CLI를 찾지 못함 (gemini 또는 ANTHROPIC_API_KEY 필요)"
+      add_score "Verify Agent" 0 15 "Agent 실행 실패"
+      echo "  ❌ Verify Agent 실행 실패"
+      echo "  Output: $(echo "$AGENT_OUTPUT" | tail -5)"
     fi
-    echo ""
   else
-    add_score "Cross-Check" 15 15 "변경 없음"
+    add_score "Verify Agent" 15 15 "변경 없음"
     echo "  ✅ 변경된 파일 없음 (skip)"
-    echo ""
   fi
+  echo ""
 fi
 
 # ─── Step 6: E2E 안내 (cross만) ──────────────

@@ -136,12 +136,20 @@ GitHub 레포에서 구현 패턴을 검색하거나 이슈/PR을 관리한다.
 
 #### 검증 레벨
 
-| 레벨 | 명령어 | 언제 | 점수 |
-|------|--------|------|------|
-| quick | `pnpm verify` | 모든 코드 변경 후 | 70점 만점 |
-| full | `pnpm verify:full` | UI 변경 시 | 85점 만점 |
-| cross | `pnpm verify:cross` | 커밋 전 (필수) | 100점 만점 |
-| e2e | `pnpm verify:e2e` | 파이프라인 변경 시 | 100점 만점 |
+| 레벨 | 명령어 | 언제 | 점수 | 검증 방식 |
+|------|--------|------|------|----------|
+| quick | `pnpm verify` | 모든 코드 변경 후 | 70점 만점 | 빌드 + TypeScript + API |
+| full | `pnpm verify:full` | UI 변경 시 | 85점 만점 | + UI 페이지 체크 |
+| cross | `pnpm verify:cross` | 커밋 전 (필수) | 100점 만점 | + **Verify Agent (다른 LLM이 코드 리뷰)** |
+| e2e | `pnpm verify:e2e` | 파이프라인 변경 시 | 100점 만점 | 실제 작업 실행 |
+| agent | `pnpm verify:agent` | 수동 실행 | - | Verify Agent만 단독 실행 |
+
+#### Verify Agent 규칙 (레이어 1)
+
+커밋 전 `pnpm verify:cross` 실행 시, **Verify Agent가 변경된 코드를 리뷰**한다.
+- Claude Code로 코딩했으면 → Gemini CLI 또는 Codex CLI가 리뷰
+- Verify Agent가 없으면 → score 10/15 + warn (빌드를 막지 않음)
+- Verify Agent는 레이어 2(서비스)에서 사용하는 것과 **같은 Verify Agent**
 
 #### 등급 기준
 
