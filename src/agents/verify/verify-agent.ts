@@ -32,7 +32,7 @@ export class VerifyAgent implements IAgent {
    * Coding Agent와 다른 LLM을 자동 선택
    */
   static async selectDifferentFrom(codingAgentId: string): Promise<VerifyAgent> {
-    const candidates = ['codex-cli', 'gemini-cli'];
+    const candidates = ['gemini-cli', 'claude-cli', 'claude-api'];
     const codingLlm = codingAgentId.replace('claude-code', 'claude-cli');
 
     for (const candidate of candidates) {
@@ -53,6 +53,7 @@ export class VerifyAgent implements IAgent {
   }
 
   async invoke(input: AgentInput): Promise<AgentOutput> {
+    // TODO R2: IAgent를 제네릭으로 리팩터하면 캐스팅 제거 가능
     const verifyInput = input as unknown as VerifyInput;
     const startTime = Date.now();
     const emit = input.onProgress ?? (() => {});
@@ -102,6 +103,7 @@ export class VerifyAgent implements IAgent {
     emit: (e: PipelineEvent) => void,
   ): Promise<VerifyResult> {
     // Check: files were actually created
+    // TODO: 삭제만 한 경우 modifiedFiles가 빈 배열 → 삭제 변경도 허용하도록 개선
     if (input.modifiedFiles.length === 0) {
       emit({ type: 'log', level: 'warn', message: '[Verify] No files were created/modified' } as PipelineEvent);
       return {
@@ -141,7 +143,9 @@ export class VerifyAgent implements IAgent {
     if (existsSync(packageJsonPath)) {
       try {
         const ex = await getExeca();
-        await ex('npm', ['install'], { cwd: input.projectDir, reject: false, timeout: 120_000 } as any);
+        if (!existsSync(join(input.projectDir, 'node_modules'))) {
+          await ex('npm', ['install'], { cwd: input.projectDir, reject: false, timeout: 120_000 } as any);
+        }
         const buildResult = await ex('npm', ['run', 'build'], { cwd: input.projectDir, reject: false, timeout: 60_000 } as any);
         if ((buildResult as any).exitCode !== 0) {
           const stderr = ((buildResult as any).stderr ?? '').slice(0, 2000);

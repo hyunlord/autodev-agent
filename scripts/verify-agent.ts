@@ -19,13 +19,16 @@ async function main() {
   console.log('🔍 Verify Agent — Layer 1 Code Review');
   console.log('');
 
-  // 1. Get changed files
+  // 1. Get changed files (staged + unstaged + untracked)
   let changedFiles: string[] = [];
   try {
-    const diffOutput = execSync('git diff HEAD~1 --name-only', { cwd: projectDir, encoding: 'utf-8' });
-    changedFiles = diffOutput.trim().split('\n').filter(Boolean);
+    const statusOutput = execSync('git status --porcelain', { cwd: projectDir, encoding: 'utf-8' });
+    changedFiles = statusOutput.trim().split('\n')
+      .filter(Boolean)
+      .map(line => line.slice(3).trim())  // Remove status prefix (e.g. "M ", "?? ", "A ")
+      .filter(f => !f.startsWith('.git/'));
   } catch {
-    console.log('⚠ No git diff available');
+    console.log('⚠ No git status available');
     process.exit(0);
   }
 
@@ -70,6 +73,8 @@ Be critical — your job is to find problems, not confirm the code works.`;
   const result = await verifyAgent.invoke({
     prompt: 'Review the code changes',
     originalPrompt: prompt,
+    // TODO: 삭제된 파일도 리뷰 대상에 포함 (현재는 existsSync로 필터)
+    // TODO: review 지시를 prompt 필드로 이동 (현재는 originalPrompt에 있음)
     modifiedFiles: changedFiles.filter(f => existsSync(join(projectDir, f))),
     projectDir,
     tools: [],
@@ -89,7 +94,7 @@ Be critical — your job is to find problems, not confirm the code works.`;
     },
   } as any);
 
-  const vr = result.result as any;
+  const vr = result.result as any; // TODO: IAgent 제네릭 리팩터 후 as any 제거
 
   // 5. Output result
   console.log('');
@@ -113,6 +118,7 @@ Be critical — your job is to find problems, not confirm the code works.`;
   console.log('─'.repeat(60));
 
   // 6. Output JSON for verify.sh
+  // Score scaled to 15 points for verify.sh integration (15 = max in cross-check step)
   const jsonResult = JSON.stringify({
     score: Math.round(vr.score * 15 / 100),
     issues: vr.issues,
@@ -120,8 +126,8 @@ Be critical — your job is to find problems, not confirm the code works.`;
   });
   console.log(`VERIFY_AGENT_RESULT=${jsonResult}`);
 
-  // Exit with error if fail
-  if (vr.verdict === 'fail') {
+  // Exit with error if not pass
+  if (vr.verdict === 'fail' || vr.verdict === 're-code' || vr.verdict === 're-plan') {
     process.exit(1);
   }
 }
