@@ -22,6 +22,11 @@ export interface AgentInput {
     gitStatus?: string;
     previousResults?: unknown;
     verifyFeedback?: VerifyFeedback;
+    // Planning-specific
+    projectConfig?: unknown;
+    workspaceContext?: string;
+    // Coding-specific
+    mcpServers?: unknown[];
   };
   config: {
     systemPrompt?: string;
