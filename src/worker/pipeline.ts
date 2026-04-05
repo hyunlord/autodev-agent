@@ -523,11 +523,17 @@ async function runSingleCycle(
     };
   }
 
+  // ─── Re-plan outer loop setup ─────────────────────────
+  const MAX_REPLANS = 2;
+  let replanCount = 0;
+  let currentPlan = plan;
+  let replanFeedback: { issues: string[]; suggestions: string[]; previousSummary: string } | null = null;
+
   // Validate verification spec against actual project — remove impossible checks
   if (!projectConfig?.buildCmd) {
     const hasPkgJson = existsSync(join(projectDir, 'package.json'));
     if (!hasPkgJson) {
-      plan.verificationSpec.steps = plan.verificationSpec.steps.filter(s => {
+      currentPlan.verificationSpec.steps = currentPlan.verificationSpec.steps.filter(s => {
         if (s.type === 'build_check') {
           emit({ type: 'log', level: 'warn', message: `Removed build_check: no package.json found` });
           return false;
@@ -538,31 +544,19 @@ async function runSingleCycle(
         }
         return true;
       });
-      if (plan.verificationSpec.steps.length === 0) {
-        plan.verificationSpec.steps.push({
+      if (currentPlan.verificationSpec.steps.length === 0) {
+        currentPlan.verificationSpec.steps.push({
           id: 'v1',
           description: 'Output files exist',
           type: 'file_check',
-          filePath: plan.estimatedFiles[0] ?? 'index.html',
+          filePath: currentPlan.estimatedFiles[0] ?? 'index.html',
         });
       }
     }
   }
 
   // ─── Code → Verify retry loop ─────────────────────────
-  const retryCtrl = new RetryController({
-    maxAttempts: config.maxRetries,
-    timeBudgetMs: 300_000,
-    tokenBudget: 100_000,
-  });
-
-  let lastModifiedFiles: string[] = [];
   let totalCostUsd = planResult.costUsd;
-  let lastFailedChecks: Array<{ id: string; description: string; actual?: string; expected?: string; type?: string; filePath?: string }> = [];
-  let lastPassedChecks: Array<{ description: string }> = [];
-  let lastVerdict = '';
-  let lastIssues: string[] = [];
-  let lastSuggestions: string[] = [];
 
   if (planResult.costUsd > 0) {
     emit({
@@ -611,6 +605,122 @@ async function runSingleCycle(
     }
   } catch { /* not a git repo, skip */ }
 
+  // ═══ Re-plan outer loop ═══════════════════════════════
+  while (replanCount <= MAX_REPLANS) {
+    // ─── Re-plan: generate new plan with Verify Agent feedback ───
+    if (replanFeedback) {
+      replanCount++;
+      emit({ type: 'log', level: 'info', message: `[Re-plan] Attempt ${replanCount}/${MAX_REPLANS} — regenerating plan with Verify Agent feedback` });
+      emit({ type: 'status_change', status: 'planning' as TaskStatus, message: `Re-planning (attempt ${replanCount})...` });
+
+      const replanPrompt = `${task.prompt}
+
+## IMPORTANT: Previous attempt FAILED. You must create a DIFFERENT plan.
+
+Previous plan summary: ${replanFeedback.previousSummary}
+
+Issues found by verification:
+${replanFeedback.issues.map((issue: string, i: number) => `${i + 1}. ${issue}`).join('\n')}
+
+Suggestions:
+${replanFeedback.suggestions.map((s: string, i: number) => `${i + 1}. ${s}`).join('\n')}
+
+DO NOT repeat the same approach. Fix the root cause of the issues above.
+Consider a simpler or fundamentally different implementation strategy.`;
+
+      try {
+        const replanResult = await generatePlan(
+          replanPrompt,
+          projectConfig,
+          (task.planningMode ?? 'claude-cli') as PlanningMode,
+          undefined,
+          (msg: string) => emit({ type: 'log', level: 'info', message: msg }),
+          workspaceContext,
+          projectDir,
+          systemPrompt,
+        );
+
+        currentPlan = replanResult.plan;
+        totalCostUsd += replanResult.costUsd;
+
+        emit({ type: 'cost_update', attemptNum: 0, costUsd: replanResult.costUsd, totalCostUsd, inputTokens: replanResult.inputTokens, outputTokens: replanResult.outputTokens, agentId: `planning-${(task as any).planningMode ?? 'claude-cli'}` });
+        emit({ type: 'log', level: 'info', message: `[Re-plan] New plan: ${currentPlan.summary}` });
+
+        db.update(tasks).set({
+          plan: JSON.stringify(currentPlan),
+          updatedAt: new Date().toISOString(),
+        }).where(eq(tasks.id, taskId)).run();
+
+        if (replanResult.costUsd > 0) {
+          db.insert(attempts).values({
+            id: nanoid(),
+            taskId,
+            attemptNum: 0,
+            agentId: `planning-${(task as any).planningMode ?? 'claude-cli'}`,
+            phase: 'planning',
+            status: 'success',
+            input: JSON.stringify({ prompt: replanPrompt.slice(0, 2000), replanAttempt: replanCount }),
+            output: JSON.stringify({ summary: currentPlan.summary }),
+            errorLog: null,
+            errorHash: null,
+            costUsd: replanResult.costUsd,
+            tokenCount: replanResult.inputTokens + replanResult.outputTokens,
+            durationMs: null,
+            createdAt: new Date().toISOString(),
+          }).run();
+        }
+
+        // Normalize verification filePaths for new plan
+        if (currentPlan.verificationSpec?.steps) {
+          for (const step of currentPlan.verificationSpec.steps) {
+            if (step.filePath && isAbsolute(step.filePath)) {
+              if (step.filePath.startsWith(projectDir)) {
+                step.filePath = step.filePath.slice(projectDir.length).replace(/^\//, '');
+              } else {
+                step.filePath = step.filePath.split('/').pop() ?? step.filePath;
+              }
+            }
+          }
+        }
+
+        // Validate verification spec for new plan
+        if (!projectConfig?.buildCmd) {
+          const hasPkgJson = existsSync(join(projectDir, 'package.json'));
+          if (!hasPkgJson) {
+            currentPlan.verificationSpec.steps = currentPlan.verificationSpec.steps.filter(s => {
+              if (s.type === 'build_check' || s.type === 'port_check' || s.type === 'http_check' || s.type === 'dom_check') return false;
+              return true;
+            });
+            if (currentPlan.verificationSpec.steps.length === 0) {
+              currentPlan.verificationSpec.steps.push({
+                id: 'v1', description: 'Output files exist', type: 'file_check',
+                filePath: currentPlan.estimatedFiles[0] ?? 'index.html',
+              });
+            }
+          }
+        }
+
+        replanFeedback = null;
+      } catch (replanError) {
+        emit({ type: 'log', level: 'error', message: `[Re-plan] Failed: ${replanError}` });
+        break;
+      }
+    }
+
+    // ─── Reset retry state for this plan ───────────────────
+    const retryCtrl = new RetryController({
+      maxAttempts: config.maxRetries,
+      timeBudgetMs: 300_000,
+      tokenBudget: 100_000,
+    });
+
+    let lastModifiedFiles: string[] = [];
+    let lastFailedChecks: Array<{ id: string; description: string; actual?: string; expected?: string; type?: string; filePath?: string }> = [];
+    let lastPassedChecks: Array<{ description: string }> = [];
+    let lastVerdict = '';
+    let lastIssues: string[] = [];
+    let lastSuggestions: string[] = [];
+
   for (let attempt = 1; attempt <= config.maxRetries; attempt++) {
     const isRetry = attempt > 1;
     if (isRetry) {
@@ -629,7 +739,7 @@ Do NOT navigate to or modify files outside this directory.
 Do NOT search for or modify any files in parent directories.
 Your working directory is ${projectDir} — all file paths must be relative to this directory.
 
-${plan.codingPrompt}`;
+${currentPlan.codingPrompt}`;
     if (workspaceContext) {
       codingPrompt = codingPrompt + `\n\n${workspaceContext}`;
     }
@@ -648,7 +758,7 @@ ${plan.codingPrompt}`;
     }
     if (isRetry && lastFailedChecks.length > 0) {
       const retryContext = retryCtrl.buildRetryContext(lastFailedChecks, lastPassedChecks);
-      codingPrompt = `${plan.codingPrompt}\n\n---\n\n${retryContext}`;
+      codingPrompt = `${currentPlan.codingPrompt}\n\n---\n\n${retryContext}`;
       emit({ type: 'log', level: 'info', message: `Retry context: ${lastFailedChecks.length} failed, ${lastPassedChecks.length} passed checks from previous attempt` });
     }
     if (isRetry && useVerifyAgent && lastIssues.length > 0) {
@@ -730,7 +840,7 @@ ${plan.codingPrompt}`;
       if (!allowed) {
         return {
           success: false,
-          summary: plan.summary,
+          summary: currentPlan.summary,
           modifiedFiles: lastModifiedFiles,
           costUsd: totalCostUsd,
           attemptCount: attempt,
@@ -848,14 +958,19 @@ ${plan.codingPrompt}`;
 
       // Handle re-plan verdict
       if (vr.verdict === 're-plan') {
-        emit({ type: 'log', level: 'warn', message: '[Verify Agent] Re-plan needed. Stopping coding retries.' });
+        emit({ type: 'log', level: 'warn', message: `[Verify Agent] Re-plan needed (score: ${vr.score}). Will regenerate plan.` });
+        replanFeedback = {
+          issues: vr.issues ?? [],
+          suggestions: vr.suggestions ?? [],
+          previousSummary: currentPlan.summary,
+        };
         break;
       }
     } else {
       // ─── LEGACY: mechanical verification ────────────
       const { runVerification } = await import('./verification');
       verifyResult = await runVerification(
-        plan.verificationSpec,
+        currentPlan.verificationSpec,
         projectDir,
         projectConfig,
         screenshotDir,
@@ -883,7 +998,7 @@ ${plan.codingPrompt}`;
     if (verifyResult.allPassed) {
       return {
         success: true,
-        summary: plan.summary,
+        summary: currentPlan.summary,
         modifiedFiles: lastModifiedFiles,
         costUsd: totalCostUsd,
         attemptCount: attempt,
@@ -898,9 +1013,9 @@ ${plan.codingPrompt}`;
       id: r.checkId,
       description: r.description,
       actual: r.actual,
-      expected: r.expected ?? plan.verificationSpec.steps.find((s: any) => s.id === r.checkId)?.expectedText,
-      type: r.type ?? plan.verificationSpec.steps.find((s: any) => s.id === r.checkId)?.type,
-      filePath: plan.verificationSpec.steps.find((s: any) => s.id === r.checkId)?.filePath,
+      expected: r.expected ?? currentPlan.verificationSpec.steps.find((s: any) => s.id === r.checkId)?.expectedText,
+      type: r.type ?? currentPlan.verificationSpec.steps.find((s: any) => s.id === r.checkId)?.type,
+      filePath: currentPlan.verificationSpec.steps.find((s: any) => s.id === r.checkId)?.filePath,
     }));
     lastPassedChecks = verifyResult.results
       .filter((r: any) => r.status === 'pass')
@@ -922,7 +1037,7 @@ ${plan.codingPrompt}`;
     if (!allowed) {
       return {
         success: false,
-        summary: plan.summary,
+        summary: currentPlan.summary,
         modifiedFiles: lastModifiedFiles,
         costUsd: totalCostUsd,
         attemptCount: attempt,
@@ -935,18 +1050,52 @@ ${plan.codingPrompt}`;
 
     emit({ type: 'log', level: 'info', message: `Will retry (${reason ?? 'checks failed'})...` });
   }
+  // ─── End of coding retry loop ─────────────────────────
 
-  // Max retries exhausted
+    // Check if re-plan is needed
+    if (!replanFeedback) {
+      // No re-plan requested — max retries exhausted for this plan
+      return {
+        success: false,
+        summary: currentPlan.summary,
+        modifiedFiles: lastModifiedFiles,
+        costUsd: totalCostUsd,
+        attemptCount: config.maxRetries,
+        totalDurationMs: Date.now() - startTime,
+        failedChecks: lastFailedChecks,
+        attemptRecords: retryCtrl.attempts,
+        stopReason: 'max_attempts',
+      };
+    }
+
+    // Check re-plan budget
+    if (replanCount >= MAX_REPLANS) {
+      emit({ type: 'log', level: 'warn', message: `[Re-plan] Max re-plans reached (${MAX_REPLANS}). Escalating.` });
+      return {
+        success: false,
+        summary: currentPlan.summary,
+        modifiedFiles: lastModifiedFiles,
+        costUsd: totalCostUsd,
+        attemptCount: config.maxRetries,
+        totalDurationMs: Date.now() - startTime,
+        failedChecks: lastFailedChecks,
+        attemptRecords: retryCtrl.attempts,
+        stopReason: 'max_replans',
+      };
+    }
+  } // ═══ End of re-plan outer loop ═══════════════════════
+
+  // All plans exhausted (should not normally reach here)
   return {
     success: false,
-    summary: plan.summary,
-    modifiedFiles: lastModifiedFiles,
+    summary: currentPlan.summary,
+    modifiedFiles: [],
     costUsd: totalCostUsd,
-    attemptCount: config.maxRetries,
+    attemptCount: 0,
     totalDurationMs: Date.now() - startTime,
-    failedChecks: lastFailedChecks,
-    attemptRecords: retryCtrl.attempts,
-    stopReason: 'max_attempts',
+    failedChecks: [],
+    attemptRecords: [],
+    stopReason: 'max_replans',
   };
 }
 
