@@ -178,21 +178,27 @@ export class VerifyAgent implements IAgent {
 
     // Read file contents (limit total size for CLI prompt)
     const fileContents: Record<string, string> = {};
+    const truncatedFiles: Record<string, number> = {};
     let totalContentSize = 0;
-    const maxTotalContent = 30000;
+    const maxTotalContent = 60000;
     for (const file of input.modifiedFiles) {
       if (totalContentSize >= maxTotalContent) break;
       const fullPath = join(input.projectDir, file);
       if (existsSync(fullPath)) {
         const content = readFileSync(fullPath, 'utf-8');
         const remaining = maxTotalContent - totalContentSize;
-        const maxPerFile = Math.min(remaining, 5000);
-        fileContents[file] = content.length > maxPerFile
-          ? content.slice(0, maxPerFile) + '\n...[truncated]...'
-          : content;
+        const maxPerFile = Math.min(remaining, 15000);
+        if (content.length > maxPerFile) {
+          fileContents[file] = content.slice(0, maxPerFile)
+            + `\n...[NOTE: This file was truncated from ${content.length} bytes. The code may be complete — do not fail based on truncation alone.]...`;
+          truncatedFiles[file] = content.length;
+        } else {
+          fileContents[file] = content;
+        }
         totalContentSize += fileContents[file].length;
       }
     }
+    evidence.truncatedFiles = truncatedFiles;
     evidence.fileContents = fileContents;
 
     // List all files in project
@@ -296,30 +302,50 @@ If key features are missing, score below 60 and verdict "re-code" or "re-plan".`
       if (this.llm === 'claude-cli') {
         const cliPath = await resolveCli('claude');
         if (!cliPath) throw new Error('Claude CLI not found');
-        const result = await ex(cliPath, [
-          '-p', verifyPrompt,
-          '--output-format', 'text',
-          '--max-turns', '2',
-          '--dangerously-skip-permissions',
-        ], { cwd: input.projectDir, reject: false, timeout: 120_000 } as any);
-        stdout = (result as any).stdout ?? '';
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 120_000);
+        try {
+          const result = await ex(cliPath, [
+            '-p', verifyPrompt,
+            '--output-format', 'text',
+            '--max-turns', '2',
+            '--dangerously-skip-permissions',
+          ], { cwd: input.projectDir, reject: false, timeout: 120_000, signal: controller.signal } as any);
+          stdout = (result as any).stdout ?? '';
+        } finally {
+          clearTimeout(timer);
+        }
       } else if (this.llm === 'gemini-cli') {
         const cliPath = await resolveCli('gemini');
         if (!cliPath) throw new Error('Gemini CLI not found');
         const truncatedPrompt = verifyPrompt.length > 40000 ? verifyPrompt.slice(0, 40000) + '\n...[prompt truncated]' : verifyPrompt;
         // Gemini CLI indexes the cwd — use /tmp to avoid hang on large projects
-        const result = await ex(cliPath, ['-p', truncatedPrompt], {
-          cwd: '/tmp', reject: false, timeout: 120_000,
-        } as any);
-        stdout = (result as any).stdout ?? '';
+        // AbortController enforces timeout even when reject: false
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 120_000);
+        try {
+          const result = await ex(cliPath, ['-p', truncatedPrompt], {
+            cwd: '/tmp', reject: false, timeout: 120_000,
+            signal: controller.signal,
+          } as any);
+          stdout = (result as any).stdout ?? '';
+        } finally {
+          clearTimeout(timer);
+        }
       } else if (this.llm === 'codex-cli') {
         const cliPath = await resolveCli('codex');
         if (!cliPath) throw new Error('Codex CLI not found');
-        const result = await ex(cliPath, [
-          'exec', '--full-auto', '--sandbox', 'workspace-write', '--json',
-          verifyPrompt.slice(0, 12000),
-        ], { cwd: input.projectDir, reject: false, timeout: 120_000 } as any);
-        stdout = (result as any).stdout ?? '';
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 120_000);
+        try {
+          const result = await ex(cliPath, [
+            'exec', '--full-auto', '--sandbox', 'workspace-write', '--json',
+            verifyPrompt.slice(0, 12000),
+          ], { cwd: input.projectDir, reject: false, timeout: 120_000, signal: controller.signal } as any);
+          stdout = (result as any).stdout ?? '';
+        } finally {
+          clearTimeout(timer);
+        }
       } else if (this.llm === 'claude-api') {
         const apiKey = process.env.ANTHROPIC_API_KEY;
         if (!apiKey) throw new Error('ANTHROPIC_API_KEY not set');
