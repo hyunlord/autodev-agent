@@ -190,6 +190,21 @@ Debate: LLM 5-7회 호출 (Planner + Questioner + Skeptic + 수정들)
 Phase R2 (Planning Agent를 IAgent로 분리할 때) 에서 구현.
 R1 (Verify Agent)이 먼저.
 
+#### 참조 흐름도
+
+`docs/reference/worldsim_harness_pipeline_flow.svg` — 다른 프로젝트의 하네스 파이프라인 흐름도.
+Planning debate loop (Drafter → Challenger → QC), Generator 격리, Visual verification, Evaluator, pre-commit hook 구조가 포함.
+
+핵심 참조 패턴:
+- **Agent isolation**: 각 에이전트가 볼 수 있는 정보를 제한 (자기 합리화 방지)
+  - Drafter: full project context
+  - Challenger: plan만 봄 (격리)
+  - Generator: plan + prompt만 (격리)
+  - Evaluator: 결과물만, reasoning 못 봄
+- **Planning debate loop**: Drafter → Challenger → Revision → QC (max 2 rounds)
+- **Visual verification**: 실행 → 스크린샷 → VLM 분석 (별도 단계)
+- **pre-commit hook**: verdict 파일 확인 → 통과해야 커밋
+
 ---
 
 ## 4. 파이프라인 — 에이전트 오케스트레이션

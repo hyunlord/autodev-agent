@@ -9,7 +9,11 @@ export class AgentRegistry {
   private static agents: Map<string, IAgent> = new Map();
 
   /** Get or create a planning agent */
-  static getPlanningAgent(mode?: string): PlanningAgent {
+  static getPlanningAgent(mode?: string): IAgent {
+    if (mode === 'debate') {
+      const { DebatePlanner } = require('./planning/debate-planner');
+      return new DebatePlanner();
+    }
     const id = `planning-${mode ?? 'claude-cli'}`;
     if (!this.agents.has(id)) {
       this.agents.set(id, new PlanningAgent(mode));

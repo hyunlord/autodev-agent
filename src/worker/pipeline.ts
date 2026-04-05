@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { eq, and, not, desc } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import { detectProjectType, type ProjectConfig } from '../lib/detection/project-type';
-import { generatePlan } from './planning';
+import { generatePlan, type PlanResult } from './planning';
 import { PluginRegistry } from '../lib/plugins/registry';
 import { selectAgent } from '../lib/agent-selector';
 import { loadPrompt } from '../lib/harness/prompt-loader';
@@ -397,19 +397,56 @@ async function runSingleCycle(
   const startTime = Date.now();
 
   // ─── Planning ──────────────────────────────────────────
-  const planResult = await generatePlan(
-    task.prompt,
-    projectConfig,
-    (task.planningMode ?? 'auto') as PlanningMode,
-    taskConfig.codingPrompt ? {
-      codingPrompt: taskConfig.codingPrompt,
-      verificationChecklist: taskConfig.verificationChecklist ?? '',
-    } : undefined,
-    (msg) => emit({ type: 'log', level: 'info', message: msg }),
-    workspaceContext,
-    projectDir,
-    systemPrompt,
-  );
+  let planResult: PlanResult;
+  const planMode = (task.planningMode ?? 'auto') as PlanningMode;
+
+  if (planMode === 'debate') {
+    // Debate mode: Drafter → Challenger → QC
+    const { DebatePlanner } = await import('../agents/planning/debate-planner');
+    const debatePlanner = new DebatePlanner('claude-cli');
+    const debateOutput = await debatePlanner.invoke({
+      prompt: task.prompt,
+      context: {
+        projectDir,
+        projectConfig,
+        workspaceContext,
+      },
+      config: {
+        systemPrompt: systemPrompt ?? undefined,
+      },
+      onProgress: emit,
+    });
+
+    const debateResult = debateOutput.result as {
+      plan: import('./planning').Plan;
+      totalRounds: number;
+      inputTokens: number;
+      outputTokens: number;
+    };
+    planResult = {
+      plan: debateResult.plan,
+      costUsd: debateOutput.costUsd,
+      inputTokens: debateResult.inputTokens,
+      outputTokens: debateResult.outputTokens,
+    };
+
+    emit({ type: 'log', level: 'info',
+      message: `[Debate] ${debateResult.totalRounds} round(s), cost: $${debateOutput.costUsd.toFixed(4)}` });
+  } else {
+    planResult = await generatePlan(
+      task.prompt,
+      projectConfig,
+      planMode,
+      taskConfig.codingPrompt ? {
+        codingPrompt: taskConfig.codingPrompt,
+        verificationChecklist: taskConfig.verificationChecklist ?? '',
+      } : undefined,
+      (msg) => emit({ type: 'log', level: 'info', message: msg }),
+      workspaceContext,
+      projectDir,
+      systemPrompt,
+    );
+  }
   const plan = planResult.plan;
 
   emit({ type: 'log', level: 'info', message: `Plan: ${plan.summary}` });

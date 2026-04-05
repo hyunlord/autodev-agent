@@ -40,7 +40,7 @@ const [tasks, setTasks] = useState<Task[]>([]);
   const [prompt, setPrompt] = useState('');
   const [projectDir, setProjectDir] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [planningMode, setPlanningMode] = useState<'claude-cli' | 'gemini-cli' | 'codex-cli' | 'api' | 'manual'>('claude-cli');
+  const [planningMode, setPlanningMode] = useState<'claude-cli' | 'gemini-cli' | 'codex-cli' | 'api' | 'manual' | 'debate'>('claude-cli');
   const [codingPrompt, setCodingPrompt] = useState('');
   const [verificationChecklist, setVerificationChecklist] = useState('');
   const [agents, setAgents] = useState<Array<{ id: string; name: string; available: boolean; path: string | null }>>([]);
@@ -250,6 +250,7 @@ const [tasks, setTasks] = useState<Task[]>([]);
               { id: 'gemini-cli', label: 'Gemini CLI' },
               { id: 'codex-cli', label: 'Codex CLI' },
               { id: 'api', label: 'Claude API' },
+              { id: 'debate', label: '\uD83D\uDDE3\uFE0F Debate' },
               { id: 'manual', label: 'Manual' },
             ] as const).map((mode) => (
               <button
@@ -278,6 +279,9 @@ const [tasks, setTasks] = useState<Task[]>([]);
         )}
         {planningMode === 'api' && (
           <p className="mt-1 text-xs text-yellow-500">Uses Claude API directly. Requires ANTHROPIC_API_KEY environment variable.</p>
+        )}
+        {planningMode === 'debate' && (
+          <p className="mt-1 text-xs text-purple-400">Drafter → Challenger → QC. 정교하지만 LLM 3-4회 호출 (비용 높음).</p>
         )}
         {planningMode === 'manual' && (
           <div className="mt-3 space-y-3">
