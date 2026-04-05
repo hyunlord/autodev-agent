@@ -326,7 +326,7 @@ If key features are missing, score below 60 and verdict "re-code" or "re-plan".`
         try {
           const result = await ex(cliPath, ['-p', truncatedPrompt], {
             cwd: '/tmp', reject: false, timeout: 120_000,
-            signal: controller.signal,
+            cancelSignal: controller.signal,
           } as any);
           stdout = (result as any).stdout ?? '';
         } finally {
