@@ -948,6 +948,12 @@ ${currentPlan.codingPrompt}`;
         consoleErrors: vr.evidence?.consoleErrors ?? [],
       };
 
+      // Force re-plan if same verdict repeats — different approach needed
+      if (lastVerdict === 're-code' && vr.verdict === 're-code' && attempt >= 2) {
+        emit({ type: 'log', level: 'warn', message: '[Pipeline] Same re-code verdict repeated — forcing re-plan' });
+        vr.verdict = 're-plan';
+      }
+
       // Track verdict for retry
       lastVerdict = vr.verdict;
       lastIssues = vr.issues ?? [];

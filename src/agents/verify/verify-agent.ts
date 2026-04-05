@@ -289,6 +289,17 @@ verdict meanings:
 - "re-plan": Fundamental approach is wrong, needs re-planning
 - "fail": Cannot be fixed with current tools/approach
 
+IMPORTANT — issues writing rules:
+- Do NOT write vague issues like "logic is wrong"
+- Specify EXACTLY which file, which part, and what is wrong
+- State the actual behavior and expected behavior explicitly
+- Example: "index.html line ~50: condition treats playerChoice === computerChoice as a win, but it should be a draw"
+
+IMPORTANT — suggestions writing rules:
+- Do NOT write vague suggestions like "fix it"
+- Specify EXACTLY which code to change and how
+- Example: "In determineWinner function, change so that (playerChoice - computerChoice + 3) % 3 === 1 means win, 2 means loss"
+
 Be strict. Score 80+ only if ALL requested features work correctly.
 If key features are missing, score below 60 and verdict "re-code" or "re-plan".`;
 
