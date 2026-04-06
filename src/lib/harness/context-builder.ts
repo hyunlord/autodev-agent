@@ -1,5 +1,5 @@
 import { getExeca } from '../execa';
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, existsSync, readdirSync } from 'fs';
 import { join, relative } from 'path';
 
 export interface ProjectContext {
@@ -8,11 +8,14 @@ export interface ProjectContext {
   gitStatus: string | null;        // short status (changed/staged/untracked)
   recentCommits: string | null;    // last 5 commits oneline
   changedFiles: string[];          // modified + staged + untracked
+  defaultBranch: string | null;    // main/master (PR 대상)
+  gitUserName: string | null;      // git config user.name
 
   // Project info
   projectTree: string;             // directory tree (depth 3)
   packageInfo: PackageInfo | null; // from package.json
   fileCount: number;
+  tsConfig: { strict: boolean; target: string } | null; // tsconfig.json 핵심 정보
 
   // Context files
   readmeContent: string | null;    // README.md first 1000 chars
@@ -40,7 +43,7 @@ export async function buildProjectContext(
   const execa = await getExeca();
 
   // Run git commands in parallel
-  const [gitBranch, gitStatus, recentCommits, changedFiles, projectTree] = await Promise.all([
+  const [gitBranch, gitStatus, recentCommits, changedFiles, projectTree, defaultBranch, gitUserName] = await Promise.all([
     // Current branch
     execa('git', ['branch', '--show-current'], { cwd: projectDir, reject: false, timeout: 5_000 })
       .then((r: any) => r.stdout.trim() || null)
@@ -61,10 +64,23 @@ export async function buildProjectContext(
 
     // Directory tree
     buildTree(projectDir),
+
+    // Default branch (main/master)
+    execa('git', ['config', '--get', 'init.defaultBranch'], { cwd: projectDir, reject: false, timeout: 5_000 })
+      .then((r: any) => r.stdout.trim() || 'main')
+      .catch(() => 'main'),
+
+    // Git user name
+    execa('git', ['config', 'user.name'], { cwd: projectDir, reject: false, timeout: 5_000 })
+      .then((r: any) => r.stdout.trim() || null)
+      .catch(() => null),
   ]);
 
   // Package info
   const packageInfo = readPackageInfo(projectDir);
+
+  // TypeScript config
+  const tsConfig = readTsConfig(projectDir);
 
   // File count
   let fileCount = 0;
@@ -89,9 +105,12 @@ export async function buildProjectContext(
     gitStatus,
     recentCommits,
     changedFiles,
+    defaultBranch,
+    gitUserName,
     projectTree,
     packageInfo,
     fileCount,
+    tsConfig,
     readmeContent,
     autodevMemory,
     previousTaskSummary: previousTaskSummary ?? null,
@@ -105,9 +124,12 @@ export function formatContext(ctx: ProjectContext): string {
   const sections: string[] = [];
 
   // Git info
-  if (ctx.gitBranch || ctx.gitStatus) {
+  if (ctx.gitBranch || ctx.gitStatus || ctx.defaultBranch) {
     let git = '## Git Status\n';
+    git += 'Note: 이 정보는 작업 시작 시점의 스냅샷입니다.\n';
     if (ctx.gitBranch) git += `Branch: ${ctx.gitBranch}\n`;
+    if (ctx.defaultBranch) git += `Main branch: ${ctx.defaultBranch}\n`;
+    if (ctx.gitUserName) git += `Git user: ${ctx.gitUserName}\n`;
     if (ctx.gitStatus) {
       const statusLines = ctx.gitStatus.split('\n');
       if (statusLines.length > 20) {
@@ -129,14 +151,19 @@ export function formatContext(ctx: ProjectContext): string {
   }
 
   // Dependencies
-  if (ctx.packageInfo) {
+  if (ctx.packageInfo || ctx.tsConfig) {
     let deps = '## Dependencies\n';
-    deps += `Package: ${ctx.packageInfo.name}\n`;
-    if (ctx.packageInfo.scripts.length > 0) {
-      deps += `Scripts: ${ctx.packageInfo.scripts.join(', ')}\n`;
+    if (ctx.packageInfo) {
+      deps += `Package: ${ctx.packageInfo.name}\n`;
+      if (ctx.packageInfo.scripts.length > 0) {
+        deps += `Scripts: ${ctx.packageInfo.scripts.join(', ')}\n`;
+      }
+      if (ctx.packageInfo.dependencies.length > 0) {
+        deps += `Dependencies: ${ctx.packageInfo.dependencies.join(', ')}\n`;
+      }
     }
-    if (ctx.packageInfo.dependencies.length > 0) {
-      deps += `Dependencies: ${ctx.packageInfo.dependencies.join(', ')}\n`;
+    if (ctx.tsConfig) {
+      deps += `TypeScript: strict=${ctx.tsConfig.strict}, target=${ctx.tsConfig.target}\n`;
     }
     sections.push(deps);
   }
@@ -270,5 +297,46 @@ function readAutodevMemory(projectDir: string): string | null {
     try { notes.push(`Config:\n${readFileSync(configFile, 'utf-8').slice(0, 500)}`); } catch { /* ignore */ }
   }
 
+  // Read .autodev/agents/*.md — title + first 2 lines each
+  const agentsDir = join(autodevDir, 'agents');
+  if (existsSync(agentsDir)) {
+    try {
+      const agentFiles = readdirSync(agentsDir).filter(f => f.endsWith('.md')).sort();
+      if (agentFiles.length > 0) {
+        const summaries: string[] = [];
+        for (const file of agentFiles) {
+          try {
+            const content = readFileSync(join(agentsDir, file), 'utf-8');
+            const lines = content.split('\n').filter(l => l.trim());
+            const title = lines[0] ?? file.replace('.md', '');
+            const preview = lines.slice(1, 3).join(' ').slice(0, 120);
+            summaries.push(`  ${title}${preview ? ': ' + preview : ''}`);
+          } catch { /* ignore */ }
+        }
+        if (summaries.length > 0) {
+          notes.push(`Agent Prompts:\n${summaries.join('\n')}`);
+        }
+      }
+    } catch { /* ignore */ }
+  }
+
   return notes.length > 0 ? notes.join('\n') : null;
+}
+
+function readTsConfig(projectDir: string): { strict: boolean; target: string } | null {
+  const tsconfigPath = join(projectDir, 'tsconfig.json');
+  if (!existsSync(tsconfigPath)) return null;
+  try {
+    const raw = readFileSync(tsconfigPath, 'utf-8')
+      .replace(/\/\/[^\n]*/g, '')   // strip line comments
+      .replace(/\/\*[\s\S]*?\*\//g, ''); // strip block comments
+    const parsed = JSON.parse(raw);
+    const opts = parsed?.compilerOptions ?? {};
+    return {
+      strict: opts.strict === true,
+      target: (opts.target as string) ?? 'ES5',
+    };
+  } catch {
+    return null;
+  }
 }
