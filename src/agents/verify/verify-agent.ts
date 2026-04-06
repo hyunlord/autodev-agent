@@ -212,17 +212,39 @@ export class VerifyAgent implements IAgent {
     // Try to detect if it's a web project and take screenshot
     const hasHtml = input.modifiedFiles.some(f => f.endsWith('.html'));
     if (hasHtml) {
-      try {
-        const htmlFile = input.modifiedFiles.find(f => f.endsWith('.html'))!;
-        const screenshotDir = join(process.cwd(), '.autodev', 'screenshots', 'verify');
-        const playwrightTool = createPlaywrightTool(input.projectDir, screenshotDir);
-        const ssResult = await playwrightTool.execute({ file: htmlFile, action: 'screenshot' });
-        if (ssResult.success) {
-          evidence.screenshot = ssResult.data;
-          emit({ type: 'log', level: 'info', message: `[Verify] Screenshot captured` } as PipelineEvent);
+      const htmlFile = input.modifiedFiles.find(f => f.endsWith('.html'))!;
+
+      // 1순위: MCP Playwright (연결돼있으면)
+      const mcpNavigate = input.tools?.find(t => t.name.includes('browser_navigate'));
+      const mcpScreenshot = input.tools?.find(t => t.name.includes('browser_take_screenshot'));
+
+      if (mcpNavigate && mcpScreenshot) {
+        try {
+          const fileUrl = `file://${join(input.projectDir, htmlFile)}`;
+          await mcpNavigate.execute({ url: fileUrl });
+          const ssResult = await mcpScreenshot.execute({});
+          if (ssResult.success) {
+            evidence.screenshot = { pageText: ssResult.output };
+            emit({ type: 'log', level: 'info', message: '[Verify] MCP Playwright screenshot captured' } as PipelineEvent);
+          }
+        } catch (err) {
+          emit({ type: 'log', level: 'info', message: `[Verify] MCP Playwright failed, falling back to direct Playwright: ${err}` } as PipelineEvent);
         }
-      } catch (err) {
-        emit({ type: 'log', level: 'info', message: `[Verify] Playwright not available: ${err}` } as PipelineEvent);
+      }
+
+      // 2순위: 기존 Playwright (폴백)
+      if (!evidence.screenshot) {
+        try {
+          const screenshotDir = join(process.cwd(), '.autodev', 'screenshots', 'verify');
+          const playwrightTool = createPlaywrightTool(input.projectDir, screenshotDir);
+          const ssResult = await playwrightTool.execute({ file: htmlFile, action: 'screenshot' });
+          if (ssResult.success) {
+            evidence.screenshot = ssResult.data;
+            emit({ type: 'log', level: 'info', message: '[Verify] Screenshot captured (direct Playwright)' } as PipelineEvent);
+          }
+        } catch (err) {
+          emit({ type: 'log', level: 'info', message: `[Verify] Playwright not available: ${err}` } as PipelineEvent);
+        }
       }
     }
 
