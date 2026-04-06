@@ -1,54 +1,21 @@
 import { db } from '../lib/db/client';
-import { tasks, attempts, events, verifications } from '../lib/db/schema';
-import { join, resolve, isAbsolute } from 'path';
+import { tasks, attempts, events } from '../lib/db/schema';
+import { join, resolve } from 'path';
 import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { eq, and, not, desc } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import { detectProjectType, type ProjectConfig } from '../lib/detection/project-type';
-import { generatePlan, type PlanResult } from './planning';
-import { PluginRegistry } from '../lib/plugins/registry';
 import { selectAgent } from '../lib/agent-selector';
-import { loadPrompt } from '../lib/harness/prompt-loader';
 import { McpManager } from '../lib/harness/mcp-manager';
 import { buildProjectContext, formatContext } from '../lib/harness/context-builder';
 import type { McpServerInfo } from '../lib/plugins/interfaces';
-import { RetryController, type AttemptRecord } from './retry';
+import type { AttemptRecord } from './retry';
 import { generateEscalationReport } from './escalation';
 import { loadConfig, type AutoDevConfig } from '../lib/config';
-import type { PipelineEvent, TaskStatus, PlanningMode } from '../lib/types';
+import type { TaskStatus } from '../lib/types';
 import { ProgressDetector } from '../lib/safety/progress-detector';
 import { HookEngine } from '../lib/hooks/hook-engine';
-
-type EmitFn = (event: PipelineEvent) => void;
-
-const TOOL_ARTIFACTS = ['.omc/', '.omx/', '.opencode/', '.autodev/', '.git/', '.DS_Store'];
-
-function filterToolArtifacts(files: string[]): string[] {
-  return files.filter(f => !TOOL_ARTIFACTS.some(prefix => f.startsWith(prefix)) && f !== '.DS_Store');
-}
-
-
-// ─── Single cycle result type ────────────────────────────
-interface SingleCycleResult {
-  success: boolean;
-  summary: string;
-  modifiedFiles: string[];
-  costUsd: number;
-  attemptCount: number;
-  totalDurationMs: number;
-  failedChecks: Array<{ id: string; description: string; actual?: string }>;
-  attemptRecords: AttemptRecord[];
-  stopReason?: string;
-}
-
-// ═════════════════════════════════════════════════════════
-// Pipeline entry point
-// ═════════════════════════════════════════════════════════
-function checkAbort(signal?: AbortSignal): void {
-  if (signal?.aborted) {
-    throw new Error('Task cancelled');
-  }
-}
+import { type EmitFn, type SingleCycleResult, checkAbort } from './pipeline-types';
 
 export async function runPipeline(taskId: string, rawEmit: EmitFn, signal?: AbortSignal): Promise<void> {
   // Wrap emit to persist all events to DB for later retrieval
@@ -434,109 +401,16 @@ async function runSingleCycle(
   // Accumulated context injected into each coding attempt prompt
   let hookContextAccumulator = '';
 
-  // ─── Planning ──────────────────────────────────────────
-  {
-    const prePlanHooks = await hookEngine.execute(
-      { event: 'PrePlan', taskId, projectDir, prompt: task.prompt },
-      emit,
-    );
-    if (prePlanHooks.mergedContext) {
-      hookContextAccumulator += (hookContextAccumulator ? '\n' : '') + prePlanHooks.mergedContext;
-    }
-  }
-
-  let planResult: PlanResult;
-  const planMode = (task.planningMode ?? 'auto') as PlanningMode;
-
-  if (planMode === 'debate') {
-    // Debate mode: Drafter → Challenger → QC
-    const { DebatePlanner } = await import('../agents/planning/debate-planner');
-    const debatePlanner = new DebatePlanner('claude-cli');
-    const debateOutput = await debatePlanner.invoke({
-      prompt: task.prompt,
-      context: {
-        projectDir,
-        projectConfig,
-        workspaceContext,
-      },
-      config: {
-        systemPrompt: systemPrompt ?? undefined,
-      },
-      onProgress: emit,
-    });
-
-    const debateResult = debateOutput.result as {
-      plan: import('./planning').Plan;
-      totalRounds: number;
-      inputTokens: number;
-      outputTokens: number;
-    };
-    planResult = {
-      plan: debateResult.plan,
-      costUsd: debateOutput.costUsd,
-      inputTokens: debateResult.inputTokens,
-      outputTokens: debateResult.outputTokens,
-    };
-
-    emit({ type: 'log', level: 'info',
-      message: `[Debate] ${debateResult.totalRounds} round(s), cost: $${debateOutput.costUsd.toFixed(4)}` });
-  } else {
-    planResult = await generatePlan(
-      task.prompt,
-      projectConfig,
-      planMode,
-      taskConfig.codingPrompt ? {
-        codingPrompt: taskConfig.codingPrompt,
-        verificationChecklist: taskConfig.verificationChecklist ?? '',
-      } : undefined,
-      (msg) => emit({ type: 'log', level: 'info', message: msg }),
-      workspaceContext,
-      projectDir,
-      systemPrompt,
-    );
-  }
+  // ─── Planning (delegated to pipeline-planning.ts) ──────
+  const { executePlanning } = await import('./pipeline-planning');
+  const planningResult = await executePlanning({
+    taskId, projectDir, projectConfig, workspaceContext, systemPrompt,
+    task, taskConfig, hookEngine, hookContextAccumulator, emit,
+  });
+  const planResult = planningResult.planResult;
+  hookContextAccumulator = planningResult.hookContextAccumulator;
   const plan = planResult.plan;
-
-  emit({ type: 'log', level: 'info', message: `Plan: ${plan.summary}` });
-  emit({ type: 'log', level: 'info', message: `Estimated files: ${plan.estimatedFiles.join(', ')}` });
-  emit({ type: 'log', level: 'info', message: `Coding prompt: ${plan.codingPrompt.slice(0, 500)}` });
-  emit({ type: 'log', level: 'info', message: `Verification: ${plan.verificationSpec.steps.map(s => `${s.id}:${s.type}(${s.description})`).join(', ')}` });
   recordEvent(taskId, 'plan_complete', { summary: plan.summary, files: plan.estimatedFiles });
-
-  // Normalize verification filePaths — convert absolute paths to relative
-  if (plan.verificationSpec?.steps) {
-    for (const step of plan.verificationSpec.steps) {
-      if (step.filePath && isAbsolute(step.filePath)) {
-        if (step.filePath.startsWith(projectDir)) {
-          step.filePath = step.filePath.slice(projectDir.length).replace(/^\//, '');
-        } else {
-          step.filePath = step.filePath.split('/').pop() ?? step.filePath;
-        }
-        emit({ type: 'log', level: 'info', message: `Normalized filePath: ${step.filePath}` });
-      }
-    }
-  }
-
-  // ─── PostPlan hook ────────────────────────────────────
-  {
-    const postPlanHooks = await hookEngine.execute(
-      { event: 'PostPlan', taskId, projectDir, plan: { summary: plan.summary, estimatedFiles: plan.estimatedFiles }, costUsd: planResult.costUsd },
-      emit,
-    );
-    if (postPlanHooks.finalDecision === 'deny') {
-      emit({ type: 'log', level: 'warn', message: `[Hook] PostPlan denied: ${postPlanHooks.outputs.find(o => o.decision === 'deny')?.reason ?? ''}` });
-    }
-    if (postPlanHooks.finalDecision === 'modify' && postPlanHooks.updatedInput?.plan) {
-      const hp = postPlanHooks.updatedInput.plan as Record<string, unknown>;
-      if (typeof hp.summary === 'string') plan.summary = hp.summary;
-      if (typeof hp.codingPrompt === 'string') plan.codingPrompt = hp.codingPrompt;
-      if (Array.isArray(hp.estimatedFiles)) plan.estimatedFiles = hp.estimatedFiles as string[];
-      emit({ type: 'log', level: 'info', message: '[Hook] Plan modified by PostPlan hook' });
-    }
-    if (postPlanHooks.mergedContext) {
-      hookContextAccumulator += (hookContextAccumulator ? '\n' : '') + postPlanHooks.mergedContext;
-    }
-  }
 
   // ─── Agent Selection (from LLM recommendation) ────────
   const taskCategory = plan.taskCategory ?? 'unknown';
@@ -728,47 +602,16 @@ async function runSingleCycle(
       emit({ type: 'log', level: 'info', message: `[Re-plan] Attempt ${replanCount}/${MAX_REPLANS} — regenerating plan with Verify Agent feedback` });
       emit({ type: 'status_change', status: 'planning' as TaskStatus, message: `Re-planning (attempt ${replanCount})...` });
 
-      // ─── OnReplan hook ──────────────────────────────────
-      {
-        const onReplanHooks = await hookEngine.execute(
-          { event: 'OnReplan', taskId, projectDir, replanCount, previousIssues: replanFeedback.issues },
-          emit,
-        );
-        if (onReplanHooks.mergedContext) {
-          hookContextAccumulator += (hookContextAccumulator ? '\n' : '') + onReplanHooks.mergedContext;
-        }
-      }
-
-      const replanPrompt = `${task.prompt}
-
-## IMPORTANT: Previous attempt FAILED. You must create a DIFFERENT plan.
-
-Previous plan summary: ${replanFeedback.previousSummary}
-
-Issues found by verification:
-${replanFeedback.issues.map((issue: string, i: number) => `${i + 1}. ${issue}`).join('\n')}
-
-Suggestions:
-${replanFeedback.suggestions.map((s: string, i: number) => `${i + 1}. ${s}`).join('\n')}
-
-DO NOT repeat the same approach. Fix the root cause of the issues above.
-Consider a simpler or fundamentally different implementation strategy.`;
-
       try {
-        const replanResult = await generatePlan(
-          replanPrompt,
-          projectConfig,
-          // debate mode는 re-plan에서 지원 안 됨 → claude-cli로 fallback
-          ((task.planningMode === 'debate' ? 'claude-cli' : task.planningMode) ?? 'claude-cli') as PlanningMode,
-          undefined,
-          (msg: string) => emit({ type: 'log', level: 'info', message: msg }),
-          workspaceContext,
-          projectDir,
-          systemPrompt,
-        );
+        const { executeReplan } = await import('./pipeline-planning');
+        const replanResult = await executeReplan({
+          taskId, projectDir, projectConfig, workspaceContext, systemPrompt,
+          task, replanFeedback, hookEngine, hookContextAccumulator, emit,
+        });
 
         currentPlan = replanResult.plan;
         totalCostUsd += replanResult.costUsd;
+        hookContextAccumulator = replanResult.hookContextAccumulator;
 
         emit({ type: 'cost_update', attemptNum: 0, costUsd: replanResult.costUsd, totalCostUsd, inputTokens: replanResult.inputTokens, outputTokens: replanResult.outputTokens, agentId: `planning-${(task as any).planningMode ?? 'claude-cli'}` });
         emit({ type: 'log', level: 'info', message: `[Re-plan] New plan: ${currentPlan.summary}` });
@@ -786,7 +629,7 @@ Consider a simpler or fundamentally different implementation strategy.`;
             agentId: `planning-${(task as any).planningMode ?? 'claude-cli'}`,
             phase: 'planning',
             status: 'success',
-            input: JSON.stringify({ prompt: replanPrompt.slice(0, 2000), replanAttempt: replanCount }),
+            input: JSON.stringify({ prompt: task.prompt?.slice(0, 2000), replanAttempt: replanCount }),
             output: JSON.stringify({ summary: currentPlan.summary }),
             errorLog: null,
             errorHash: null,
@@ -795,19 +638,6 @@ Consider a simpler or fundamentally different implementation strategy.`;
             durationMs: null,
             createdAt: new Date().toISOString(),
           }).run();
-        }
-
-        // Normalize verification filePaths for new plan
-        if (currentPlan.verificationSpec?.steps) {
-          for (const step of currentPlan.verificationSpec.steps) {
-            if (step.filePath && isAbsolute(step.filePath)) {
-              if (step.filePath.startsWith(projectDir)) {
-                step.filePath = step.filePath.slice(projectDir.length).replace(/^\//, '');
-              } else {
-                step.filePath = step.filePath.split('/').pop() ?? step.filePath;
-              }
-            }
-          }
         }
 
         // Validate verification spec for new plan
@@ -834,429 +664,42 @@ Consider a simpler or fundamentally different implementation strategy.`;
       }
     }
 
-    // ─── Reset retry state for this plan ───────────────────
-    const retryCtrl = new RetryController({
-      maxAttempts: config.maxRetries,
-      timeBudgetMs: 300_000,
-      tokenBudget: 100_000,
+    // ─── Coding + Verification loop (delegated to pipeline-coding.ts) ───
+    const { executeCodingLoop } = await import('./pipeline-coding');
+    const codingResult = await executeCodingLoop({
+      taskId, projectDir, projectConfig, task, currentPlan,
+      workspaceContext, systemPrompt, agentId, agent, verifyAgent,
+      useVerifyAgent,
+      codingMcpServers: options?.codingMcpServers ?? [],
+      codingMcpPrompt: options?.codingMcpPrompt ?? '',
+      verifyMcpPrompt: options?.verifyMcpPrompt ?? '',
+      config, hookEngine, hookContextAccumulator, totalCostUsd,
+      signal, projectHistory: options?.projectHistory,
+      emit, updateTaskStatus, startTime,
     });
 
-    let lastModifiedFiles: string[] = [];
-    let lastFailedChecks: Array<{ id: string; description: string; actual?: string; expected?: string; type?: string; filePath?: string }> = [];
-    let lastPassedChecks: Array<{ description: string }> = [];
-    let lastVerdict = '';
-    let lastIssues: string[] = [];
-    let lastSuggestions: string[] = [];
+    // Sync state back from coding loop
+    totalCostUsd = codingResult.totalCostUsd;
+    hookContextAccumulator = codingResult.hookContextAccumulator;
+    agentId = codingResult.agentId;
 
-  for (let attempt = 1; attempt <= config.maxRetries; attempt++) {
-    const isRetry = attempt > 1;
-    if (isRetry) {
-      updateTaskStatus(taskId, 'retrying');
-      emit({ type: 'status_change', status: 'retrying', message: `Retry attempt ${attempt}/${config.maxRetries}...` });
-
-      // ─── OnRetry hook ───────────────────────────────────
-      const onRetryHooks = await hookEngine.execute(
-        { event: 'OnRetry', taskId, projectDir, attempt, previousIssues: lastFailedChecks.map(c => c.description) },
-        emit,
-      );
-      if (onRetryHooks.mergedContext) {
-        hookContextAccumulator += (hookContextAccumulator ? '\n' : '') + onRetryHooks.mergedContext;
-      }
-    } else {
-      updateTaskStatus(taskId, 'coding');
-    }
-
-    checkAbort(signal);
-    emit({ type: 'status_change', status: 'coding', message: isRetry ? `Retrying with error context (attempt ${attempt})...` : `Sending task to ${agent.name}...` });
-    emit({ type: 'attempt_start', attemptNum: attempt, agentId });
-
-    let codingPrompt = `${systemPrompt ? systemPrompt + '\n\n' : ''}CRITICAL: You MUST only create and modify files inside this directory: ${projectDir}
-Do NOT navigate to or modify files outside this directory.
-Do NOT search for or modify any files in parent directories.
-Your working directory is ${projectDir} — all file paths must be relative to this directory.
-
-${currentPlan.codingPrompt}`;
-    if (workspaceContext) {
-      codingPrompt = codingPrompt + `\n\n${workspaceContext}`;
-    }
-    const projectHistory = options?.projectHistory ?? [];
-    if (!isRetry && projectHistory.length > 0) {
-      const historyContext = projectHistory.map(h => {
-        try {
-          const result = h.result ? (typeof h.result === 'string' ? JSON.parse(h.result) : h.result) : {};
-          return `- "${h.prompt}" → ${(result as any).summary ?? 'completed'}`;
-        } catch {
-          return `- "${h.prompt}" → completed`;
-        }
-      }).join('\n');
-      codingPrompt = `## Previous work on this project:\n${historyContext}\n\n## Current task:\n${codingPrompt}`;
-      emit({ type: 'log', level: 'info', message: `Project history: ${projectHistory.length} previous task(s) found` });
-    }
-    if (isRetry && lastFailedChecks.length > 0) {
-      const retryContext = retryCtrl.buildRetryContext(lastFailedChecks, lastPassedChecks);
-      codingPrompt = `${currentPlan.codingPrompt}\n\n---\n\n${retryContext}`;
-      emit({ type: 'log', level: 'info', message: `Retry context: ${lastFailedChecks.length} failed, ${lastPassedChecks.length} passed checks from previous attempt` });
-    }
-    if (isRetry && useVerifyAgent && lastIssues.length > 0) {
-      codingPrompt += `\n\n---\n\nPrevious verification FAILED.\n\n## Verdict: ${lastVerdict}\n## Issues found by Verify Agent:\n${lastIssues.map((issue, i) => `${i + 1}. ${issue}`).join('\n')}\n\n## Suggestions:\n${lastSuggestions.map((s, i) => `${i + 1}. ${s}`).join('\n')}\n\nFix ONLY the issues listed above. Do NOT rewrite everything.`;
-    }
-
-    const coderPrompt = loadPrompt('coder', projectDir, { projectDir });
-    emit({ type: 'log', level: 'info', message: `Coder prompt: ${coderPrompt.source}${coderPrompt.filePath ? ` (${coderPrompt.filePath})` : ' (built-in)'}` });
-
-    const codingMcpPrompt = options?.codingMcpPrompt ?? '';
-    const codingMcpServers = options?.codingMcpServers ?? [];
-    const verifyMcpPrompt = options?.verifyMcpPrompt ?? '';
-
-    // Inject accumulated hook context into coding prompt
-    if (hookContextAccumulator) {
-      codingPrompt += `\n\n## Additional Context (Hook)\n${hookContextAccumulator}`;
-    }
-
-    const safePrompt = `${coderPrompt.content}${codingMcpPrompt ? '\n' + codingMcpPrompt : ''}\n\n${codingPrompt}`;
-
-    if (verifyMcpPrompt) {
-      emit({ type: 'log', level: 'info', message: `Verification MCP tools available` });
-    }
-
-    // ─── PreCode hook ───────────────────────────────────
-    {
-      const preCodeHooks = await hookEngine.execute(
-        { event: 'PreCode', taskId, projectDir, plan: { summary: currentPlan.summary }, agentId, attempt },
-        emit,
-      );
-      if (preCodeHooks.mergedContext) {
-        hookContextAccumulator += (hookContextAccumulator ? '\n' : '') + preCodeHooks.mergedContext;
-      }
-    }
-
-    const codeResult = await agent.invoke({
-      task: safePrompt,
-      projectDir,
-      maxTurns: 20,
-      timeoutMs: 300_000,
-      mcpServers: codingMcpServers.length > 0 ? codingMcpServers : undefined,
-      onProgress: (event) => emit(event),
-    });
-
-    const codingAttemptId = nanoid();
-    db.insert(attempts).values({
-      id: codingAttemptId,
-      taskId,
-      attemptNum: attempt,
-      agentId,
-      phase: 'coding',
-      status: codeResult.success ? 'success' : 'error',
-      input: JSON.stringify({ codingPrompt: codingPrompt.slice(0, 5000) }),
-      output: JSON.stringify({
-        text: codeResult.text.slice(0, 5000),
-        modifiedFiles: codeResult.modifiedFiles,
-        costUsd: codeResult.costUsd,
-      }),
-      errorLog: codeResult.success ? null : codeResult.text.slice(0, 5000),
-      errorHash: null,
-      costUsd: codeResult.costUsd ?? null,
-      tokenCount: codeResult.tokenUsage
-        ? codeResult.tokenUsage.inputTokens + codeResult.tokenUsage.outputTokens
-        : null,
-      durationMs: codeResult.durationMs,
-      createdAt: new Date().toISOString(),
-    }).run();
-
-    totalCostUsd += codeResult.costUsd ?? 0;
-
-    emit({
-      type: 'cost_update',
-      attemptNum: attempt,
-      costUsd: codeResult.costUsd ?? 0,
-      totalCostUsd,
-      inputTokens: codeResult.tokenUsage?.inputTokens ?? 0,
-      outputTokens: codeResult.tokenUsage?.outputTokens ?? 0,
-      agentId,
-    });
-
-    if (!codeResult.success) {
-      const errorMsg = `Coding failed: ${codeResult.text.slice(0, 500)}`;
-      emit({ type: 'attempt_complete', attemptNum: attempt, success: false, error: errorMsg });
-
-      retryCtrl.recordAttempt({
-        attemptNum: attempt,
-        errorMessage: errorMsg,
-        tokensUsed: codeResult.tokenUsage
-          ? codeResult.tokenUsage.inputTokens + codeResult.tokenUsage.outputTokens
-          : 0,
-        durationMs: codeResult.durationMs,
-      });
-
-      const { allowed, reason } = retryCtrl.canRetry();
-      if (!allowed) {
-        return {
-          success: false,
-          summary: currentPlan.summary,
-          modifiedFiles: lastModifiedFiles,
-          costUsd: totalCostUsd,
-          attemptCount: attempt,
-          totalDurationMs: Date.now() - startTime,
-          failedChecks: [{ id: 'coding', description: 'Coding agent returned error', actual: errorMsg }],
-          attemptRecords: retryCtrl.attempts,
-          stopReason: reason,
-        };
-      }
-
-      lastFailedChecks = [{ id: 'coding', description: 'Coding agent returned error', actual: errorMsg }];
-      const errorTier = retryCtrl.classifyError(errorMsg);
-      if (errorTier === 'strategy_change') {
-        const allAgents = PluginRegistry.instance.listAgents();
-        for (const alt of allAgents) {
-          if (alt.id !== agentId && await alt.isAvailable()) {
-            emit({ type: 'log', level: 'info', message: `Strategy change: switching from ${agent.name} to ${alt.name}` });
-            agent = alt;
-            agentId = alt.id;
-            break;
-          }
-        }
-      }
-      continue;
-    }
-
-    lastModifiedFiles = filterToolArtifacts(codeResult.modifiedFiles);
-    emit({ type: 'log', level: 'info', message: `Code generated (attempt ${attempt}). Files: ${lastModifiedFiles.join(', ') || 'none detected'}` });
-    emit({ type: 'attempt_complete', attemptNum: attempt, success: true });
-
-    // ─── PostCode hook ──────────────────────────────────
-    {
-      const postCodeHooks = await hookEngine.execute(
-        { event: 'PostCode', taskId, projectDir, modifiedFiles: lastModifiedFiles, agentId, attempt,
-          codingResult: { success: codeResult.success, costUsd: codeResult.costUsd, durationMs: codeResult.durationMs } },
-        emit,
-      );
-      if (postCodeHooks.finalDecision === 'deny' && postCodeHooks.mergedIssues.length > 0) {
-        // Hook vetoed the code — inject issues into retry context
-        lastFailedChecks = [
-          ...lastFailedChecks,
-          ...postCodeHooks.mergedIssues.map((issue, i) => ({ id: `hook-${i}`, description: issue })),
-        ];
-        emit({ type: 'log', level: 'warn', message: `[Hook] PostCode denied — issues will be included in retry context` });
-      }
-      if (postCodeHooks.mergedContext) {
-        hookContextAccumulator += (hookContextAccumulator ? '\n' : '') + postCodeHooks.mergedContext;
-      }
-    }
-
-    // ─── Verification phase ──────────────────────────
-    checkAbort(signal);
-    updateTaskStatus(taskId, 'verifying');
-    emit({ type: 'status_change', status: 'verifying', message: `Verifying (attempt ${attempt})...` });
-
-    // ─── PreVerify hook ─────────────────────────────────
-    {
-      const preVerifyHooks = await hookEngine.execute(
-        { event: 'PreVerify', taskId, projectDir, modifiedFiles: lastModifiedFiles, agentId },
-        emit,
-      );
-      if (preVerifyHooks.mergedContext) {
-        hookContextAccumulator += (hookContextAccumulator ? '\n' : '') + preVerifyHooks.mergedContext;
-      }
-    }
-
-    const screenshotDir = join(process.cwd(), '.autodev', 'screenshots', taskId, `attempt-${attempt}`);
-    let verifyResult: any;
-
-    if (useVerifyAgent) {
-      // ─── NEW: LLM-based Verify Agent ────────────────
-      const verifyOutput = await verifyAgent.invoke({
-        prompt: 'Verify the coding result',
-        originalPrompt: task.prompt,
-        modifiedFiles: lastModifiedFiles,
-        projectDir,
-        tools: [],
-        context: {
-          projectDir,
-          projectType: projectConfig?.type,
-          files: lastModifiedFiles,
-          verifyFeedback: attempt > 1 ? {
-            previousVerdict: lastVerdict,
-            issues: lastIssues,
-            suggestions: lastSuggestions,
-            attemptCount: attempt,
-          } : undefined,
-        },
-        config: { timeoutMs: 120_000 },
-        onProgress: emit,
-      } as any);
-
-      const vr = verifyOutput.result as any;
-      totalCostUsd += verifyOutput.costUsd;
-
-      emit({
-        type: 'cost_update',
-        attemptNum: attempt,
-        costUsd: verifyOutput.costUsd,
-        totalCostUsd,
-        inputTokens: verifyOutput.tokenUsage?.input ?? 0,
-        outputTokens: verifyOutput.tokenUsage?.output ?? 0,
-        agentId: verifyAgent.id,
-      });
-
-      // Save verify agent result to attempts table
-      db.insert(attempts).values({
-        id: nanoid(),
-        taskId,
-        attemptNum: attempt,
-        agentId: verifyAgent.id,
-        phase: 'verifying',
-        status: vr.passed ? 'success' : 'error',
-        input: JSON.stringify({ originalPrompt: task.prompt?.slice(0, 1000) }),
-        output: JSON.stringify(vr),
-        errorLog: vr.passed ? null : (vr.reason ?? '').slice(0, 5000),
-        errorHash: null,
-        costUsd: verifyOutput.costUsd,
-        tokenCount: (verifyOutput.tokenUsage?.input ?? 0) + (verifyOutput.tokenUsage?.output ?? 0),
-        durationMs: verifyOutput.durationMs,
-        createdAt: new Date().toISOString(),
-      }).run();
-
-      // Convert to legacy format for DB compatibility
-      verifyResult = {
-        allPassed: vr.passed,
-        results: [{
-          checkId: 'verify-agent',
-          type: 'llm_verify',
-          status: vr.passed ? 'pass' : 'fail',
-          description: vr.reason,
-          expected: 'Requirements met',
-          actual: `Score: ${vr.score}/100 — ${vr.reason}`,
-          durationMs: verifyOutput.durationMs,
-        }],
-        consoleErrors: vr.evidence?.consoleErrors ?? [],
-      };
-
-      // Force re-plan if same verdict repeats — different approach needed
-      if (lastVerdict === 're-code' && vr.verdict === 're-code' && attempt >= 2) {
-        emit({ type: 'log', level: 'warn', message: '[Pipeline] Same re-code verdict repeated — forcing re-plan' });
-        vr.verdict = 're-plan';
-      }
-
-      // Track verdict for retry
-      lastVerdict = vr.verdict;
-      lastIssues = vr.issues ?? [];
-      lastSuggestions = vr.suggestions ?? [];
-
-      emit({ type: 'log', level: vr.passed ? 'info' : 'warn',
-        message: `[Verify Agent] ${(vr.verdict ?? 'unknown').toUpperCase()} — Score: ${vr.score}/100 — ${vr.reason}` });
-
-      // Handle re-plan verdict
-      if (vr.verdict === 're-plan') {
-        emit({ type: 'log', level: 'warn', message: `[Verify Agent] Re-plan needed (score: ${vr.score}). Will regenerate plan.` });
-        replanFeedback = {
-          issues: vr.issues ?? [],
-          suggestions: vr.suggestions ?? [],
-          previousSummary: currentPlan.summary,
-        };
-        break;
-      }
-    } else {
-      // ─── LEGACY: mechanical verification ────────────
-      const { runVerification } = await import('./verification');
-      verifyResult = await runVerification(
-        currentPlan.verificationSpec,
-        projectDir,
-        projectConfig,
-        screenshotDir,
-        emit,
-      );
-    }
-
-    for (const r of verifyResult.results) {
-      db.insert(verifications).values({
-        id: nanoid(),
-        attemptId: codingAttemptId,
-        checkId: r.checkId,
-        type: r.type,
-        status: r.status,
-        expected: r.expected ?? null,
-        actual: r.actual ?? null,
-        screenshotPath: r.screenshotPath ?? null,
-        vlmFeedback: r.vlmFeedback ?? null,
-        vlmConfidence: r.vlmConfidence ?? null,
-        durationMs: r.durationMs,
-        createdAt: new Date().toISOString(),
-      }).run();
-    }
-
-    // ─── PostVerify hook ────────────────────────────────
-    {
-      const postVerifyHooks = await hookEngine.execute(
-        { event: 'PostVerify', taskId, projectDir, verifyResult: { allPassed: verifyResult.allPassed }, attempt },
-        emit,
-      );
-      if (postVerifyHooks.finalDecision === 'deny' && postVerifyHooks.mergedIssues.length > 0) {
-        lastFailedChecks = [
-          ...lastFailedChecks,
-          ...postVerifyHooks.mergedIssues.map((issue, i) => ({ id: `hook-verify-${i}`, description: issue })),
-        ];
-      }
-      if (postVerifyHooks.mergedContext) {
-        hookContextAccumulator += (hookContextAccumulator ? '\n' : '') + postVerifyHooks.mergedContext;
-      }
-    }
-
-    if (verifyResult.allPassed) {
+    if (codingResult.success) {
       return {
         success: true,
         summary: currentPlan.summary,
-        modifiedFiles: lastModifiedFiles,
-        costUsd: totalCostUsd,
-        attemptCount: attempt,
+        modifiedFiles: codingResult.lastModifiedFiles,
+        costUsd: codingResult.totalCostUsd,
+        attemptCount: codingResult.attemptCount,
         totalDurationMs: Date.now() - startTime,
         failedChecks: [],
-        attemptRecords: retryCtrl.attempts,
+        attemptRecords: codingResult.retryAttempts,
       };
     }
 
-    const failedChecks = verifyResult.results.filter((r: any) => r.status === 'fail');
-    lastFailedChecks = failedChecks.map((r: any) => ({
-      id: r.checkId,
-      description: r.description,
-      actual: r.actual,
-      expected: r.expected ?? currentPlan.verificationSpec.steps.find((s: any) => s.id === r.checkId)?.expectedText,
-      type: r.type ?? currentPlan.verificationSpec.steps.find((s: any) => s.id === r.checkId)?.type,
-      filePath: currentPlan.verificationSpec.steps.find((s: any) => s.id === r.checkId)?.filePath,
-    }));
-    lastPassedChecks = verifyResult.results
-      .filter((r: any) => r.status === 'pass')
-      .map((r: any) => ({ description: r.description }));
-
-    const failSummary = failedChecks.map((c: any) => c.description).join('; ');
-    emit({ type: 'log', level: 'warn', message: `Attempt ${attempt} verification failed: ${failSummary}` });
-
-    retryCtrl.recordAttempt({
-      attemptNum: attempt,
-      errorMessage: `Verification failed: ${failSummary}`,
-      tokensUsed: codeResult.tokenUsage
-        ? codeResult.tokenUsage.inputTokens + codeResult.tokenUsage.outputTokens
-        : 0,
-      durationMs: codeResult.durationMs,
-    });
-
-    const { allowed, reason } = retryCtrl.canRetry();
-    if (!allowed) {
-      return {
-        success: false,
-        summary: currentPlan.summary,
-        modifiedFiles: lastModifiedFiles,
-        costUsd: totalCostUsd,
-        attemptCount: attempt,
-        totalDurationMs: Date.now() - startTime,
-        failedChecks: lastFailedChecks,
-        attemptRecords: retryCtrl.attempts,
-        stopReason: reason,
-      };
+    // Handle re-plan feedback from coding loop
+    if (codingResult.replanFeedback) {
+      replanFeedback = codingResult.replanFeedback;
     }
-
-    emit({ type: 'log', level: 'info', message: `Will retry (${reason ?? 'checks failed'})...` });
-  }
-  // ─── End of coding retry loop ─────────────────────────
 
     // Check if re-plan is needed
     if (!replanFeedback) {
@@ -1264,13 +707,13 @@ ${currentPlan.codingPrompt}`;
       return {
         success: false,
         summary: currentPlan.summary,
-        modifiedFiles: lastModifiedFiles,
-        costUsd: totalCostUsd,
-        attemptCount: config.maxRetries,
+        modifiedFiles: codingResult.lastModifiedFiles,
+        costUsd: codingResult.totalCostUsd,
+        attemptCount: codingResult.attemptCount,
         totalDurationMs: Date.now() - startTime,
-        failedChecks: lastFailedChecks,
-        attemptRecords: retryCtrl.attempts,
-        stopReason: 'max_attempts',
+        failedChecks: codingResult.lastFailedChecks,
+        attemptRecords: codingResult.retryAttempts,
+        stopReason: codingResult.stopReason ?? 'max_attempts',
       };
     }
 
@@ -1280,12 +723,12 @@ ${currentPlan.codingPrompt}`;
       return {
         success: false,
         summary: currentPlan.summary,
-        modifiedFiles: lastModifiedFiles,
-        costUsd: totalCostUsd,
-        attemptCount: config.maxRetries,
+        modifiedFiles: codingResult.lastModifiedFiles,
+        costUsd: codingResult.totalCostUsd,
+        attemptCount: codingResult.attemptCount,
         totalDurationMs: Date.now() - startTime,
-        failedChecks: lastFailedChecks,
-        attemptRecords: retryCtrl.attempts,
+        failedChecks: codingResult.lastFailedChecks,
+        attemptRecords: codingResult.retryAttempts,
         stopReason: 'max_replans',
       };
     }
