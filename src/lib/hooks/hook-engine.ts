@@ -74,20 +74,103 @@ export class HookEngine {
   private config: Record<string, HookMatcher[]> = {};
 
   /**
-   * Load hook config from {projectDir}/.autodev/hooks.json
+   * Built-in default hooks — always active, overridable by name.
+   */
+  private loadDefaults(): Record<string, HookMatcher[]> {
+    return {
+      PostPlan: [{
+        matcher: '',
+        hooks: [{
+          name: 'plan-log',
+          type: 'command',
+          command: "echo '[Hook] Plan generated: {{taskId}}'",
+          blocking: false,
+        }],
+      }],
+      PostCode: [{
+        matcher: '',
+        hooks: [{
+          name: 'file-check',
+          type: 'command',
+          command: "ls {{projectDir}}/*.html {{projectDir}}/*.js {{projectDir}}/*.ts 2>/dev/null | head -5 || echo 'No output files'",
+          blocking: false,
+        }],
+      }],
+      TaskComplete: [{
+        matcher: '',
+        hooks: [{
+          name: 'complete-log',
+          type: 'command',
+          command: "echo '[Hook] Task {{taskId}} completed'",
+          blocking: false,
+        }],
+      }],
+    };
+  }
+
+  /**
+   * Merge overlay config into base.
+   * Same event: hooks are combined (overlay appended after base).
+   * Same hook name within an event: overlay replaces base hook.
+   */
+  private mergeConfig(
+    base: Record<string, HookMatcher[]>,
+    overlay: Record<string, HookMatcher[]>,
+  ): Record<string, HookMatcher[]> {
+    const result: Record<string, HookMatcher[]> = { ...base };
+
+    for (const [event, overlayMatchers] of Object.entries(overlay)) {
+      if (!result[event]) {
+        result[event] = overlayMatchers;
+        continue;
+      }
+
+      // Names defined in overlay — these replace same-named hooks in base
+      const overlayNames = new Set(
+        overlayMatchers.flatMap(m => m.hooks.map(h => h.name)),
+      );
+
+      // Strip overridden names from base, keep non-empty matchers
+      const filteredBase = result[event]
+        .map(m => ({ ...m, hooks: m.hooks.filter(h => !overlayNames.has(h.name)) }))
+        .filter(m => m.hooks.length > 0);
+
+      result[event] = [...filteredBase, ...overlayMatchers];
+    }
+
+    return result;
+  }
+
+  /**
+   * Load hook config in priority order:
+   *   1. Built-in defaults (always active)
+   *   2. Global ~/.autodev/hooks.json (overrides defaults)
+   *   3. Project {projectDir}/.autodev/hooks.json (overrides global)
    */
   async load(projectDir: string): Promise<void> {
     const { existsSync, readFileSync } = await import('fs');
     const { join } = await import('path');
+    const { homedir } = await import('os');
 
-    const hookFile = join(projectDir, '.autodev', 'hooks.json');
-    if (!existsSync(hookFile)) return;
+    // 1. defaults
+    this.config = this.loadDefaults();
 
-    try {
-      const parsed = JSON.parse(readFileSync(hookFile, 'utf-8'));
-      this.config = (parsed.hooks ?? {}) as Record<string, HookMatcher[]>;
-    } catch {
-      /* invalid JSON — skip */
+    // 2. global
+    const globalFile = join(homedir(), '.autodev', 'hooks.json');
+    if (existsSync(globalFile)) {
+      try {
+        const parsed = JSON.parse(readFileSync(globalFile, 'utf-8'));
+        this.config = this.mergeConfig(this.config, (parsed.hooks ?? {}) as Record<string, HookMatcher[]>);
+      } catch { /* invalid JSON — skip */ }
+    }
+
+    // 3. project
+    const projectFile = join(projectDir, '.autodev', 'hooks.json');
+    if (existsSync(projectFile)) {
+      try {
+        const parsed = JSON.parse(readFileSync(projectFile, 'utf-8'));
+        this.config = this.mergeConfig(this.config, (parsed.hooks ?? {}) as Record<string, HookMatcher[]>);
+      } catch { /* invalid JSON — skip */ }
     }
   }
 

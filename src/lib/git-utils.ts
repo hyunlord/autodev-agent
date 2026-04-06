@@ -22,8 +22,23 @@ export async function getModifiedFiles(cwd: string, diffRef?: string): Promise<s
     const { stdout: untracked } = await execa('git', ['ls-files', '--others', '--exclude-standard'], { cwd, reject: false });
     files.push(...untracked.split('\n').filter(Boolean));
 
-    return [...new Set(files)];
+    const unique = [...new Set(files)];
+
+    // git repo가 아닌 경우 모든 git 명령이 빈 결과를 반환 (reject:false) → readdirSync fallback
+    if (unique.length === 0) {
+      throw new Error('no git files');
+    }
+
+    return unique;
   } catch {
-    return [];
+    // git repo가 아닌 경우: 실제 파일 목록으로 fallback
+    try {
+      const { readdirSync } = require('fs');
+      return (readdirSync(cwd, { recursive: true }) as string[])
+        .map(String)
+        .filter(f => !f.startsWith('.git/') && !f.startsWith('node_modules/') && !f.startsWith('.'));
+    } catch {
+      return [];
+    }
   }
 }

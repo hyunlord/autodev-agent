@@ -758,7 +758,8 @@ Consider a simpler or fundamentally different implementation strategy.`;
         const replanResult = await generatePlan(
           replanPrompt,
           projectConfig,
-          (task.planningMode ?? 'claude-cli') as PlanningMode,
+          // debate mode는 re-plan에서 지원 안 됨 → claude-cli로 fallback
+          ((task.planningMode === 'debate' ? 'claude-cli' : task.planningMode) ?? 'claude-cli') as PlanningMode,
           undefined,
           (msg: string) => emit({ type: 'log', level: 'info', message: msg }),
           workspaceContext,

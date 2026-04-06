@@ -250,7 +250,7 @@ If no real issues: { "issues": [], "suggestions": [], "severity": "minor" }`;
         const timer = setTimeout(() => controller.abort(), 90_000);
         try {
           const result = await ex(cliPath, args, {
-            reject: false, timeout: 90_000, signal: controller.signal,
+            reject: false, timeout: 90_000, cancelSignal: controller.signal,
           } as any);
           stdout = (result as any).stdout ?? '';
         } finally {
@@ -339,7 +339,7 @@ Verdicts:
         const timer = setTimeout(() => controller.abort(), 90_000);
         try {
           const result = await ex(cliPath, args, {
-            reject: false, timeout: 90_000, signal: controller.signal,
+            reject: false, timeout: 90_000, cancelSignal: controller.signal,
           } as any);
           stdout = (result as any).stdout ?? '';
         } finally {

@@ -1,5 +1,35 @@
 {
   "$schema": "https://autodev.dev/schemas/hooks.json",
   "version": 1,
-  "hooks": {}
+  "hooks": {
+    "PostPlan": [{
+      "matcher": "",
+      "hooks": [{
+        "name": "plan-log",
+        "type": "command",
+        "command": "echo '[Hook] PostPlan: plan generated successfully'",
+        "timeout": 5,
+        "blocking": false
+      }]
+    }],
+    "PostCode": [{
+      "matcher": "",
+      "hooks": [{
+        "name": "build-gate",
+        "type": "command",
+        "command": "cd {{projectDir}} && ls *.html 2>/dev/null && echo 'HTML found' || echo 'No HTML'",
+        "timeout": 10,
+        "blocking": false
+      }]
+    }],
+    "TaskComplete": [{
+      "matcher": "",
+      "hooks": [{
+        "name": "done-log",
+        "type": "command",
+        "command": "echo '[Hook] Task completed!'",
+        "blocking": false
+      }]
+    }]
+  }
 }
