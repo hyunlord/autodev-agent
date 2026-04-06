@@ -8,6 +8,7 @@ import type { EmitFn } from './pipeline-types';
 import { checkAbort } from './pipeline-types';
 import type { Plan } from './planning';
 import type { TaskStatus } from '../lib/types';
+import type { McpManager } from '../lib/harness/mcp-manager';
 
 export interface VerifyPhaseResult {
   allPassed: boolean;
@@ -45,6 +46,7 @@ export async function executeVerification(params: {
   hookEngine: HookEngine;
   hookContextAccumulator: string;
   totalCostUsd: number;
+  mcpManager?: McpManager;
   signal?: AbortSignal;
   emit: EmitFn;
 }): Promise<VerifyPhaseResult> {
@@ -54,6 +56,13 @@ export async function executeVerification(params: {
     verifyAgent, hookEngine, signal, emit,
   } = params;
   let { lastVerdict, lastIssues, lastSuggestions, hookContextAccumulator, totalCostUsd } = params;
+
+  // MCP 도구 수집 (있으면)
+  let mcpVerifyTools: import('../agents/interfaces').VerifyTool[] = [];
+  if (params.mcpManager) {
+    const { mcpToolsAsVerifyTools } = await import('../lib/mcp/mcp-tool-provider');
+    mcpVerifyTools = mcpToolsAsVerifyTools(params.mcpManager.getMcpClient(), ['playwright']);
+  }
 
   // ─── Verification phase ──────────────────────────
   checkAbort(signal);
@@ -84,7 +93,7 @@ export async function executeVerification(params: {
       originalPrompt: task.prompt,
       modifiedFiles: lastModifiedFiles,
       projectDir,
-      tools: [],
+      tools: mcpVerifyTools,
       context: {
         projectDir,
         projectType: projectConfig?.type,

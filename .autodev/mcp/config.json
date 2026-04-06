@@ -1,0 +1,20 @@
+{
+  "servers": {
+    "playwright": {
+      "type": "local",
+      "command": "npx",
+      "args": ["@playwright/mcp@latest"],
+      "enabled": true
+    },
+    "context7": {
+      "type": "remote",
+      "url": "https://mcp.context7.com/mcp",
+      "enabled": false
+    }
+  },
+  "pipeline_mapping": {
+    "planning": ["context7"],
+    "coding": ["playwright", "context7"],
+    "verification": ["playwright"]
+  }
+}

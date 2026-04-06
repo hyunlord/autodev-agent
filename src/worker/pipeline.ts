@@ -98,6 +98,18 @@ export async function runPipeline(taskId: string, rawEmit: EmitFn, signal?: Abor
     emit({ type: 'log', level: 'info', message: `Verification MCP: ${verifyMcps.join(', ')}` });
   }
 
+  // 실제 MCP 프로토콜 연결
+  try {
+    await mcpManager.connectAll(emit);
+    const connectedTools = mcpManager.getConnectedTools();
+    if (connectedTools.length > 0) {
+      emit({ type: 'log', level: 'info',
+        message: `[MCP] ${connectedTools.length} tools connected: ${connectedTools.map(t => `${t.serverId}/${t.name}`).join(', ')}` });
+    }
+  } catch (err) {
+    emit({ type: 'log', level: 'warn', message: `[MCP] Connection failed: ${err}` });
+  }
+
   const planningMcpPrompt = mcpManager.getMcpPromptSection('planning');
   const codingMcpServers = mcpManager.getServersForStage('coding');
   const codingMcpPrompt = mcpManager.getMcpPromptSection('coding');
@@ -171,7 +183,7 @@ export async function runPipeline(taskId: string, rawEmit: EmitFn, signal?: Abor
         const result = await runSingleCycle(
           taskId, task, projectDir, projectConfig, workspaceContext,
           systemPrompt, taskConfig, config, emit,
-          { projectHistory, codingMcpServers, codingMcpPrompt, verifyMcpPrompt, signal },
+          { projectHistory, codingMcpServers, codingMcpPrompt, verifyMcpPrompt, signal, mcpManager },
         );
         if (result.success) {
           if (projectDir) {
@@ -293,7 +305,7 @@ Respond with ONLY a JSON array of question strings:
       const result = await runSingleCycle(
         taskId, task, projectDir, projectConfig, workspaceContext,
         systemPrompt, taskConfig, config, emit,
-        { projectHistory, codingMcpServers, codingMcpPrompt, verifyMcpPrompt, signal },
+        { projectHistory, codingMcpServers, codingMcpPrompt, verifyMcpPrompt, signal, mcpManager },
       );
 
       if (result.success) {
@@ -390,6 +402,7 @@ async function runSingleCycle(
     codingMcpPrompt?: string;
     verifyMcpPrompt?: string;
     signal?: AbortSignal;
+    mcpManager?: McpManager;
   },
 ): Promise<SingleCycleResult> {
   const signal = options?.signal;
@@ -675,6 +688,7 @@ async function runSingleCycle(
       verifyMcpPrompt: options?.verifyMcpPrompt ?? '',
       config, hookEngine, hookContextAccumulator, totalCostUsd,
       signal, projectHistory: options?.projectHistory,
+      mcpManager: options?.mcpManager,
       emit, updateTaskStatus, startTime,
     });
 

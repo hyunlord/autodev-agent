@@ -1,11 +1,15 @@
 import { loadMcpConfig, type McpConfig, type McpServerConfig } from './prompt-loader';
 import type { McpServerInfo } from '../plugins/interfaces';
+import { McpClient, type McpToolInfo } from '../mcp/mcp-client';
+import type { PipelineEvent } from '../types';
 
 export interface McpTool {
   name: string;
   description: string;
   serverId: string;
 }
+
+export type { McpToolInfo };
 
 interface RunningServer {
   config: McpServerConfig;
@@ -18,6 +22,7 @@ interface RunningServer {
 export class McpManager {
   private servers = new Map<string, RunningServer>();
   private config: McpConfig;
+  private mcpClient: McpClient = new McpClient();
 
   constructor(projectDir?: string) {
     this.config = loadMcpConfig(projectDir);
@@ -184,7 +189,53 @@ export class McpManager {
     return `\n## Available MCP Tools\nThe following MCP tools are available for this stage:\n${lines.join('\n')}\nUse these tools when they would help complete the task more effectively.\n`;
   }
 
+  /**
+   * MCP 서버에 실제 프로토콜 연결 (listTools까지 수행)
+   */
+  async connectAll(emit?: (e: PipelineEvent) => void): Promise<void> {
+    for (const [id, config] of Object.entries(this.config.servers)) {
+      if (!config.enabled) continue;
+      await this.mcpClient.connect({
+        id,
+        type: config.type,
+        command: config.command,
+        args: config.args,
+        env: config.env,
+        url: config.url,
+        headers: config.headers,
+        enabled: config.enabled,
+      }, emit);
+    }
+  }
+
+  /**
+   * 실제 연결된 도구 목록 (listTools 결과)
+   */
+  getConnectedTools(): McpToolInfo[] {
+    return this.mcpClient.getAllTools();
+  }
+
+  /**
+   * MCP 도구 호출
+   */
+  async callTool(
+    serverId: string,
+    toolName: string,
+    args: Record<string, unknown>,
+    emit?: (e: PipelineEvent) => void,
+  ): Promise<import('../mcp/mcp-client').McpToolResult> {
+    return this.mcpClient.callTool(serverId, toolName, args, emit);
+  }
+
+  /**
+   * McpClient 인스턴스 반환 (Verify Agent 등에서 사용)
+   */
+  getMcpClient(): McpClient {
+    return this.mcpClient;
+  }
+
   async shutdown(): Promise<void> {
+    await this.mcpClient.disconnectAll();
     for (const id of this.servers.keys()) {
       await this.stopServer(id);
     }

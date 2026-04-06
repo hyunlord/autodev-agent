@@ -13,6 +13,7 @@ import type { AutoDevConfig } from '../lib/config';
 import type { McpServerInfo } from '../lib/plugins/interfaces';
 import type { ProjectConfig } from '../lib/detection/project-type';
 import type { TaskStatus } from '../lib/types';
+import type { McpManager } from '../lib/harness/mcp-manager';
 
 export interface CodingLoopResult {
   success: boolean;
@@ -59,6 +60,7 @@ export async function executeCodingLoop(params: {
   totalCostUsd: number;
   signal?: AbortSignal;
   projectHistory?: Array<{ prompt: string; status: string; result: any; createdAt: string }>;
+  mcpManager?: McpManager;
   emit: EmitFn;
   updateTaskStatus: (taskId: string, status: TaskStatus, result?: Record<string, unknown>) => void;
   startTime: number;
@@ -284,6 +286,7 @@ ${currentPlan.codingPrompt}`;
       lastModifiedFiles, attempt, codingAttemptId, useVerifyAgent,
       verifyAgent, lastVerdict, lastIssues, lastSuggestions,
       hookEngine, hookContextAccumulator, totalCostUsd,
+      mcpManager: params.mcpManager,
       signal, emit,
     });
 
