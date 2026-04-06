@@ -294,14 +294,14 @@ ${originalPrompt}
 
 ## Original Plan
 Summary: ${originalPlan.summary}
-Coding prompt: ${originalPlan.codingPrompt.slice(0, 2000)}
+Coding prompt: ${originalPlan.codingPrompt.slice(0, 8000)}
 
 ## Challenger's Issues
 ${challengeIssues.map((issue, i) => `${i + 1}. ${issue}`).join('\n')}
 
 ## Revised Plan
 Summary: ${revisedPlan.summary}
-Coding prompt: ${revisedPlan.codingPrompt.slice(0, 2000)}
+Coding prompt: ${revisedPlan.codingPrompt.slice(0, 8000)}
 
 ## Your Task
 Compare all three. Check:
