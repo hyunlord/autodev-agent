@@ -17,6 +17,7 @@ import { generateEscalationReport } from './escalation';
 import { loadConfig, type AutoDevConfig } from '../lib/config';
 import type { PipelineEvent, TaskStatus, PlanningMode } from '../lib/types';
 import { ProgressDetector } from '../lib/safety/progress-detector';
+import { HookEngine } from '../lib/hooks/hook-engine';
 
 type EmitFn = (event: PipelineEvent) => void;
 
@@ -83,6 +84,10 @@ export async function runPipeline(taskId: string, rawEmit: EmitFn, signal?: Abor
   }
 
   const config = await loadConfig(projectDir);
+
+  // ─── Hook Engine ──────────────────────────────────────
+  const hookEngine = new HookEngine();
+  await hookEngine.load(projectDir);
 
   const systemPrompt = (task as any).systemPrompt ?? null;
 
@@ -168,6 +173,17 @@ export async function runPipeline(taskId: string, rawEmit: EmitFn, signal?: Abor
     emit({ type: 'log', level: 'info', message: `Context: branch=${projectCtx.gitBranch ?? 'n/a'}, files=${projectCtx.fileCount}, changed=${projectCtx.changedFiles.length}` });
     if (projectCtx.packageInfo) {
       emit({ type: 'log', level: 'info', message: `Package: ${projectCtx.packageInfo.name} (${projectCtx.packageInfo.dependencies.length} deps, scripts: ${projectCtx.packageInfo.scripts.join(', ')})` });
+    }
+
+    // ─── 2.5 TaskStart hook ──────────────────────────────
+    {
+      const taskStartHooks = await hookEngine.execute(
+        { event: 'TaskStart', taskId, projectDir, prompt: task.prompt },
+        emit,
+      );
+      if (taskStartHooks.mergedContext) {
+        workspaceContext += `\n\n## Hook Context\n${taskStartHooks.mergedContext}`;
+      }
     }
 
     // ─── 3. Determine execution mode ─────────────────────
@@ -340,6 +356,12 @@ Respond with ONLY a JSON array of question strings:
         });
         emit({ type: 'task_complete', success: true, summary: `Completed in ${result.attemptCount} attempt(s): ${result.summary}. All checks passed. Cost: $${result.costUsd.toFixed(4)}` });
 
+        // ─── TaskComplete hook (async notification) ────────
+        hookEngine.execute(
+          { event: 'TaskComplete', taskId, projectDir, summary: result.summary, costUsd: result.costUsd, modifiedFiles: result.modifiedFiles },
+          emit,
+        ).catch(() => { /* non-critical */ });
+
         // Commit successful changes as new baseline
         try {
           const { getExeca } = await import('../lib/execa');
@@ -357,6 +379,11 @@ Respond with ONLY a JSON array of question strings:
           result.totalDurationMs, result.stopReason ?? 'max_attempts',
           emit, projectDir,
         );
+        // ─── TaskFail hook (async notification) ──────────
+        hookEngine.execute(
+          { event: 'TaskFail', taskId, projectDir, error: result.summary, attempts: result.attemptCount },
+          emit,
+        ).catch(() => { /* non-critical */ });
       }
     }
 
@@ -366,6 +393,11 @@ Respond with ONLY a JSON array of question strings:
     emit({ type: 'task_complete', success: false, summary: `Failed: ${errorMessage}` });
     updateTaskStatus(taskId, 'failed', { error: errorMessage });
     recordEvent(taskId, 'pipeline_error', { error: errorMessage });
+    // ─── TaskFail hook (async notification) ────────────
+    hookEngine.execute(
+      { event: 'TaskFail', taskId, projectDir, error: errorMessage, attempts: 0 },
+      emit,
+    ).catch(() => { /* non-critical */ });
   } finally {
     await mcpManager.shutdown();
   }
@@ -396,7 +428,23 @@ async function runSingleCycle(
   const signal = options?.signal;
   const startTime = Date.now();
 
+  // ─── Hook Engine (cycle-scoped) ───────────────────────
+  const hookEngine = new HookEngine();
+  await hookEngine.load(projectDir);
+  // Accumulated context injected into each coding attempt prompt
+  let hookContextAccumulator = '';
+
   // ─── Planning ──────────────────────────────────────────
+  {
+    const prePlanHooks = await hookEngine.execute(
+      { event: 'PrePlan', taskId, projectDir, prompt: task.prompt },
+      emit,
+    );
+    if (prePlanHooks.mergedContext) {
+      hookContextAccumulator += (hookContextAccumulator ? '\n' : '') + prePlanHooks.mergedContext;
+    }
+  }
+
   let planResult: PlanResult;
   const planMode = (task.planningMode ?? 'auto') as PlanningMode;
 
@@ -466,6 +514,27 @@ async function runSingleCycle(
         }
         emit({ type: 'log', level: 'info', message: `Normalized filePath: ${step.filePath}` });
       }
+    }
+  }
+
+  // ─── PostPlan hook ────────────────────────────────────
+  {
+    const postPlanHooks = await hookEngine.execute(
+      { event: 'PostPlan', taskId, projectDir, plan: { summary: plan.summary, estimatedFiles: plan.estimatedFiles }, costUsd: planResult.costUsd },
+      emit,
+    );
+    if (postPlanHooks.finalDecision === 'deny') {
+      emit({ type: 'log', level: 'warn', message: `[Hook] PostPlan denied: ${postPlanHooks.outputs.find(o => o.decision === 'deny')?.reason ?? ''}` });
+    }
+    if (postPlanHooks.finalDecision === 'modify' && postPlanHooks.updatedInput?.plan) {
+      const hp = postPlanHooks.updatedInput.plan as Record<string, unknown>;
+      if (typeof hp.summary === 'string') plan.summary = hp.summary;
+      if (typeof hp.codingPrompt === 'string') plan.codingPrompt = hp.codingPrompt;
+      if (Array.isArray(hp.estimatedFiles)) plan.estimatedFiles = hp.estimatedFiles as string[];
+      emit({ type: 'log', level: 'info', message: '[Hook] Plan modified by PostPlan hook' });
+    }
+    if (postPlanHooks.mergedContext) {
+      hookContextAccumulator += (hookContextAccumulator ? '\n' : '') + postPlanHooks.mergedContext;
     }
   }
 
@@ -541,6 +610,15 @@ async function runSingleCycle(
     }
 
     emit({ type: 'log', level: 'info', message: 'Plan approved. Starting coding...' });
+
+    // ─── PlanReview hook (context injection only) ────────
+    const planReviewHooks = await hookEngine.execute(
+      { event: 'PlanReview', taskId, projectDir, plan: { summary: plan.summary }, userAction: 'approved' },
+      emit,
+    );
+    if (planReviewHooks.mergedContext) {
+      hookContextAccumulator += (hookContextAccumulator ? '\n' : '') + planReviewHooks.mergedContext;
+    }
   } else {
     emit({ type: 'log', level: 'info', message: 'Auto-approved. Starting coding...' });
   }
@@ -649,6 +727,17 @@ async function runSingleCycle(
       replanCount++;
       emit({ type: 'log', level: 'info', message: `[Re-plan] Attempt ${replanCount}/${MAX_REPLANS} — regenerating plan with Verify Agent feedback` });
       emit({ type: 'status_change', status: 'planning' as TaskStatus, message: `Re-planning (attempt ${replanCount})...` });
+
+      // ─── OnReplan hook ──────────────────────────────────
+      {
+        const onReplanHooks = await hookEngine.execute(
+          { event: 'OnReplan', taskId, projectDir, replanCount, previousIssues: replanFeedback.issues },
+          emit,
+        );
+        if (onReplanHooks.mergedContext) {
+          hookContextAccumulator += (hookContextAccumulator ? '\n' : '') + onReplanHooks.mergedContext;
+        }
+      }
 
       const replanPrompt = `${task.prompt}
 
@@ -763,6 +852,15 @@ Consider a simpler or fundamentally different implementation strategy.`;
     if (isRetry) {
       updateTaskStatus(taskId, 'retrying');
       emit({ type: 'status_change', status: 'retrying', message: `Retry attempt ${attempt}/${config.maxRetries}...` });
+
+      // ─── OnRetry hook ───────────────────────────────────
+      const onRetryHooks = await hookEngine.execute(
+        { event: 'OnRetry', taskId, projectDir, attempt, previousIssues: lastFailedChecks.map(c => c.description) },
+        emit,
+      );
+      if (onRetryHooks.mergedContext) {
+        hookContextAccumulator += (hookContextAccumulator ? '\n' : '') + onRetryHooks.mergedContext;
+      }
     } else {
       updateTaskStatus(taskId, 'coding');
     }
@@ -809,10 +907,26 @@ ${currentPlan.codingPrompt}`;
     const codingMcpServers = options?.codingMcpServers ?? [];
     const verifyMcpPrompt = options?.verifyMcpPrompt ?? '';
 
+    // Inject accumulated hook context into coding prompt
+    if (hookContextAccumulator) {
+      codingPrompt += `\n\n## Additional Context (Hook)\n${hookContextAccumulator}`;
+    }
+
     const safePrompt = `${coderPrompt.content}${codingMcpPrompt ? '\n' + codingMcpPrompt : ''}\n\n${codingPrompt}`;
 
     if (verifyMcpPrompt) {
       emit({ type: 'log', level: 'info', message: `Verification MCP tools available` });
+    }
+
+    // ─── PreCode hook ───────────────────────────────────
+    {
+      const preCodeHooks = await hookEngine.execute(
+        { event: 'PreCode', taskId, projectDir, plan: { summary: currentPlan.summary }, agentId, attempt },
+        emit,
+      );
+      if (preCodeHooks.mergedContext) {
+        hookContextAccumulator += (hookContextAccumulator ? '\n' : '') + preCodeHooks.mergedContext;
+      }
     }
 
     const codeResult = await agent.invoke({
@@ -908,10 +1022,41 @@ ${currentPlan.codingPrompt}`;
     emit({ type: 'log', level: 'info', message: `Code generated (attempt ${attempt}). Files: ${lastModifiedFiles.join(', ') || 'none detected'}` });
     emit({ type: 'attempt_complete', attemptNum: attempt, success: true });
 
+    // ─── PostCode hook ──────────────────────────────────
+    {
+      const postCodeHooks = await hookEngine.execute(
+        { event: 'PostCode', taskId, projectDir, modifiedFiles: lastModifiedFiles, agentId, attempt,
+          codingResult: { success: codeResult.success, costUsd: codeResult.costUsd, durationMs: codeResult.durationMs } },
+        emit,
+      );
+      if (postCodeHooks.finalDecision === 'deny' && postCodeHooks.mergedIssues.length > 0) {
+        // Hook vetoed the code — inject issues into retry context
+        lastFailedChecks = [
+          ...lastFailedChecks,
+          ...postCodeHooks.mergedIssues.map((issue, i) => ({ id: `hook-${i}`, description: issue })),
+        ];
+        emit({ type: 'log', level: 'warn', message: `[Hook] PostCode denied — issues will be included in retry context` });
+      }
+      if (postCodeHooks.mergedContext) {
+        hookContextAccumulator += (hookContextAccumulator ? '\n' : '') + postCodeHooks.mergedContext;
+      }
+    }
+
     // ─── Verification phase ──────────────────────────
     checkAbort(signal);
     updateTaskStatus(taskId, 'verifying');
     emit({ type: 'status_change', status: 'verifying', message: `Verifying (attempt ${attempt})...` });
+
+    // ─── PreVerify hook ─────────────────────────────────
+    {
+      const preVerifyHooks = await hookEngine.execute(
+        { event: 'PreVerify', taskId, projectDir, modifiedFiles: lastModifiedFiles, agentId },
+        emit,
+      );
+      if (preVerifyHooks.mergedContext) {
+        hookContextAccumulator += (hookContextAccumulator ? '\n' : '') + preVerifyHooks.mergedContext;
+      }
+    }
 
     const screenshotDir = join(process.cwd(), '.autodev', 'screenshots', taskId, `attempt-${attempt}`);
     let verifyResult: any;
@@ -1036,6 +1181,23 @@ ${currentPlan.codingPrompt}`;
         durationMs: r.durationMs,
         createdAt: new Date().toISOString(),
       }).run();
+    }
+
+    // ─── PostVerify hook ────────────────────────────────
+    {
+      const postVerifyHooks = await hookEngine.execute(
+        { event: 'PostVerify', taskId, projectDir, verifyResult: { allPassed: verifyResult.allPassed }, attempt },
+        emit,
+      );
+      if (postVerifyHooks.finalDecision === 'deny' && postVerifyHooks.mergedIssues.length > 0) {
+        lastFailedChecks = [
+          ...lastFailedChecks,
+          ...postVerifyHooks.mergedIssues.map((issue, i) => ({ id: `hook-verify-${i}`, description: issue })),
+        ];
+      }
+      if (postVerifyHooks.mergedContext) {
+        hookContextAccumulator += (hookContextAccumulator ? '\n' : '') + postVerifyHooks.mergedContext;
+      }
     }
 
     if (verifyResult.allPassed) {
