@@ -176,6 +176,16 @@ export async function executeVerification(params: {
       vr.verdict = 're-plan';
     }
 
+    // Detect likely hallucination: same "file path in CSS/media" pattern repeated across attempts
+    if (vr.verdict === 're-code' && attempt > 1 && lastIssues.length > 0) {
+      const filePathPattern = /file path|path.*@media|@media.*path/i;
+      const newHas = vr.issues?.some((i: string) => filePathPattern.test(i));
+      const oldHas = lastIssues.some(i => filePathPattern.test(i));
+      if (newHas && oldHas) {
+        emit({ type: 'log', level: 'warn', message: '[Verify] WARNING: "file path in @media" issue repeated across attempts — possible Verify Agent hallucination. Check ~/.autodev/debug/verify-*.txt for diagnosis.' });
+      }
+    }
+
     // Track verdict for retry
     lastVerdict = vr.verdict;
     lastIssues = vr.issues ?? [];

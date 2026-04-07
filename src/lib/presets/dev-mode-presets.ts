@@ -16,7 +16,7 @@ export const DEV_MODE_PRESETS: DevModePreset[] = [
     techStack: ['HTML', 'CSS', 'JavaScript', 'React', 'Vue', 'Next.js'],
     planningHints: '반응형 디자인을 고려해라. 접근성(a11y)을 신경 써라. 브라우저 호환성을 확인해라.',
     codingHints: '시맨틱 HTML 사용. CSS는 모바일 퍼스트. 이벤트 핸들러에 에러 처리. XSS 방지를 위해 textContent 사용.',
-    verifyHints: 'Playwright로 실제 렌더링 확인. 모바일 뷰포트에서도 깨지지 않는지. 콘솔 에러 0건.',
+    verifyHints: 'Playwright로 실제 렌더링 확인. 콘솔 에러 0건. 반응형은 사용자가 명시적으로 요청한 경우에만 검증.',
   },
   {
     id: 'api-backend',

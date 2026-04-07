@@ -190,7 +190,7 @@ export class VerifyAgent implements IAgent {
         const maxPerFile = Math.min(remaining, 15000);
         if (content.length > maxPerFile) {
           fileContents[file] = content.slice(0, maxPerFile)
-            + `\n...[NOTE: This file was truncated from ${content.length} bytes. The code may be complete — do not fail based on truncation alone.]...`;
+            + `\n...[FILE TRUNCATED for prompt size. Full file on disk is ${content.length} bytes. Truncation does NOT mean the code is broken — any @media queries, CSS rules, or code beyond this point are intact on disk. Do NOT report truncation-related issues.]...`;
           truncatedFiles[file] = content.length;
         } else {
           fileContents[file] = content;
@@ -339,6 +339,12 @@ Judge the result purely on: does it fulfill the user's request?
 Do NOT assume the coding agent followed any particular plan.
 The coding agent's self-report is not provided — judge only by what you observe in the files.
 
+=== COMMON FALSE POSITIVE WARNING ===
+Do NOT report "file path in CSS media query" or "@media keyword replaced by file path" unless you can quote the EXACT offending line from the file contents below.
+If the CSS contains a valid @media rule (e.g., @media (max-width: 480px) { ... }), that is CORRECT — not an error.
+Responsive CSS is OPTIONAL unless the user explicitly requested it. Do not fail a task for lacking responsive design if it was not mentioned in the requirements.
+If you reported this same issue in a previous attempt and cannot find the exact problematic line in the current file contents, treat it as RESOLVED.
+
 ${previousAttemptSection}
 === ORIGINAL USER REQUEST ===
 ${input.originalPrompt}
@@ -384,6 +390,17 @@ Scoring:
 - Below 50: Major features broken or missing
 
 CRITICAL: Score 80+ ONLY if you have traced through the logic with concrete inputs and verified correctness. Do NOT give high scores based on "the code looks reasonable."`;
+
+    // ─── Debug: dump prompt to file ───────────────────────
+    try {
+      const { writeFileSync, mkdirSync } = await import('fs');
+      const { join: _join } = await import('path');
+      const debugDir = _join(process.env.HOME ?? '/tmp', '.autodev', 'debug');
+      mkdirSync(debugDir, { recursive: true });
+      const ts = Date.now();
+      writeFileSync(_join(debugDir, `verify-prompt-${ts}.txt`), verifyPrompt, 'utf-8');
+      emit({ type: 'log', level: 'info', message: `[Verify] Debug prompt → ~/.autodev/debug/verify-prompt-${ts}.txt` } as PipelineEvent);
+    } catch { /* non-critical */ }
 
     let stdout = '';
     let inputTokens = 0;
@@ -456,6 +473,17 @@ CRITICAL: Score 80+ ONLY if you have traced through the logic with concrete inpu
         inputTokens = data.usage?.input_tokens ?? 0;
         outputTokens = data.usage?.output_tokens ?? 0;
       }
+
+      // ─── Debug: dump response ───────────────────────────
+      try {
+        const { writeFileSync, mkdirSync } = await import('fs');
+        const { join: _join } = await import('path');
+        const debugDir = _join(process.env.HOME ?? '/tmp', '.autodev', 'debug');
+        mkdirSync(debugDir, { recursive: true });
+        const ts = Date.now();
+        writeFileSync(_join(debugDir, `verify-response-${ts}.txt`), stdout, 'utf-8');
+        emit({ type: 'log', level: 'info', message: `[Verify] Debug response → ~/.autodev/debug/verify-response-${ts}.txt` } as PipelineEvent);
+      } catch { /* non-critical */ }
 
       // Estimate cost
       if (!inputTokens) inputTokens = Math.ceil(verifyPrompt.length / 4);
