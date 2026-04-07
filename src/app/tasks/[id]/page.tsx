@@ -111,6 +111,10 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
   const [submittingAnswers, setSubmittingAnswers] = useState(false);
   const [cycleInfo, setCycleInfo] = useState<{ current: number; max: number; steps: string[] }>({ current: 0, max: 0, steps: [] });
   const [planTab, setPlanTab] = useState<'json' | 'diagram'>('json');
+  const [diffData, setDiffData] = useState<any>(null);
+  const [diffView, setDiffView] = useState<'unified' | 'split'>('unified');
+  const [diffLoading, setDiffLoading] = useState(false);
+  const [selectedDiffFile, setSelectedDiffFile] = useState<string | null>(null);
   const [liveUsage, setLiveUsage] = useState<{
     totalCostUsd: number;
     totalInputTokens: number;
@@ -277,6 +281,29 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
         setPreviewFile(data);
       }
     } catch {}
+  };
+
+  const loadDiff = async () => {
+    if (!task?.projectDir || diffData) return;
+    setDiffLoading(true);
+    try {
+      const res = await fetch(`/api/diff?projectDir=${encodeURIComponent(task.projectDir)}`);
+      if (res.ok) {
+        const data = await res.json();
+        setDiffData(data);
+      }
+    } catch { /* ignore */ } finally {
+      setDiffLoading(false);
+    }
+  };
+
+  const toggleDiffFile = async (filePath: string) => {
+    if (selectedDiffFile === filePath) {
+      setSelectedDiffFile(null);
+      return;
+    }
+    setSelectedDiffFile(filePath);
+    if (!diffData) await loadDiff();
   };
 
   const parsedResult = task?.result
@@ -689,31 +716,62 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
           </div>
           {parsedResult?.modifiedFiles?.length > 0 && (
             <div className="mt-3 pt-3 border-t border-gray-800">
-              <p className="text-xs text-gray-500 mb-2">Modified Files</p>
-              <div className="space-y-1">
-                {parsedResult.modifiedFiles.map((f: string, i: number) => (
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs text-gray-500">Modified Files</p>
+                <div className="flex gap-1">
                   <button
-                    key={i}
-                    onClick={() => loadFilePreview(f)}
-                    className={`block w-full text-left text-xs px-2 py-1.5 rounded transition-colors ${
-                      previewFile?.path === f
-                        ? 'bg-indigo-900/30 text-indigo-300 border border-indigo-800'
-                        : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
-                    }`}
+                    onClick={() => { setDiffView('unified'); loadDiff(); }}
+                    className={`text-[10px] px-2 py-0.5 rounded ${diffView === 'unified' ? 'bg-indigo-900/50 text-indigo-300' : 'text-gray-500 hover:text-gray-300'}`}
                   >
-                    📄 {f}
+                    Unified
                   </button>
-                ))}
+                  <button
+                    onClick={() => { setDiffView('split'); loadDiff(); }}
+                    className={`text-[10px] px-2 py-0.5 rounded ${diffView === 'split' ? 'bg-indigo-900/50 text-indigo-300' : 'text-gray-500 hover:text-gray-300'}`}
+                  >
+                    Split
+                  </button>
+                </div>
               </div>
-              {previewFile && (
-                <div className="mt-3 rounded-lg border border-gray-700 overflow-hidden">
-                  <div className="flex items-center justify-between px-3 py-1.5 bg-gray-800 border-b border-gray-700">
-                    <span className="text-xs text-gray-400">{previewFile.path}</span>
-                    <span className="text-xs text-gray-600">{previewFile.language}</span>
-                  </div>
-                  <pre className="p-3 text-xs text-gray-300 overflow-x-auto max-h-96 bg-gray-950">
-                    <code>{previewFile.content}</code>
-                  </pre>
+              <div className="space-y-1 mb-3">
+                {parsedResult.modifiedFiles.map((f: string, i: number) => {
+                  const fileDiff = diffData?.files?.find((d: any) => d.path === f);
+                  return (
+                    <button
+                      key={i}
+                      onClick={() => toggleDiffFile(f)}
+                      className={`flex items-center justify-between w-full text-left text-xs px-2 py-1.5 rounded transition-colors ${
+                        selectedDiffFile === f
+                          ? 'bg-indigo-900/30 text-indigo-300 border border-indigo-800'
+                          : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                      }`}
+                    >
+                      <span>{fileDiff?.status === 'added' ? '🆕' : fileDiff?.status === 'deleted' ? '🗑️' : '📄'} {f}</span>
+                      {fileDiff && (
+                        <span className="flex gap-1 shrink-0">
+                          {fileDiff.additions > 0 && <span className="text-green-400">+{fileDiff.additions}</span>}
+                          {fileDiff.deletions > 0 && <span className="text-red-400">-{fileDiff.deletions}</span>}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+              {diffLoading && <div className="text-xs text-gray-500 p-3">Loading diff...</div>}
+              {selectedDiffFile && diffData && (
+                <DiffViewer
+                  fileDiff={diffData.files?.find((d: any) => d.path === selectedDiffFile)}
+                  mode={diffView}
+                  fallbackContent={previewFile?.content}
+                  onLoadFallback={() => loadFilePreview(selectedDiffFile)}
+                />
+              )}
+              {selectedDiffFile && !diffData && !diffLoading && (
+                <div className="text-xs text-gray-500 p-3 bg-gray-900 rounded">
+                  Diff not available. Showing file content.
+                  {previewFile && (
+                    <pre className="mt-2 text-gray-300 overflow-x-auto max-h-96"><code>{previewFile.content}</code></pre>
+                  )}
                 </div>
               )}
             </div>
@@ -930,6 +988,95 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
           )}
         </div>
       </section>
+    </div>
+  );
+}
+
+function DiffViewer({
+  fileDiff, mode, fallbackContent, onLoadFallback,
+}: {
+  fileDiff: any;
+  mode: 'unified' | 'split';
+  fallbackContent?: string;
+  onLoadFallback?: () => void;
+}) {
+  if (!fileDiff || fileDiff.hunks.length === 0) {
+    if (onLoadFallback && !fallbackContent) onLoadFallback();
+    return fallbackContent ? (
+      <div className="rounded-lg border border-gray-700 overflow-hidden">
+        <div className="px-3 py-1.5 bg-gray-800 border-b border-gray-700 text-xs text-gray-400">No diff — current content</div>
+        <pre className="p-3 text-xs text-gray-300 overflow-x-auto max-h-96 bg-gray-950"><code>{fallbackContent}</code></pre>
+      </div>
+    ) : null;
+  }
+  if (mode === 'split') return <SplitDiff fileDiff={fileDiff} />;
+  return <UnifiedDiff fileDiff={fileDiff} />;
+}
+
+function UnifiedDiff({ fileDiff }: { fileDiff: any }) {
+  return (
+    <div className="rounded-lg border border-gray-700 overflow-hidden">
+      <div className="flex items-center justify-between px-3 py-1.5 bg-gray-800 border-b border-gray-700">
+        <span className="text-xs text-gray-400 font-mono">{fileDiff.path}</span>
+        <span className="text-xs"><span className="text-green-400">+{fileDiff.additions}</span> <span className="text-red-400">-{fileDiff.deletions}</span></span>
+      </div>
+      <div className="overflow-x-auto max-h-[500px] overflow-y-auto bg-gray-950">
+        {fileDiff.hunks.map((hunk: any, hi: number) => (
+          <div key={hi}>
+            <div className="px-3 py-1 text-xs text-blue-400 bg-blue-900/20 font-mono">{hunk.header}</div>
+            {hunk.lines.map((line: any, li: number) => (
+              <div key={li} className={`px-3 font-mono text-xs leading-5 whitespace-pre ${
+                line.type === 'add' ? 'bg-green-900/20 text-green-300' :
+                line.type === 'remove' ? 'bg-red-900/20 text-red-300' : 'text-gray-400'
+              }`}>
+                <span className="inline-block w-8 text-right text-gray-600 mr-2 select-none">
+                  {line.type === 'remove' ? line.oldLine : line.type === 'add' ? line.newLine : line.oldLine}
+                </span>
+                <span className="inline-block w-3 text-center select-none">
+                  {line.type === 'add' ? '+' : line.type === 'remove' ? '-' : ' '}
+                </span>
+                {line.content}
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SplitDiff({ fileDiff }: { fileDiff: any }) {
+  return (
+    <div className="rounded-lg border border-gray-700 overflow-hidden">
+      <div className="flex items-center justify-between px-3 py-1.5 bg-gray-800 border-b border-gray-700">
+        <span className="text-xs text-gray-400 font-mono">{fileDiff.path}</span>
+        <span className="text-xs"><span className="text-green-400">+{fileDiff.additions}</span> <span className="text-red-400">-{fileDiff.deletions}</span></span>
+      </div>
+      <div className="overflow-x-auto max-h-[500px] overflow-y-auto bg-gray-950">
+        {fileDiff.hunks.map((hunk: any, hi: number) => (
+          <div key={hi}>
+            <div className="px-3 py-1 text-xs text-blue-400 bg-blue-900/20 font-mono col-span-2">{hunk.header}</div>
+            <div className="grid grid-cols-2 divide-x divide-gray-800">
+              <div>
+                {hunk.lines.filter((l: any) => l.type !== 'add').map((line: any, li: number) => (
+                  <div key={li} className={`px-2 font-mono text-xs leading-5 whitespace-pre ${line.type === 'remove' ? 'bg-red-900/20 text-red-300' : 'text-gray-400'}`}>
+                    <span className="inline-block w-6 text-right text-gray-600 mr-1 select-none">{line.oldLine}</span>
+                    {line.content}
+                  </div>
+                ))}
+              </div>
+              <div>
+                {hunk.lines.filter((l: any) => l.type !== 'remove').map((line: any, li: number) => (
+                  <div key={li} className={`px-2 font-mono text-xs leading-5 whitespace-pre ${line.type === 'add' ? 'bg-green-900/20 text-green-300' : 'text-gray-400'}`}>
+                    <span className="inline-block w-6 text-right text-gray-600 mr-1 select-none">{line.newLine}</span>
+                    {line.content}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
