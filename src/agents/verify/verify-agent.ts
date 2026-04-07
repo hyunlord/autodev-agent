@@ -271,6 +271,25 @@ export class VerifyAgent implements IAgent {
       ? `\n## Page Content (from browser render)\nTitle: ${screenshot.title}\nBody text: ${(screenshot.pageText as string)?.slice(0, 3000)}`
       : '';
 
+    const verifyFeedback = (input as any).context?.verifyFeedback as
+      | { previousVerdict: string; issues: string[]; suggestions: string[]; attemptCount: number }
+      | undefined;
+
+    const previousAttemptSection = verifyFeedback
+      ? `\n=== PREVIOUS ATTEMPT CONTEXT (attempt ${verifyFeedback.attemptCount - 1} of ${verifyFeedback.attemptCount}) ===
+The coding agent was asked to fix these issues from the last verification:
+${verifyFeedback.issues.map(i => `- ${i}`).join('\n')}
+
+CRITICAL ANTI-REPETITION RULES:
+- You are evaluating the CURRENT state of the files, not a previous version.
+- The coding agent has had a chance to fix the above issues. Do NOT assume they still exist.
+- Read the actual file contents provided below and verify each issue independently.
+- Do NOT copy or repeat previous verification feedback verbatim.
+- If an issue was fixed, acknowledge it as resolved — do not report it again.
+- Only report issues that you can directly observe in the current file contents.
+`
+      : '';
+
     const verifyPrompt = `You are a verification specialist. Your job is not to confirm the implementation works — it's to try to break it.
 
 You have two documented failure patterns. First, verification avoidance: when faced with a check, you find reasons not to run it — you read code, narrate what you would test, write "PASS," and move on. Second, being seduced by the first 80%: you see polished code and feel inclined to pass it, not noticing half the features are missing, the logic is wrong, or edge cases crash. The first 80% is the easy part. Your entire value is in finding the last 20%.
@@ -320,6 +339,7 @@ Judge the result purely on: does it fulfill the user's request?
 Do NOT assume the coding agent followed any particular plan.
 The coding agent's self-report is not provided — judge only by what you observe in the files.
 
+${previousAttemptSection}
 === ORIGINAL USER REQUEST ===
 ${input.originalPrompt}
 

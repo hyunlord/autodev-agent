@@ -298,12 +298,24 @@ Use this context to continue the work. The current task builds upon the previous
             projectConfig ? { type: projectConfig.type } : undefined);
         } catch { /* non-critical */ }
 
+        // Commit successful changes as new baseline (before updateTaskStatus so hash is available)
+        let commitHash = '';
+        try {
+          const { getExeca } = await import('../lib/execa');
+          const ex = await getExeca();
+          await ex('git', ['add', '-A'], { cwd: projectDir, reject: false });
+          await ex('git', ['commit', '-m', `autodev: ${result.summary.slice(0, 72)}`], { cwd: projectDir, reject: false });
+          const { stdout: hash } = await ex('git', ['rev-parse', 'HEAD'], { cwd: projectDir, reject: false }) as { stdout: string };
+          commitHash = hash.trim();
+        } catch { /* git commit failed — non-critical */ }
+
         updateTaskStatus(taskId, 'completed', {
           summary: result.summary,
           modifiedFiles: result.modifiedFiles,
           costUsd: result.costUsd,
           attempts: result.attemptCount,
           verificationPassed: true,
+          ...(commitHash ? { commitHash } : {}),
         });
         emit({ type: 'task_complete', success: true, summary: `Completed in ${result.attemptCount} attempt(s): ${result.summary}. All checks passed. Cost: $${result.costUsd.toFixed(4)}` });
 
@@ -312,14 +324,6 @@ Use this context to continue the work. The current task builds upon the previous
           { event: 'TaskComplete', taskId, projectDir, summary: result.summary, costUsd: result.costUsd, modifiedFiles: result.modifiedFiles },
           emit,
         ).catch(() => { /* non-critical */ });
-
-        // Commit successful changes as new baseline
-        try {
-          const { getExeca } = await import('../lib/execa');
-          const ex = await getExeca();
-          await ex('git', ['add', '-A'], { cwd: projectDir, reject: false });
-          await ex('git', ['commit', '-m', `autodev: ${result.summary.slice(0, 72)}`], { cwd: projectDir, reject: false });
-        } catch { /* git commit failed — non-critical */ }
       } else if (result.stopReason === 'plan_rejected') {
         updateTaskStatus(taskId, 'failed', { error: 'Plan rejected by user' });
         emit({ type: 'task_complete', success: false, summary: 'Plan rejected by user' });
@@ -859,11 +863,14 @@ Continue working on the next step. If the original goal is fully complete, respo
         allModifiedFiles.push(...result.modifiedFiles);
 
         // Commit successful cycle changes
+        let cycleCommitHash = '';
         try {
           const { getExeca } = await import('../lib/execa');
           const ex = await getExeca();
           await ex('git', ['add', '-A'], { cwd: projectDir, reject: false });
           await ex('git', ['commit', '-m', `autodev: cycle ${cycle} - ${result.summary.slice(0, 60)}`], { cwd: projectDir, reject: false });
+          const { stdout: hash } = await ex('git', ['rev-parse', 'HEAD'], { cwd: projectDir, reject: false }) as { stdout: string };
+          cycleCommitHash = hash.trim();
         } catch { /* git commit failed — non-critical */ }
 
         // Check if the agent signaled completion
@@ -880,6 +887,7 @@ Continue working on the next step. If the original goal is fully complete, respo
             modifiedFiles: [...new Set(allModifiedFiles)],
             cycles: cycle,
             costUsd: totalCostUsd,
+            ...(cycleCommitHash ? { commitHash: cycleCommitHash } : {}),
           });
           emit({ type: 'task_complete', success: true, summary: `Auto-cycle completed in ${cycle} cycles: ${completedSteps.join('; ')}` });
           return;
@@ -1003,6 +1011,14 @@ async function resolveProjectDir(taskId: string, userDir: string | null): Promis
     }
     if (!existsSync(resolved)) {
       mkdirSync(resolved, { recursive: true });
+    }
+    // Ensure git repo exists for diff support
+    if (!existsSync(join(resolved, '.git'))) {
+      const { execa: _execa } = await import('execa');
+      try {
+        await _execa('git', ['init'], { cwd: resolved, reject: false } as any);
+        await _execa('git', ['commit', '--allow-empty', '-m', 'initial'], { cwd: resolved, reject: false } as any);
+      } catch { /* git not available */ }
     }
     return resolved;
   }

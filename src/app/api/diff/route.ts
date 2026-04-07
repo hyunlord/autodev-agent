@@ -21,6 +21,18 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: 'Invalid file path' }, { status: 403 });
     }
 
+    // If a specific commit is requested, show that commit's diff
+    const commit = url.searchParams.get('commit');
+    if (commit && /^[0-9a-f]{7,40}$/i.test(commit)) {
+      const showArgs = ['show', '--no-color', '-U3', commit, '--'];
+      if (file) showArgs.push(file);
+      const { stdout } = await execa('git', showArgs, {
+        cwd: resolvedDir, reject: false, timeout: 10_000,
+      }) as { stdout: string };
+      const fileDiffs = parseDiff(stdout);
+      return NextResponse.json({ files: fileDiffs, totalFiles: fileDiffs.length, raw: stdout.slice(0, 500_000) });
+    }
+
     const args = ['diff', '--no-color', '-U3'];
     if (ref) args.push(ref);
     args.push('--');

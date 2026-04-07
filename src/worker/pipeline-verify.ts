@@ -101,6 +101,9 @@ export async function executeVerification(params: {
         let p = task.prompt;
         if (_verifyDevPreset) p += `\n\n## Dev Mode Verification Hints\n${_verifyDevPreset.verifyHints}`;
         if (_verifyCustom) p += _verifyCustom;
+        if (attempt > 1 && lastIssues.length > 0) {
+          p += `\n\nPREVIOUS ATTEMPT reported these issues (verify independently — they may be fixed now):\n- ${lastIssues.join('\n- ')}`;
+        }
         return p;
       })(),
       modifiedFiles: lastModifiedFiles,

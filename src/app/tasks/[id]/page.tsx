@@ -287,7 +287,13 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
     if (!task?.projectDir || diffData) return;
     setDiffLoading(true);
     try {
-      const res = await fetch(`/api/diff?projectDir=${encodeURIComponent(task.projectDir)}`);
+      const result = task.result
+        ? (() => { try { return typeof task.result === 'string' ? JSON.parse(task.result) : task.result; } catch { return null; } })()
+        : null;
+      const commitHash: string = result?.commitHash ?? '';
+      const params = new URLSearchParams({ projectDir: task.projectDir });
+      if (commitHash) params.set('commit', commitHash);
+      const res = await fetch(`/api/diff?${params}`);
       if (res.ok) {
         const data = await res.json();
         setDiffData(data);
