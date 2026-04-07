@@ -23,6 +23,7 @@ export const tasks = sqliteTable('tasks', {
   maxCycles:   integer('max_cycles').notNull().default(10),
   config:      text('config', { mode: 'json' }),
   result:      text('result', { mode: 'json' }),
+  parentTaskId: text('parent_task_id'),
   createdAt:   text('created_at').notNull(),
   updatedAt:   text('updated_at').notNull(),
 });

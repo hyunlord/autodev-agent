@@ -1,6 +1,8 @@
 'use client';
-import { useState, useEffect, use } from 'react';
+import { useState, useEffect, use, useRef } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { planToMermaid } from '@/lib/utils/plan-to-mermaid';
 
 interface TaskDetail {
   id: string;
@@ -25,6 +27,31 @@ interface PipelineEvent {
 }
 
 const STAGES = ['pending', 'planning', 'plan_review', 'coding', 'verifying', 'completed'];
+
+function MermaidDiagram({ chart }: { chart: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [rendered, setRendered] = useState(false);
+
+  useEffect(() => {
+    if (!ref.current || rendered) return;
+    import('mermaid').then(mermaid => {
+      mermaid.default.initialize({
+        startOnLoad: false,
+        theme: 'dark',
+        themeVariables: {
+          primaryColor: '#7c3aed',
+          primaryTextColor: '#fff',
+          lineColor: '#6b7280',
+          secondaryColor: '#1f2937',
+        },
+      });
+      mermaid.default.run({ nodes: [ref.current!] });
+      setRendered(true);
+    });
+  }, [chart, rendered]);
+
+  return <div ref={ref} className="mermaid text-sm overflow-x-auto">{chart}</div>;
+}
 
 function StageIndicator({ currentStatus }: { currentStatus: string }) {
   const currentIdx = STAGES.indexOf(currentStatus);
@@ -57,6 +84,7 @@ function StageIndicator({ currentStatus }: { currentStatus: string }) {
 
 export default function TaskDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  const router = useRouter();
   const [task, setTask] = useState<TaskDetail | null>(null);
   const [liveEvents, setLiveEvents] = useState<PipelineEvent[]>([]);
   const [screenshots, setScreenshots] = useState<Array<{ path: string; checkId: string }>>([]);
@@ -82,6 +110,7 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
   const [interviewAnswers, setInterviewAnswers] = useState<Record<number, string>>({});
   const [submittingAnswers, setSubmittingAnswers] = useState(false);
   const [cycleInfo, setCycleInfo] = useState<{ current: number; max: number; steps: string[] }>({ current: 0, max: 0, steps: [] });
+  const [planTab, setPlanTab] = useState<'json' | 'diagram'>('json');
   const [liveUsage, setLiveUsage] = useState<{
     totalCostUsd: number;
     totalInputTokens: number;
@@ -473,9 +502,25 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
       {planData && (
         <section className="mb-6 p-5 bg-indigo-950/20 rounded-lg border border-indigo-800/50">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-indigo-300">
-              {currentStatus === 'plan_review' ? 'Plan Review' : 'Plan'}
-            </h2>
+            <div className="flex items-center gap-3">
+              <h2 className="text-lg font-semibold text-indigo-300">
+                {currentStatus === 'plan_review' ? 'Plan Review' : 'Plan'}
+              </h2>
+              <div className="flex gap-1">
+                <button
+                  onClick={() => setPlanTab('json')}
+                  className={`px-2 py-0.5 text-xs rounded transition-colors ${planTab === 'json' ? 'bg-indigo-700 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}
+                >
+                  JSON
+                </button>
+                <button
+                  onClick={() => setPlanTab('diagram')}
+                  className={`px-2 py-0.5 text-xs rounded transition-colors ${planTab === 'diagram' ? 'bg-indigo-700 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}
+                >
+                  Diagram
+                </button>
+              </div>
+            </div>
             {currentStatus === 'plan_review' && (
               <div className="flex gap-2">
                 <button
@@ -517,7 +562,13 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
             )}
           </div>
 
-          <div className="space-y-4">
+          {planTab === 'diagram' && (
+            <div className="bg-gray-900 rounded-lg p-4 min-h-32">
+              <MermaidDiagram chart={planToMermaid(planData)} />
+            </div>
+          )}
+
+          {planTab === 'json' && <div className="space-y-4">
             <div>
               <p className="text-xs text-gray-500 mb-1">Summary</p>
               <p className="text-sm text-gray-200">{planData.summary}</p>
@@ -581,7 +632,7 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
                 ))}
               </div>
             </div>
-          </div>
+          </div>}
           {(task as any).systemPrompt && (
             <div className="mt-3 pt-3 border-t border-gray-800">
               <p className="text-xs text-gray-500 mb-1">System prompt</p>
@@ -665,6 +716,16 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
                   </pre>
                 </div>
               )}
+            </div>
+          )}
+          {(currentStatus === 'completed' || currentStatus === 'failed') && (
+            <div className="mt-4 pt-3 border-t border-gray-800">
+              <button
+                onClick={() => router.push(`/?chain=${id}`)}
+                className="px-4 py-2 text-sm bg-indigo-700 hover:bg-indigo-600 text-white rounded-lg transition-colors"
+              >
+                ↪ 이어서 작업하기
+              </button>
             </div>
           )}
         </div>

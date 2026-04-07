@@ -165,6 +165,36 @@ export async function runPipeline(taskId: string, rawEmit: EmitFn, signal?: Abor
       }
     }
 
+    // ─── Project Memory ──────────────────────────────────
+    {
+      const { loadProjectMemory, formatMemoryForPrompt } = await import('../lib/harness/memory-manager');
+      const projectMemory = loadProjectMemory(projectDir);
+      const memoryContext = formatMemoryForPrompt(projectMemory);
+      if (memoryContext) {
+        workspaceContext += memoryContext;
+        emit({ type: 'log', level: 'info', message: `Project memory loaded: ${projectMemory.decisions.length} decisions, ${projectMemory.customNotes.length} custom notes` });
+      }
+    }
+
+    // ─── Task Chain Context ──────────────────────────────
+    if (task?.parentTaskId) {
+      const parentTask = db.select().from(tasks).where(eq(tasks.id, task.parentTaskId)).get();
+      if (parentTask) {
+        const parentResult = parentTask.result
+          ? (typeof parentTask.result === 'string' ? JSON.parse(parentTask.result as string) : parentTask.result)
+          : {};
+        const chainContext = `## Chained from previous task
+**Previous prompt**: ${parentTask.prompt}
+**Previous result**: ${(parentResult as any)?.summary ?? 'completed'}
+**Previous project**: ${parentTask.projectDir ?? 'unknown'}
+**Modified files**: ${((parentResult as any)?.modifiedFiles ?? []).join(', ') || 'none'}
+
+Use this context to continue the work. The current task builds upon the previous task's results.`;
+        workspaceContext += '\n\n' + chainContext;
+        emit({ type: 'log', level: 'info', message: `Task chain: linked from parent task ${parentTask.id.slice(0, 8)}` });
+      }
+    }
+
     // ─── 3. Determine execution mode ─────────────────────
     const executionMode = (task as any).executionMode ?? 'single';
     const maxCycles = (task as any).maxCycles ?? 10;
@@ -195,6 +225,11 @@ export async function runPipeline(taskId: string, rawEmit: EmitFn, signal?: Abor
               } catch { /* non-critical */ }
             }
           }
+          try {
+            const { updateMemoryAfterTask } = await import('../lib/harness/memory-manager');
+            updateMemoryAfterTask(projectDir, task.prompt, result.summary ?? '', result.modifiedFiles ?? [],
+              projectConfig ? { type: projectConfig.type } : undefined);
+          } catch { /* non-critical */ }
           updateTaskStatus(taskId, 'completed', { summary: result.summary, modifiedFiles: result.modifiedFiles, costUsd: result.costUsd, attempts: result.attemptCount, verificationPassed: true });
           emit({ type: 'task_complete', success: true, summary: result.summary });
         } else if (result.stopReason === 'plan_rejected') {
@@ -256,6 +291,12 @@ export async function runPipeline(taskId: string, rawEmit: EmitFn, signal?: Abor
             } catch { /* non-critical */ }
           }
         }
+
+        try {
+          const { updateMemoryAfterTask } = await import('../lib/harness/memory-manager');
+          updateMemoryAfterTask(projectDir, task.prompt, result.summary ?? '', result.modifiedFiles ?? [],
+            projectConfig ? { type: projectConfig.type } : undefined);
+        } catch { /* non-critical */ }
 
         updateTaskStatus(taskId, 'completed', {
           summary: result.summary,
@@ -828,6 +869,11 @@ Continue working on the next step. If the original goal is fully complete, respo
         // Check if the agent signaled completion
         if (result.summary.includes('GOAL_COMPLETE')) {
           emit({ type: 'auto_cycle_complete', totalCycles: cycle, summary: `Goal completed in ${cycle} cycles` });
+          try {
+            const { updateMemoryAfterTask } = await import('../lib/harness/memory-manager');
+            updateMemoryAfterTask(projectDir, task.prompt, `Auto-cycle completed in ${cycle} cycles`, [...new Set(allModifiedFiles)],
+              projectConfig ? { type: projectConfig.type } : undefined);
+          } catch { /* non-critical */ }
           updateTaskStatus(taskId, 'completed', {
             summary: `Auto-cycle completed in ${cycle} cycles`,
             completedSteps,
@@ -870,6 +916,11 @@ Continue working on the next step. If the original goal is fully complete, respo
     // Max cycles reached or all cycles ran
     const cyclesRan = completedSteps.length;
     emit({ type: 'auto_cycle_complete', totalCycles: cyclesRan, summary: `Reached max cycles (${maxCycles})` });
+    try {
+      const { updateMemoryAfterTask } = await import('../lib/harness/memory-manager');
+      updateMemoryAfterTask(projectDir, task.prompt, `Auto-cycle reached max ${maxCycles} cycles`, [...new Set(allModifiedFiles)],
+        projectConfig ? { type: projectConfig.type } : undefined);
+    } catch { /* non-critical */ }
     updateTaskStatus(taskId, 'completed', {
       summary: `Auto-cycle reached max ${maxCycles} cycles`,
       completedSteps,

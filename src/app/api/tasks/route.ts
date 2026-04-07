@@ -22,6 +22,7 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   const body = await req.json();
   const { prompt, projectDir } = body;
+  const parentTaskId: string | null = body.parentTaskId ?? null;
 
   if (!prompt || typeof prompt !== 'string') {
     return NextResponse.json({ error: 'prompt is required' }, { status: 400 });
@@ -47,6 +48,7 @@ export async function POST(req: Request) {
       autoApprove: body.autoApprove ?? false,
     }),
     result: null,
+    parentTaskId,
     createdAt: now,
     updatedAt: now,
   };

@@ -51,6 +51,8 @@ const [tasks, setTasks] = useState<Task[]>([]);
   const [systemPrompt, setSystemPrompt] = useState('');
   const [executionMode, setExecutionMode] = useState<'single' | 'auto-cycle' | 'interview'>('single');
   const [maxCycles, setMaxCycles] = useState(10);
+  const [chainTask, setChainTask] = useState<{ id: string; prompt: string } | null>(null);
+
   const [usage, setUsage] = useState<{
     totals: { costUsd: number; tokens: number; attempts: number };
     byAgent: Array<{ agentId: string; totalCost: number; totalTokens: number; attemptCount: number }>;
@@ -65,6 +67,16 @@ const [tasks, setTasks] = useState<Task[]>([]);
     const urlParams = new URLSearchParams(window.location.search);
     const dirFromUrl = urlParams.get('projectDir');
     if (dirFromUrl) setProjectDir(dirFromUrl);
+    const chainId = urlParams.get('chain');
+    if (chainId) {
+      fetch(`/api/tasks/${chainId}`)
+        .then(r => r.json())
+        .then(data => {
+          setChainTask({ id: data.id, prompt: data.prompt });
+          if (data.projectDir) setProjectDir(data.projectDir);
+        })
+        .catch(() => {});
+    }
   }, []);
 
   const fetchTasks = async () => {
@@ -122,6 +134,7 @@ const [tasks, setTasks] = useState<Task[]>([]);
         executionMode,
         maxCycles: executionMode === 'auto-cycle' ? maxCycles : 1,
         ...(planningMode === 'manual' ? { codingPrompt, verificationChecklist } : {}),
+        ...(chainTask ? { parentTaskId: chainTask.id } : {}),
       }),
     });
     if (res.ok) {
@@ -235,6 +248,20 @@ const [tasks, setTasks] = useState<Task[]>([]);
 
       <section className="mb-8 p-6 bg-gray-900 rounded-xl border border-gray-800">
         <h2 className="text-lg font-semibold mb-4">New Task</h2>
+        {chainTask && (
+          <div className="mb-4 px-3 py-2.5 bg-indigo-950/40 border border-indigo-800/60 rounded-lg flex items-center justify-between">
+            <div className="text-xs text-indigo-300">
+              <span className="font-medium">이전 작업 이어서:</span>{' '}
+              <span className="text-gray-400">{chainTask.prompt.slice(0, 80)}{chainTask.prompt.length > 80 ? '...' : ''}</span>
+            </div>
+            <button
+              onClick={() => setChainTask(null)}
+              className="ml-2 text-gray-600 hover:text-gray-400 text-xs"
+            >
+              ✕
+            </button>
+          </div>
+        )}
         <textarea
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
