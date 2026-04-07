@@ -41,6 +41,7 @@ const [tasks, setTasks] = useState<Task[]>([]);
   const [projectDir, setProjectDir] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [planningMode, setPlanningMode] = useState<'claude-cli' | 'gemini-cli' | 'codex-cli' | 'api' | 'manual' | 'debate'>('claude-cli');
+  const [debateDrafterMode, setDebateDrafterMode] = useState<'claude-cli' | 'gemini-cli' | 'codex-cli'>('claude-cli');
   const [codingPrompt, setCodingPrompt] = useState('');
   const [verificationChecklist, setVerificationChecklist] = useState('');
   const [agents, setAgents] = useState<Array<{ id: string; name: string; available: boolean; path: string | null }>>([]);
@@ -134,6 +135,7 @@ const [tasks, setTasks] = useState<Task[]>([]);
         executionMode,
         maxCycles: executionMode === 'auto-cycle' ? maxCycles : 1,
         ...(planningMode === 'manual' ? { codingPrompt, verificationChecklist } : {}),
+        ...(planningMode === 'debate' ? { config: { debateDrafterMode } } : {}),
         ...(chainTask ? { parentTaskId: chainTask.id } : {}),
       }),
     });
@@ -308,7 +310,21 @@ const [tasks, setTasks] = useState<Task[]>([]);
           <p className="mt-1 text-xs text-yellow-500">Uses Claude API directly. Requires ANTHROPIC_API_KEY environment variable.</p>
         )}
         {planningMode === 'debate' && (
-          <p className="mt-1 text-xs text-purple-400">Drafter → Challenger → QC. 정교하지만 LLM 3-4회 호출 (비용 높음).</p>
+          <div className="mt-2 space-y-1">
+            <p className="text-xs text-purple-400">Drafter → Challenger → QC. 정교하지만 LLM 3-4회 호출 (비용 높음).</p>
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-gray-500">Drafter LLM:</label>
+              <select
+                value={debateDrafterMode}
+                onChange={(e) => setDebateDrafterMode(e.target.value as 'claude-cli' | 'gemini-cli' | 'codex-cli')}
+                className="px-2 py-1 text-xs bg-gray-800 border border-gray-700 rounded text-gray-300"
+              >
+                <option value="claude-cli">Claude CLI</option>
+                <option value="gemini-cli">Gemini CLI</option>
+                <option value="codex-cli">Codex CLI</option>
+              </select>
+            </div>
+          </div>
         )}
         {planningMode === 'manual' && (
           <div className="mt-3 space-y-3">

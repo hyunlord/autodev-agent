@@ -67,7 +67,8 @@ export async function executePlanning(params: {
   if (planMode === 'debate') {
     // Debate mode: Drafter → Challenger → QC
     const { DebatePlanner } = await import('../agents/planning/debate-planner');
-    const debatePlanner = new DebatePlanner('claude-cli');
+    const drafterMode = (taskConfig.debateDrafterMode ?? 'claude-cli') as PlanningMode;
+    const debatePlanner = new DebatePlanner(drafterMode);
     const debateOutput = await debatePlanner.invoke({
       prompt: task.prompt,
       context: {

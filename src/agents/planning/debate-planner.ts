@@ -108,9 +108,11 @@ export class DebatePlanner implements IAgent {
 
 ## REVISION REQUIRED
 
-Previous plan:
+Previous plan summary:
 ${currentPlan.summary}
-${currentPlan.codingPrompt}
+
+Previous coding prompt (truncated):
+${currentPlan.codingPrompt.slice(0, 3000)}
 
 A challenger agent found these issues:
 ${challengeResult.issues.map((issue: string, i: number) => `${i + 1}. ${issue}`).join('\n')}
