@@ -19,19 +19,29 @@ export class ProgressDetector {
   private history: CycleRecord[] = [];
   private maxCostUsd: number;
   private maxConsecutiveFailures: number;
+  private maxDurationMs: number;
+  private maxSingleTaskCostUsd: number;
+  private startTime: number | null = null;
 
   constructor(opts?: {
     maxCostUsd?: number;
     maxConsecutiveFailures?: number;
+    maxDurationMs?: number;
+    maxSingleTaskCostUsd?: number;
   }) {
     this.maxCostUsd = opts?.maxCostUsd ?? 5.0;
     this.maxConsecutiveFailures = opts?.maxConsecutiveFailures ?? 3;
+    this.maxDurationMs = opts?.maxDurationMs ?? 10 * 60 * 1000; // 10분
+    this.maxSingleTaskCostUsd = opts?.maxSingleTaskCostUsd ?? 2.0;
   }
 
   /**
    * Record a completed cycle
    */
   record(cycle: CycleRecord): void {
+    if (this.startTime === null) {
+      this.startTime = Date.now();
+    }
     this.history.push(cycle);
   }
 
@@ -58,6 +68,14 @@ export class ProgressDetector {
     // 4. Diminishing returns
     const diminishingResult = this.checkDiminishingReturns();
     if (!diminishingResult.shouldContinue) return diminishingResult;
+
+    // 5. 시간 기반 감지
+    const durationResult = this.checkDuration();
+    if (!durationResult.shouldContinue) return durationResult;
+
+    // 6. 단일 작업 비용 감지
+    const singleCostResult = this.checkSingleTaskCost();
+    if (!singleCostResult.shouldContinue) return singleCostResult;
 
     return { shouldContinue: true, recommendation: 'continue' };
   }
@@ -173,6 +191,36 @@ export class ProgressDetector {
       };
     }
 
+    return { shouldContinue: true };
+  }
+
+  private checkDuration(): ProgressCheckResult {
+    if (this.startTime === null) return { shouldContinue: true };
+
+    const elapsed = Date.now() - this.startTime;
+    if (elapsed >= this.maxDurationMs) {
+      const mins = (elapsed / 60_000).toFixed(1);
+      const limit = (this.maxDurationMs / 60_000).toFixed(1);
+      return {
+        shouldContinue: false,
+        reason: `Duration limit: ${mins}min >= ${limit}min`,
+        recommendation: 'warn',
+      };
+    }
+    return { shouldContinue: true };
+  }
+
+  private checkSingleTaskCost(): ProgressCheckResult {
+    if (this.history.length === 0) return { shouldContinue: true };
+
+    const last = this.history[this.history.length - 1];
+    if (last.costUsd >= this.maxSingleTaskCostUsd) {
+      return {
+        shouldContinue: false,
+        reason: `Single task cost: $${last.costUsd.toFixed(4)} >= $${this.maxSingleTaskCostUsd.toFixed(2)} limit`,
+        recommendation: 'warn',
+      };
+    }
     return { shouldContinue: true };
   }
 

@@ -136,7 +136,13 @@ ${currentPlan.codingPrompt}`;
       emit({ type: 'log', level: 'info', message: `Retry context: ${lastFailedChecks.length} failed, ${lastPassedChecks.length} passed checks from previous attempt` });
     }
     if (isRetry && useVerifyAgent && lastIssues.length > 0) {
-      codingPrompt += `\n\n---\n\nPrevious verification FAILED.\n\n## Verdict: ${lastVerdict}\n## Issues found by Verify Agent:\n${lastIssues.map((issue, i) => `${i + 1}. ${issue}`).join('\n')}\n\n## Suggestions:\n${lastSuggestions.map((s, i) => `${i + 1}. ${s}`).join('\n')}\n\nFix ONLY the issues listed above. Do NOT rewrite everything.`;
+      // ISOLATION: issues/suggestions만 전달 — score/verdict는 제외
+      // Coding Agent가 "85점이니까 조금만 고치면 되겠지" 합리화 방지
+      codingPrompt += `\n\n---\n\nPrevious attempt had these issues:\n${lastIssues.map((issue, i) => `${i + 1}. ${issue}`).join('\n')}`;
+      if (lastSuggestions.length > 0) {
+        codingPrompt += `\n\nSuggestions:\n${lastSuggestions.map((s, i) => `${i + 1}. ${s}`).join('\n')}`;
+      }
+      codingPrompt += `\n\nFix these issues. Do NOT rewrite everything.`;
     }
 
     const coderPrompt = loadPrompt('coder', projectDir, { projectDir });

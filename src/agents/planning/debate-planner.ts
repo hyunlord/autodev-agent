@@ -201,7 +201,12 @@ Keep the same JSON output format.`;
 
     const challengePrompt = `You are an adversarial plan challenger. Your ONLY job is to find weaknesses, gaps, and potential failures in this plan.
 
-You can ONLY see the plan below. You cannot see the project code, the user's full context, or the drafter's reasoning. This isolation is intentional — you judge the plan on its own merits.
+=== ISOLATION NOTICE ===
+You can ONLY see the plan and the original user request below.
+You CANNOT see the project code, file contents, or any implementation details.
+This isolation is intentional — you judge the plan purely on its logical merit.
+Do NOT assume you know what the codebase looks like.
+Do NOT say "the existing code probably handles this" — you don't know that.
 
 ## Original User Request
 ${originalPrompt}
@@ -250,7 +255,7 @@ If no real issues: { "issues": [], "suggestions": [], "severity": "minor" }`;
         const timer = setTimeout(() => controller.abort(), 90_000);
         try {
           const result = await ex(cliPath, args, {
-            reject: false, timeout: 90_000, cancelSignal: controller.signal,
+            cwd: '/tmp', reject: false, timeout: 90_000, cancelSignal: controller.signal,
           } as any);
           stdout = (result as any).stdout ?? '';
         } finally {
@@ -288,6 +293,11 @@ If no real issues: { "issues": [], "suggestions": [], "severity": "minor" }`;
 3. The revised plan
 
 Your job is to determine if the revised plan adequately addresses ALL challenger issues.
+
+=== ISOLATION NOTICE ===
+You can ONLY see the three documents below and the original user request.
+You CANNOT see the project code, file contents, or any implementation details.
+This isolation is intentional — judge the revision purely on whether it addresses the challenger's issues.
 
 ## Original User Request
 ${originalPrompt}
@@ -339,7 +349,7 @@ Verdicts:
         const timer = setTimeout(() => controller.abort(), 90_000);
         try {
           const result = await ex(cliPath, args, {
-            reject: false, timeout: 90_000, cancelSignal: controller.signal,
+            cwd: '/tmp', reject: false, timeout: 90_000, cancelSignal: controller.signal,
           } as any);
           stdout = (result as any).stdout ?? '';
         } finally {

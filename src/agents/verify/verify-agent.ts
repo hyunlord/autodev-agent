@@ -313,6 +313,13 @@ When suggesting fixes, be SPECIFIC:
 - BAD: "fix the logic"
 - GOOD: "Change the condition from (playerChoice - computerChoice + 3) % 3 === 2 to === 1 for win detection, and === 2 for lose detection."
 
+=== ISOLATION NOTICE ===
+You can see the original user request and the generated files below.
+You CANNOT see the implementation plan or the coding agent's reasoning.
+Judge the result purely on: does it fulfill the user's request?
+Do NOT assume the coding agent followed any particular plan.
+The coding agent's self-report is not provided — judge only by what you observe in the files.
+
 === ORIGINAL USER REQUEST ===
 ${input.originalPrompt}
 
