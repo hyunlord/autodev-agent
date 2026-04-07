@@ -173,13 +173,10 @@ export async function runPipeline(taskId: string, rawEmit: EmitFn, signal?: Abor
       await runAutoCycle(taskId, task, projectDir, projectConfig, workspaceContext, systemPrompt, taskConfig, config, maxCycles, emit, projectHistory, codingMcpServers, codingMcpPrompt, verifyMcpPrompt);
     } else if (executionMode === 'interview' && !(taskConfig as any).interviewAnswers) {
       // ─── Interview Mode: check if prompt is already specific enough ───
-      const promptWords = task.prompt.split(/\s+/).length;
-      const hasStack = /react|vue|next|angular|html|python|node|typescript|flutter/i.test(task.prompt);
-      const hasAction = /만들|생성|추가|수정|구현|개발|build|create|add|fix|implement/i.test(task.prompt);
-      const isSpecific = promptWords > 15 || (hasStack && hasAction);
+      const { InterviewAgent } = await import('../agents/interview/interview-agent');
 
-      if (isSpecific) {
-        emit({ type: 'log', level: 'info', message: `Prompt is specific enough (${promptWords} words, stack: ${hasStack}). Skipping interview.` });
+      if (InterviewAgent.shouldSkip(task.prompt)) {
+        emit({ type: 'log', level: 'info', message: 'Prompt specific enough, skipping interview.' });
         const result = await runSingleCycle(
           taskId, task, projectDir, projectConfig, workspaceContext,
           systemPrompt, taskConfig, config, emit,
@@ -212,81 +209,15 @@ export async function runPipeline(taskId: string, rawEmit: EmitFn, signal?: Abor
       // ─── Generate clarifying questions ───────────────────
       emit({ type: 'status_change', status: 'interview' as TaskStatus, message: 'Generating clarifying questions...' });
 
-      const interviewPrompt = `The user wants to build something but needs more detail. Generate 3-5 clarifying questions.
-
-User request: "${task.prompt}"
-
-IMPORTANT RULES:
-- Do NOT ask about things already mentioned in the request
-- If they said "React" → don't ask about tech stack
-- If they described specific features → don't ask about features
-- Only ask about genuinely MISSING information
-- Questions should be in Korean if the user's request is in Korean
-- Each question should help narrow down the implementation
-
-Respond with ONLY a JSON array of question strings:
-["Question 1?", "Question 2?", "Question 3?"]`;
-
-      let questions: string[] = [];
       const cliMode = (task as any).planningMode ?? 'claude-cli';
-
-      try {
-        const { getExeca } = await import('../lib/execa');
-        const { resolveCli } = await import('../lib/cli-resolver');
-        const ex = await getExeca();
-        let stdout = '';
-
-        if (cliMode === 'claude-cli' || cliMode === 'auto') {
-          const cliPath = await resolveCli('claude');
-          if (cliPath) {
-            const result = await ex(cliPath, ['-p', interviewPrompt, '--output-format', 'text', '--max-turns', '2', '--dangerously-skip-permissions'], {
-              cwd: projectDir, reject: false, timeout: 60_000,
-            }) as { stdout: string };
-            stdout = result.stdout;
-          }
-        } else if (cliMode === 'gemini-cli') {
-          const cliPath = await resolveCli('gemini');
-          if (cliPath) {
-            const result = await ex(cliPath, ['-p', interviewPrompt], {
-              cwd: projectDir, reject: false, timeout: 60_000,
-            }) as { stdout: string };
-            stdout = result.stdout;
-          }
-        } else if (cliMode === 'api') {
-          const apiKey = process.env.ANTHROPIC_API_KEY;
-          if (apiKey) {
-            const res = await fetch('https://api.anthropic.com/v1/messages', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-              body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 1024, messages: [{ role: 'user', content: interviewPrompt }] }),
-            });
-            const data = await res.json() as { content?: Array<{ text?: string }> };
-            stdout = data.content?.[0]?.text ?? '';
-          }
-        }
-
-        if (stdout) {
-          const { extractJson } = await import('../lib/utils/json-extractor');
-          try {
-            const parsed = extractJson<string[]>(stdout);
-            if (Array.isArray(parsed)) questions = parsed.filter((q): q is string => typeof q === 'string');
-          } catch {
-            const lines = stdout.split('\n').filter((l: string) => l.trim().endsWith('?'));
-            questions = lines.slice(0, 5).map((l: string) => l.replace(/^\d+[\.\)]\s*/, '').trim());
-          }
-        }
-      } catch (err) {
-        emit({ type: 'log', level: 'warn', message: `Interview question generation failed: ${err}` });
-      }
-
-      if (questions.length === 0) {
-        questions = [
-          '어떤 기능이 필요한가요? 구체적으로 설명해주세요.',
-          '어떤 기술 스택을 선호하나요? (React, Vue, 순수 HTML 등)',
-          '디자인이나 UI에 대한 선호가 있나요?',
-          '프로젝트의 규모나 범위는 어느 정도인가요?',
-        ];
-      }
+      const interviewAgent = new InterviewAgent(cliMode);
+      const interviewResult = await interviewAgent.invoke({
+        prompt: task.prompt,
+        context: { projectDir },
+        config: {},
+        onProgress: emit,
+      });
+      const questions = interviewResult.result.questions;
 
       const interviewConfig = typeof task.config === 'string' ? JSON.parse(task.config ?? '{}') : (task.config ?? {});
       (interviewConfig as any).interviewQuestions = questions;

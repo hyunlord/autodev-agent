@@ -44,6 +44,17 @@ export async function executePlanning(params: {
   let planResult: PlanResult;
   const planMode = (task.planningMode ?? 'auto') as PlanningMode;
 
+  // ─── Dev Mode preset injection ─────────────────────────
+  const { getPresetById: _getPreset, detectPresetFromProject: _detectPreset } = await import('../lib/presets/dev-mode-presets');
+  const _planTaskCfg = typeof task.config === 'string' ? JSON.parse(task.config ?? '{}') : (task.config ?? {});
+  const _planDevPreset = (_planTaskCfg.devMode ? _getPreset(_planTaskCfg.devMode) : undefined) ?? _detectPreset(projectConfig);
+  const effectiveWorkspaceContext = _planDevPreset
+    ? `${workspaceContext}\n\n## Dev Mode: ${_planDevPreset.name}\n${_planDevPreset.planningHints}`
+    : workspaceContext;
+  if (_planDevPreset) {
+    emit({ type: 'log', level: 'info', message: `Dev Mode preset: ${_planDevPreset.name}` });
+  }
+
   if (planMode === 'debate') {
     // Debate mode: Drafter → Challenger → QC
     const { DebatePlanner } = await import('../agents/planning/debate-planner');
@@ -53,7 +64,7 @@ export async function executePlanning(params: {
       context: {
         projectDir,
         projectConfig,
-        workspaceContext,
+        workspaceContext: effectiveWorkspaceContext,
       },
       config: {
         systemPrompt: systemPrompt ?? undefined,
@@ -86,7 +97,7 @@ export async function executePlanning(params: {
         verificationChecklist: taskConfig.verificationChecklist ?? '',
       } : undefined,
       (msg) => emit({ type: 'log', level: 'info', message: msg }),
-      workspaceContext,
+      effectiveWorkspaceContext,
       projectDir,
       systemPrompt,
     );

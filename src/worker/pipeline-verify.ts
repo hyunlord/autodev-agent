@@ -86,11 +86,18 @@ export async function executeVerification(params: {
   let lastFailedChecks: Array<{ id: string; description: string; actual?: string; expected?: string; type?: string; filePath?: string }> = [];
   let lastPassedChecks: Array<{ description: string }> = [];
 
+  // ─── Dev Mode preset ──────────────────────────────────
+  const { getPresetById: _getPresetV, detectPresetFromProject: _detectPresetV } = await import('../lib/presets/dev-mode-presets');
+  const _verifyTaskCfg = typeof task.config === 'string' ? JSON.parse(task.config ?? '{}') : (task.config ?? {});
+  const _verifyDevPreset = (_verifyTaskCfg.devMode ? _getPresetV(_verifyTaskCfg.devMode) : undefined) ?? _detectPresetV(projectConfig);
+
   if (useVerifyAgent) {
     // ─── NEW: LLM-based Verify Agent ────────────────
     const verifyOutput = await verifyAgent.invoke({
       prompt: 'Verify the coding result',
-      originalPrompt: task.prompt,
+      originalPrompt: _verifyDevPreset
+        ? `${task.prompt}\n\n## Dev Mode Verification Hints\n${_verifyDevPreset.verifyHints}`
+        : task.prompt,
       modifiedFiles: lastModifiedFiles,
       projectDir,
       tools: mcpVerifyTools,

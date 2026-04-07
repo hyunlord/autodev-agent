@@ -73,6 +73,11 @@ export async function executeCodingLoop(params: {
   const { codingMcpServers, codingMcpPrompt, verifyMcpPrompt, useVerifyAgent, verifyAgent } = params;
   const projectHistory = params.projectHistory ?? [];
 
+  // ─── Dev Mode preset ──────────────────────────────────
+  const { getPresetById: _getPresetC, detectPresetFromProject: _detectPresetC } = await import('../lib/presets/dev-mode-presets');
+  const _codeTaskCfg = typeof task.config === 'string' ? JSON.parse(task.config ?? '{}') : (task.config ?? {});
+  const _codeDevPreset = (_codeTaskCfg.devMode ? _getPresetC(_codeTaskCfg.devMode) : undefined) ?? _detectPresetC(projectConfig);
+
   // ─── Reset retry state for this plan ───────────────────
   const retryCtrl = new RetryController({
     maxAttempts: config.maxRetries,
@@ -117,6 +122,9 @@ Your working directory is ${projectDir} — all file paths must be relative to t
 ${currentPlan.codingPrompt}`;
     if (workspaceContext) {
       codingPrompt = codingPrompt + `\n\n${workspaceContext}`;
+    }
+    if (_codeDevPreset) {
+      codingPrompt += `\n\n## Dev Mode: ${_codeDevPreset.name}\n${_codeDevPreset.codingHints}`;
     }
     if (!isRetry && projectHistory.length > 0) {
       const historyContext = projectHistory.map(h => {
