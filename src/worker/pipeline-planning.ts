@@ -48,11 +48,20 @@ export async function executePlanning(params: {
   const { getPresetById: _getPreset, detectPresetFromProject: _detectPreset } = await import('../lib/presets/dev-mode-presets');
   const _planTaskCfg = typeof task.config === 'string' ? JSON.parse(task.config ?? '{}') : (task.config ?? {});
   const _planDevPreset = (_planTaskCfg.devMode ? _getPreset(_planTaskCfg.devMode) : undefined) ?? _detectPreset(projectConfig);
-  const effectiveWorkspaceContext = _planDevPreset
+  let effectiveWorkspaceContext = _planDevPreset
     ? `${workspaceContext}\n\n## Dev Mode: ${_planDevPreset.name}\n${_planDevPreset.planningHints}`
     : workspaceContext;
   if (_planDevPreset) {
     emit({ type: 'log', level: 'info', message: `Dev Mode preset: ${_planDevPreset.name}` });
+  }
+
+  // ─── Prompt Library injection ──────────────────────────
+  const { loadPromptLibrary, getPromptsForStage } = await import('../lib/harness/prompt-library');
+  const _planPromptLib = loadPromptLibrary(projectDir);
+  const _planningCustom = getPromptsForStage(_planPromptLib, 'planning');
+  if (_planningCustom) {
+    effectiveWorkspaceContext += _planningCustom;
+    emit({ type: 'log', level: 'info', message: `Prompt library: ${_planPromptLib.filter(p => p.stage === 'planning' || p.stage === 'all').length} planning prompt(s) loaded` });
   }
 
   if (planMode === 'debate') {

@@ -90,14 +90,19 @@ export async function executeVerification(params: {
   const { getPresetById: _getPresetV, detectPresetFromProject: _detectPresetV } = await import('../lib/presets/dev-mode-presets');
   const _verifyTaskCfg = typeof task.config === 'string' ? JSON.parse(task.config ?? '{}') : (task.config ?? {});
   const _verifyDevPreset = (_verifyTaskCfg.devMode ? _getPresetV(_verifyTaskCfg.devMode) : undefined) ?? _detectPresetV(projectConfig);
+  const { loadPromptLibrary: _loadVerifyLib, getPromptsForStage: _getVerifyStage } = await import('../lib/harness/prompt-library');
+  const _verifyCustom = _getVerifyStage(_loadVerifyLib(projectDir), 'verification');
 
   if (useVerifyAgent) {
     // ─── NEW: LLM-based Verify Agent ────────────────
     const verifyOutput = await verifyAgent.invoke({
       prompt: 'Verify the coding result',
-      originalPrompt: _verifyDevPreset
-        ? `${task.prompt}\n\n## Dev Mode Verification Hints\n${_verifyDevPreset.verifyHints}`
-        : task.prompt,
+      originalPrompt: (() => {
+        let p = task.prompt;
+        if (_verifyDevPreset) p += `\n\n## Dev Mode Verification Hints\n${_verifyDevPreset.verifyHints}`;
+        if (_verifyCustom) p += _verifyCustom;
+        return p;
+      })(),
       modifiedFiles: lastModifiedFiles,
       projectDir,
       tools: mcpVerifyTools,

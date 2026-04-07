@@ -77,6 +77,8 @@ export async function executeCodingLoop(params: {
   const { getPresetById: _getPresetC, detectPresetFromProject: _detectPresetC } = await import('../lib/presets/dev-mode-presets');
   const _codeTaskCfg = typeof task.config === 'string' ? JSON.parse(task.config ?? '{}') : (task.config ?? {});
   const _codeDevPreset = (_codeTaskCfg.devMode ? _getPresetC(_codeTaskCfg.devMode) : undefined) ?? _detectPresetC(projectConfig);
+  const { loadPromptLibrary: _loadCodingLib, getPromptsForStage: _getCodingStage } = await import('../lib/harness/prompt-library');
+  const _codePromptLib = _loadCodingLib(projectDir);
 
   // ─── Reset retry state for this plan ───────────────────
   const retryCtrl = new RetryController({
@@ -125,6 +127,10 @@ ${currentPlan.codingPrompt}`;
     }
     if (_codeDevPreset) {
       codingPrompt += `\n\n## Dev Mode: ${_codeDevPreset.name}\n${_codeDevPreset.codingHints}`;
+    }
+    const _codingCustom = _getCodingStage(_codePromptLib, 'coding');
+    if (_codingCustom) {
+      codingPrompt += _codingCustom;
     }
     if (!isRetry && projectHistory.length > 0) {
       const historyContext = projectHistory.map(h => {
