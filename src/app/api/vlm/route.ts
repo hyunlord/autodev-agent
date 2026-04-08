@@ -17,7 +17,7 @@ function loadConfig(): VlmConfig {
     enabled: false,
     provider: 'openrouter',
     apiKey: '',
-    model: 'google/gemini-2.5-flash',
+    model: 'google/gemini-3.1-flash-lite-preview',
   };
   if (!existsSync(CONFIG_PATH)) return defaults;
   try {

@@ -11,7 +11,7 @@ export default function SetupPage() {
   const [vlmEnabled, setVlmEnabled] = useState(false);
   const [vlmProvider, setVlmProvider] = useState<'openrouter' | 'anthropic'>('openrouter');
   const [vlmApiKey, setVlmApiKey] = useState('');
-  const [vlmModel, setVlmModel] = useState('google/gemini-2.5-flash');
+  const [vlmModel, setVlmModel] = useState('google/gemini-3.1-flash-lite-preview');
   const [vlmStatus, setVlmStatus] = useState<'idle' | 'ok' | 'error' | 'testing'>('idle');
 
   useEffect(() => {
@@ -122,7 +122,7 @@ export default function SetupPage() {
                   type="text"
                   value={vlmModel}
                   onChange={(e) => setVlmModel(e.target.value)}
-                  placeholder="google/gemini-2.5-flash"
+                  placeholder="google/gemini-3.1-flash-lite-preview"
                   className="w-full px-3 py-2 text-xs bg-gray-800 border border-gray-700 rounded-lg text-gray-300 placeholder-gray-600 focus:outline-none focus:border-indigo-500"
                 />
               </div>
