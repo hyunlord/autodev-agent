@@ -250,14 +250,15 @@ If no real issues: { "issues": [], "suggestions": [], "severity": "minor" }`;
       if (cliPath) {
         const cliName = cliPath.includes('gemini') ? 'gemini' : 'claude';
         const args = cliName === 'claude'
-          ? ['-p', challengePrompt, '--output-format', 'text', '--max-turns', '2', '--dangerously-skip-permissions']
-          : ['-p', challengePrompt];
+          ? ['--output-format', 'text', '--max-turns', '2', '--dangerously-skip-permissions']
+          : [];
 
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), 90_000);
         try {
           const result = await ex(cliPath, args, {
             cwd: '/tmp', reject: false, timeout: 90_000, cancelSignal: controller.signal,
+            input: challengePrompt,
           } as any);
           stdout = (result as any).stdout ?? '';
         } finally {
@@ -344,14 +345,15 @@ Verdicts:
       if (cliPath) {
         const cliName = cliPath.includes('gemini') ? 'gemini' : 'claude';
         const args = cliName === 'claude'
-          ? ['-p', qcPrompt, '--output-format', 'text', '--max-turns', '2', '--dangerously-skip-permissions']
-          : ['-p', qcPrompt];
+          ? ['--output-format', 'text', '--max-turns', '2', '--dangerously-skip-permissions']
+          : [];
 
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), 90_000);
         try {
           const result = await ex(cliPath, args, {
             cwd: '/tmp', reject: false, timeout: 90_000, cancelSignal: controller.signal,
+            input: qcPrompt,
           } as any);
           stdout = (result as any).stdout ?? '';
         } finally {

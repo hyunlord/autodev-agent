@@ -82,7 +82,6 @@ async function planViaCliAgent(
     throw new Error('Claude CLI not found. Install with: npm install -g @anthropic-ai/claude-code');
   }
   const result = await execa(claudePath, [
-    '-p', planPrompt,
     '--output-format', 'text',
     '--max-turns', '5',
     '--dangerously-skip-permissions',
@@ -90,6 +89,7 @@ async function planViaCliAgent(
     cwd: workspaceDir,
     timeout: 120_000,
     reject: false,
+    input: planPrompt,
     env: { ...process.env },
   });
 
@@ -149,13 +149,13 @@ async function planViaGeminiCli(
   }
 
   const result = await execa(geminiPath, [
-    '-p', planPrompt,
     '--output-format', 'json',
     '-y',
   ], {
     cwd: workspaceDir,
     timeout: 120_000,
     reject: false,
+    input: planPrompt,
     env: { ...process.env },
   });
 
@@ -219,8 +219,13 @@ async function planViaCodexCli(
     throw new Error('Codex CLI not found');
   }
 
+  const MAX_CODEX_PROMPT = 50_000;
+  const codexPrompt = planPrompt.length > MAX_CODEX_PROMPT
+    ? planPrompt.slice(0, MAX_CODEX_PROMPT) + '\n\n[PROMPT TRUNCATED FOR CLI LIMITS]'
+    : planPrompt;
+
   const result = await execa(codexPath, [
-    'exec', planPrompt, '--full-auto', '--json',
+    'exec', codexPrompt, '--full-auto', '--json',
   ], {
     cwd: workspaceDir,
     timeout: 120_000,
