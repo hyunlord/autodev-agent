@@ -1,6 +1,6 @@
 import type { IAgent, AgentInput, AgentOutput, VerifyInput, VerifyResult } from '../interfaces';
 import { createPlaywrightTool } from './tools/playwright-verify';
-import { existsSync, readFileSync, readdirSync } from 'fs';
+import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { resolveCli } from '../../lib/cli-resolver';
 import { getExeca } from '../../lib/execa';
@@ -226,6 +226,26 @@ export class VerifyAgent implements IAgent {
           if (ssResult.success) {
             evidence.screenshot = { pageText: ssResult.output };
             emit({ type: 'log', level: 'info', message: '[Verify] MCP Playwright screenshot captured' } as PipelineEvent);
+
+            // 이미지 데이터 보존 — base64 또는 파일 경로 추출
+            const ssData = ssResult.data as Record<string, unknown> | undefined;
+            const imageBase64 = (ssData?.['base64'] ?? ssData?.['image']) as string | undefined;
+            const imagePath = (ssData?.['path'] ?? ssData?.['screenshotPath']) as string | undefined;
+
+            if (imageBase64) {
+              try {
+                const screenshotDir = join(process.env.HOME ?? '/tmp', '.autodev', 'screenshots');
+                mkdirSync(screenshotDir, { recursive: true });
+                const ssPath = join(screenshotDir, `verify-${Date.now()}.png`);
+                writeFileSync(ssPath, Buffer.from(imageBase64, 'base64'));
+                evidence.screenshotPath = ssPath;
+                emit({ type: 'log', level: 'info', message: `[Verify] Screenshot saved: ${ssPath}` } as PipelineEvent);
+              } catch (saveErr) {
+                emit({ type: 'log', level: 'info', message: `[Verify] Screenshot save failed: ${saveErr}` } as PipelineEvent);
+              }
+            } else if (imagePath) {
+              evidence.screenshotPath = imagePath;
+            }
           }
 
           // Collect computed CSS styles for design quality assessment
@@ -295,11 +315,33 @@ export class VerifyAgent implements IAgent {
           const ssResult = await playwrightTool.execute({ file: htmlFile, action: 'screenshot' });
           if (ssResult.success) {
             evidence.screenshot = ssResult.data;
+            // 직접 Playwright는 파일 경로를 반환 — VLM 분석에 사용
+            const directData = ssResult.data as Record<string, unknown> | undefined;
+            if (directData?.['screenshotPath']) {
+              evidence.screenshotPath = directData['screenshotPath'] as string;
+            }
             emit({ type: 'log', level: 'info', message: '[Verify] Screenshot captured (direct Playwright)' } as PipelineEvent);
           }
         } catch (err) {
           emit({ type: 'log', level: 'info', message: `[Verify] Playwright not available: ${err}` } as PipelineEvent);
         }
+      }
+    }
+
+    // ─── Stage 2.5: Visual analysis (VLM) ──────────────
+    if (evidence.screenshotPath) {
+      emit({ type: 'log', level: 'info', message: '[Verify] Stage 2.5: Visual analysis...' } as PipelineEvent);
+      try {
+        const imageBuffer = readFileSync(evidence.screenshotPath as string);
+        const imageBase64 = imageBuffer.toString('base64');
+        const visualAnalysis = await this.analyzeVisual(imageBase64, input.originalPrompt, emit);
+        evidence.visualAnalysis = visualAnalysis;
+        emit({
+          type: 'log', level: 'info',
+          message: `[Verify] Visual analysis: score ${visualAnalysis.designScore}/15, ${visualAnalysis.issues.length} visual issue(s)`,
+        } as PipelineEvent);
+      } catch (err) {
+        emit({ type: 'log', level: 'info', message: `[Verify] Visual analysis skipped: ${err}` } as PipelineEvent);
       }
     }
 
@@ -337,6 +379,15 @@ Use these values to assess design quality:
 - button.transition "all 0s" or empty = no hover transitions
 - container.boxShadow "none" = no visual depth
 - meta.hasCustomFont = false means using default serif font (unprofessional)`
+      : '';
+
+    const visualAnalysis = evidence.visualAnalysis as {
+      designScore: number; layoutScore: number; colorScore: number;
+      interactionScore: number; completenessScore: number;
+      issues: string[]; strengths: string[];
+    } | undefined;
+    const visualSection = visualAnalysis
+      ? `\n## Visual Analysis (VLM screenshot review)\nDesign Score: ${visualAnalysis.designScore}/15 (Layout: ${visualAnalysis.layoutScore}/4 | Color: ${visualAnalysis.colorScore}/4 | Interaction: ${visualAnalysis.interactionScore}/4 | Completeness: ${visualAnalysis.completenessScore}/3)\n${visualAnalysis.issues.length > 0 ? `Visual Issues:\n${visualAnalysis.issues.map(i => `- ${i}`).join('\n')}` : 'No visual issues found.'}\n${visualAnalysis.strengths.length > 0 ? `Visual Strengths:\n${visualAnalysis.strengths.map(s => `- ${s}`).join('\n')}` : ''}`
       : '';
 
     const verifyFeedback = (input as any).context?.verifyFeedback as
@@ -434,6 +485,7 @@ ${input.modifiedFiles.join(', ')}
 ${fileContentsSection}
 ${screenshotSection}
 ${styleSection}
+${visualSection}
 
 === ALL FILES IN PROJECT ===
 ${allFiles.join(', ')}
@@ -601,5 +653,79 @@ CRITICAL: Score 80+ ONLY if you have traced through the logic with concrete inpu
         tokenUsage: { input: 0, output: 0 },
       };
     }
+  }
+
+  // ─── VLM: Visual analysis via Claude API Vision ───────
+  private async analyzeVisual(
+    imageBase64: string,
+    originalPrompt: string,
+    emit: (e: PipelineEvent) => void,
+  ): Promise<{
+    designScore: number;
+    layoutScore: number;
+    colorScore: number;
+    interactionScore: number;
+    completenessScore: number;
+    issues: string[];
+    strengths: string[];
+  }> {
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) {
+      throw new Error('VLM requires ANTHROPIC_API_KEY');
+    }
+
+    emit({ type: 'log', level: 'info', message: '[Verify] VLM: calling Claude API Vision...' } as PipelineEvent);
+
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1000,
+        messages: [{
+          role: 'user',
+          content: [
+            {
+              type: 'image',
+              source: { type: 'base64', media_type: 'image/png', data: imageBase64 },
+            },
+            {
+              type: 'text',
+              text: `You are a UI design quality reviewer. The user requested: "${originalPrompt.slice(0, 500)}"
+
+Rate the visual quality of this screenshot on these criteria:
+- Layout & Spacing (0-4): Proper alignment, consistent padding/margins, no overlapping or cramped elements
+- Color & Typography (0-4): Cohesive color scheme (not default browser gray), readable fonts, text hierarchy
+- Interactive Polish (0-4): Buttons look clickable, visual states distinguishable, cursor changes
+- Completeness (0-3): No unstyled elements, consistent border-radius, professional overall appearance
+
+Respond with ONLY valid JSON (no markdown, no explanation):
+{
+  "designScore": <sum of all scores 0-15>,
+  "layoutScore": <0-4>,
+  "colorScore": <0-4>,
+  "interactionScore": <0-4>,
+  "completenessScore": <0-3>,
+  "issues": ["specific visual issue 1"],
+  "strengths": ["specific visual strength 1"]
+}`,
+            },
+          ],
+        }],
+      }),
+    });
+
+    if (!res.ok) {
+      throw new Error(`Claude API Vision error: ${res.status} ${await res.text()}`);
+    }
+
+    const data = await res.json() as { content?: Array<{ text?: string }> };
+    const text = data.content?.[0]?.text ?? '{}';
+    const cleaned = text.replace(/```json|```/g, '').trim();
+    return JSON.parse(cleaned);
   }
 }
