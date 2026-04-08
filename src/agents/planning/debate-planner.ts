@@ -56,6 +56,7 @@ export class DebatePlanner implements IAgent {
 
     // ─── Step 1a: Drafter — plan 초안 ─────────────────────
     emit({ type: 'log', level: 'info', message: '[Debate] Step 1a: Drafter generating plan draft...' } as PipelineEvent);
+    emit({ type: 'log', level: 'info', message: `[Debate Step 1a] prompt length: ${input.prompt.length} chars, mode: ${this.cliMode}` } as PipelineEvent);
 
     const draftResult: PlanResult = await generatePlan(
       input.prompt,
@@ -123,6 +124,8 @@ Revise the plan to address ALL issues above.
 If a challenge is invalid, explain why in the codingPrompt — don't silently ignore it.
 Keep the same JSON output format.`;
 
+      emit({ type: 'log', level: 'info', message: `[Debate Step 1c] revision prompt length: ${revisionPrompt.length} chars (~${Math.ceil(revisionPrompt.length / 4)} tokens), mode: ${this.cliMode}, timeout: 240s` } as PipelineEvent);
+
       const revisionResult = await generatePlan(
         revisionPrompt,
         projectConfig,
@@ -132,6 +135,7 @@ Keep the same JSON output format.`;
         workspaceContext,
         input.context.projectDir,
         input.config.systemPrompt ?? null,
+        240_000,
       );
 
       totalCost += revisionResult.costUsd;

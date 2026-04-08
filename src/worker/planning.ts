@@ -58,6 +58,7 @@ async function planViaCliAgent(
   workspaceContext?: string,
   workspaceDir?: string,
   systemPrompt?: string | null,
+  timeoutMs?: number,
 ): Promise<PlanResult> {
   onProgress?.('Generating plan via coding agent CLI...');
 
@@ -81,24 +82,34 @@ async function planViaCliAgent(
   if (!claudePath) {
     throw new Error('Claude CLI not found. Install with: npm install -g @anthropic-ai/claude-code');
   }
+
+  const effectiveTimeout = timeoutMs ?? 120_000;
+  onProgress?.(`[CLI] prompt length: ${planPrompt.length} chars (~${Math.ceil(planPrompt.length / 4)} tokens), timeout: ${effectiveTimeout / 1000}s`);
+  const cliStartTime = Date.now();
+
   const result = await execa(claudePath, [
     '--output-format', 'text',
     '--max-turns', '5',
     '--dangerously-skip-permissions',
   ], {
     cwd: workspaceDir,
-    timeout: 120_000,
+    timeout: effectiveTimeout,
     reject: false,
     input: planPrompt,
     env: { ...process.env },
   });
 
+  const cliElapsed = ((Date.now() - cliStartTime) / 1000).toFixed(1);
+  onProgress?.(`[CLI] done in ${cliElapsed}s, exit: ${result.exitCode}`);
+
   if (result.exitCode !== 0) {
+    const isTimeout = result.exitCode === 143 || (result as any).timedOut === true;
+    const exitReason = isTimeout ? `TIMEOUT after ${cliElapsed}s (limit: ${effectiveTimeout / 1000}s)` : `exit ${result.exitCode}`;
     const debugOutput = [
       result.stderr ? `stderr: ${result.stderr.slice(0, 1000)}` : '',
       result.stdout ? `stdout: ${result.stdout.slice(0, 1000)}` : '',
     ].filter(Boolean).join('\n');
-    throw new Error(`CLI planning failed (exit ${result.exitCode}):\n${debugOutput}`);
+    throw new Error(`CLI planning failed (${exitReason}):\n${debugOutput}`);
   }
 
   const parsed = extractJson(result.stdout, 'summary');
@@ -368,12 +379,13 @@ export async function generatePlan(
   workspaceContext?: string,
   workspaceDir?: string,
   systemPrompt?: string | null,
+  timeoutMs?: number,
 ): Promise<PlanResult> {
   switch (mode) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     case 'auto' as any:  // backward compat — treat as claude-cli
     case 'claude-cli':
-      return planViaCliAgent(userPrompt, projectConfig, onProgress, workspaceContext, workspaceDir, systemPrompt);
+      return planViaCliAgent(userPrompt, projectConfig, onProgress, workspaceContext, workspaceDir, systemPrompt, timeoutMs);
 
     case 'gemini-cli':
       return planViaGeminiCli(userPrompt, projectConfig, onProgress, workspaceContext, workspaceDir, systemPrompt);
