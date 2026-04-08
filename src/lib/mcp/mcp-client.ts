@@ -14,7 +14,7 @@ export interface McpClientServerConfig {
   headers?: Record<string, string>;
   // common
   enabled: boolean;
-  timeout?: number; // ms, default 30000
+  timeout?: number; // ms, connect timeout (default 120000)
 }
 
 export interface McpToolInfo {
@@ -43,58 +43,84 @@ export class McpClient {
       return this.connections.get(config.id)!.tools;
     }
 
-    const log = (msg: string) =>
-      emit?.({ type: 'log', level: 'info', message: msg } as PipelineEvent);
+    const log = (msg: string, level: 'info' | 'warn' = 'info') =>
+      emit?.({ type: 'log', level, message: msg } as PipelineEvent);
 
-    try {
-      log(`[MCP] Connecting to ${config.id}...`);
+    // 기본 2분 timeout (npx의 패키지 다운로드 + Chromium 초기화 대비)
+    const timeout = config.timeout ?? 120_000;
 
-      const client = new Client({ name: 'autodev-agent', version: '1.0.0' });
-      let transport: any;
-
+    // local stdio transport는 일회성이므로 재시도 시 새로 생성해야 함
+    const buildTransport = async (): Promise<any> => {
       if (config.type === 'local' && config.command) {
-        transport = new StdioClientTransport({
+        return new StdioClientTransport({
           command: config.command,
           args: config.args ?? [],
           env: { ...process.env, ...config.env } as Record<string, string>,
         });
-      } else if (config.type === 'remote' && config.url) {
+      }
+      if (config.type === 'remote' && config.url) {
         const { StreamableHTTPClientTransport } = await import(
           '@modelcontextprotocol/sdk/client/streamableHttp.js'
         );
-        transport = new StreamableHTTPClientTransport(new URL(config.url), {
+        return new StreamableHTTPClientTransport(new URL(config.url), {
           requestInit: {
             headers: config.headers ?? {},
           },
         });
-      } else {
-        throw new Error(
-          `Invalid MCP config for ${config.id}: need command (local) or url (remote)`,
-        );
       }
-
-      await client.connect(transport);
-      log(`[MCP] Connected to ${config.id}`);
-
-      const toolsResult = await client.listTools();
-      const tools: McpToolInfo[] = (toolsResult.tools ?? []).map((t) => ({
-        name: t.name,
-        description: t.description ?? '',
-        inputSchema: t.inputSchema,
-        serverId: config.id,
-      }));
-
-      log(
-        `[MCP] ${config.id}: ${tools.length} tools available — ${tools.map((t) => t.name).join(', ')}`,
+      throw new Error(
+        `Invalid MCP config for ${config.id}: need command (local) or url (remote)`,
       );
+    };
 
-      this.connections.set(config.id, { client, transport, tools });
-      return tools;
-    } catch (err) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      log(`[MCP] Failed to connect to ${config.id}: ${errMsg}`);
-      return [];
+    const maxAttempts = config.type === 'local' ? 2 : 1;
+    let lastErr: unknown;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const client = new Client({ name: 'autodev-agent', version: '1.0.0' });
+      let transport: any;
+      try {
+        log(
+          attempt === 1
+            ? `[MCP] Connecting to ${config.id} (timeout: ${timeout}ms)...`
+            : `[MCP] Retrying connection to ${config.id} (attempt ${attempt}/${maxAttempts})...`,
+        );
+
+        transport = await buildTransport();
+
+        // SDK Client.connect()의 두 번째 인자로 RequestOptions를 전달 (timeout 지원)
+        await client.connect(transport, { timeout });
+        log(`[MCP] Connected to ${config.id}`);
+
+        const toolsResult = await client.listTools(undefined, { timeout });
+        const tools: McpToolInfo[] = (toolsResult.tools ?? []).map((t) => ({
+          name: t.name,
+          description: t.description ?? '',
+          inputSchema: t.inputSchema,
+          serverId: config.id,
+        }));
+
+        log(
+          `[MCP] ${config.id}: ${tools.length} tools available — ${tools.map((t) => t.name).join(', ')}`,
+        );
+
+        this.connections.set(config.id, { client, transport, tools });
+        return tools;
+      } catch (err) {
+        lastErr = err;
+        const errMsg = err instanceof Error ? err.message : String(err);
+        log(
+          `[MCP] Connection attempt ${attempt}/${maxAttempts} to ${config.id} failed: ${errMsg}`,
+          'warn',
+        );
+        // 실패한 transport/client는 정리 시도 (실패해도 무시)
+        try { await client.close(); } catch { /* ignore */ }
+      }
     }
+
+    const errMsg = lastErr instanceof Error ? lastErr.message : String(lastErr);
+    log(`[MCP] Failed to connect to ${config.id}: ${errMsg}`, 'warn');
+    return [];
   }
 
   /**

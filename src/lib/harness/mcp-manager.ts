@@ -204,6 +204,7 @@ export class McpManager {
         url: config.url,
         headers: config.headers,
         enabled: config.enabled,
+        timeout: config.timeout,
       }, emit);
     }
   }

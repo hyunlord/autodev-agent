@@ -106,6 +106,14 @@ export async function runPipeline(taskId: string, rawEmit: EmitFn, signal?: Abor
       emit({ type: 'log', level: 'info',
         message: `[MCP] ${connectedTools.length} tools connected: ${connectedTools.map(t => `${t.serverId}/${t.name}`).join(', ')}` });
     }
+
+    // 활성화되었지만 연결 실패한 서버를 명시적으로 표시
+    const mcpClient = mcpManager.getMcpClient();
+    const failedServers = enabledServers.filter(id => !mcpClient.isConnected(id));
+    if (failedServers.length > 0) {
+      emit({ type: 'log', level: 'warn',
+        message: `[MCP] Failed to connect: ${failedServers.join(', ')}. Verify Agent will use fallback Playwright (if available).` });
+    }
   } catch (err) {
     emit({ type: 'log', level: 'warn', message: `[MCP] Connection failed: ${err}` });
   }

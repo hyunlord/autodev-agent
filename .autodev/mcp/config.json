@@ -4,7 +4,8 @@
       "type": "local",
       "command": "npx",
       "args": ["@playwright/mcp@latest"],
-      "enabled": true
+      "enabled": true,
+      "timeout": 120000
     },
     "context7": {
       "type": "remote",

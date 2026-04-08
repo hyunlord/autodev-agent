@@ -166,6 +166,7 @@ export interface McpServerConfig {
   enabled: boolean;
   headers?: Record<string, string>;
   env?: Record<string, string>;
+  timeout?: number; // ms, connect timeout (default 120000)
 }
 
 export interface McpConfig {
