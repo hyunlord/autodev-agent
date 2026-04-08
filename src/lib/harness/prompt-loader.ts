@@ -354,6 +354,16 @@ Respond with ONLY valid JSON matching this schema:
   "summary": "One-line description of the plan",
   "estimatedFiles": ["file1.ts", "file2.tsx"],
   "codingPrompt": "Detailed instructions for the coding agent...",
+  "subTasks": [
+    {
+      "id": "task-1",
+      "description": "Short label",
+      "codingPrompt": "Instructions specific to this sub-task",
+      "files": ["file1.ts"],
+      "agent": "claude-code",
+      "dependsOn": []
+    }
+  ],
   "verificationSpec": {
     "steps": [
       {
@@ -369,7 +379,20 @@ Respond with ONLY valid JSON matching this schema:
     ]
   },
   "taskCategory": "frontend" | "backend" | "fullstack" | "fix" | "refactor" | "test" | "docs"
-}`;
+}
+
+RULE 4 — PARALLEL DECOMPOSITION (subTasks, OPTIONAL):
+- The "subTasks" field is OPTIONAL. Only include it when the work can be split into INDEPENDENT pieces that touch DIFFERENT files.
+- If you include subTasks, the system will run each sub-task in parallel using a separate coding agent process.
+- Rules:
+  * Each sub-task's "files" array must NOT overlap with another sub-task's files (no two agents writing the same file).
+  * If two pieces of work reference each other during coding (shared types, imports, contracts), keep them in a SINGLE codingPrompt — do NOT split.
+  * Use "dependsOn" only when one sub-task strictly cannot start until another finishes (e.g., generated types).
+  * The "agent" field is optional — leave it unset to let the system pick.
+  * The top-level "codingPrompt" is still REQUIRED as a single-execution fallback. Make it self-contained even when subTasks are present.
+- Example WHERE TO USE subTasks: a frontend component file + an unrelated backend route handler.
+- Example WHERE NOT TO USE: index.html + styles.css for the same page; two files that share types or imports.
+- If in doubt, OMIT subTasks and use a single codingPrompt. Parallelization is an optimization, not a requirement.`;
 
 const DEFAULT_CODER_PROMPT = `You are an expert software engineer. Write high-quality, production-ready code.
 

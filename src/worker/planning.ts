@@ -31,16 +31,27 @@ export const VerificationSpecSchema = z.object({
 export type VerificationSpec = z.infer<typeof VerificationSpecSchema>;
 export type VerificationStep = z.infer<typeof VerificationStepSchema>;
 
+export const SubTaskSchema = z.object({
+  id: z.string(),
+  description: z.string(),
+  codingPrompt: z.string(),
+  files: z.array(z.string()),
+  agent: z.string().optional(),
+  dependsOn: z.array(z.string()).optional(),
+});
+
 export const PlanSchema = z.object({
   summary: z.string(),
   taskCategory: z.string().optional(),
   recommendedAgent: z.string().optional(),
   codingPrompt: z.string(),
+  subTasks: z.array(SubTaskSchema).optional(),
   estimatedFiles: z.array(z.string()),
   verificationSpec: VerificationSpecSchema,
 });
 
 export type Plan = z.infer<typeof PlanSchema>;
+export type SubTask = z.infer<typeof SubTaskSchema>;
 
 export interface PlanResult {
   plan: Plan;

@@ -94,6 +94,148 @@ export async function executeCodingLoop(params: {
   let lastIssues: string[] = [];
   let lastSuggestions: string[] = [];
 
+  // ─── Parallel branch (H4): Plan에 subTasks가 있으면 병렬 실행 ───
+  // subTasks가 없으면 100% 기존 단일 실행 경로로 폴백.
+  if (currentPlan.subTasks && currentPlan.subTasks.length > 0) {
+    const { executeParallelCoding } = await import('./pipeline-parallel');
+
+    emit({
+      type: 'log',
+      level: 'info',
+      message: `[Parallel] Plan has ${currentPlan.subTasks.length} sub-tasks — using parallel coding execution`,
+    });
+
+    updateTaskStatus(taskId, 'coding');
+    emit({ type: 'status_change', status: 'coding', message: `Running ${currentPlan.subTasks.length} sub-tasks in parallel...` });
+    emit({ type: 'attempt_start', attemptNum: 1, agentId: 'parallel' });
+
+    const parallelResults = await executeParallelCoding({
+      subTasks: currentPlan.subTasks,
+      projectDir,
+      systemPrompt,
+      workspaceContext,
+      emit,
+      signal,
+    });
+
+    // 결과 합산
+    const allModifiedFiles = filterToolArtifacts(parallelResults.flatMap((r) => r.modifiedFiles));
+    const totalParallelCost = parallelResults.reduce((sum, r) => sum + r.costUsd, 0);
+    const totalParallelInputTokens = parallelResults.reduce((sum, r) => sum + r.inputTokens, 0);
+    const totalParallelOutputTokens = parallelResults.reduce((sum, r) => sum + r.outputTokens, 0);
+    const allSuccess = parallelResults.length > 0 && parallelResults.every((r) => r.success);
+    const parallelDurationMs = Date.now() - startTime;
+
+    // 각 sub-task를 개별 attempts row로 기록 (비용/토큰 추적)
+    for (const r of parallelResults) {
+      db.insert(attempts).values({
+        id: nanoid(),
+        taskId,
+        attemptNum: 1,
+        agentId: r.agentId || 'parallel',
+        phase: 'coding',
+        status: r.success ? 'success' : 'error',
+        input: JSON.stringify({ subTaskId: r.subTaskId }),
+        output: JSON.stringify({
+          text: r.text.slice(0, 5000),
+          modifiedFiles: r.modifiedFiles,
+          costUsd: r.costUsd,
+        }),
+        errorLog: r.success ? null : r.text.slice(0, 5000),
+        errorHash: null,
+        costUsd: r.costUsd,
+        tokenCount: r.inputTokens + r.outputTokens,
+        durationMs: r.durationMs,
+        createdAt: new Date().toISOString(),
+      }).run();
+    }
+
+    totalCostUsd += totalParallelCost;
+    emit({
+      type: 'cost_update',
+      attemptNum: 1,
+      costUsd: totalParallelCost,
+      totalCostUsd,
+      inputTokens: totalParallelInputTokens,
+      outputTokens: totalParallelOutputTokens,
+      agentId: 'parallel',
+    });
+
+    lastModifiedFiles = allModifiedFiles;
+    emit({
+      type: 'log',
+      level: 'info',
+      message: `[Parallel] Done — ${parallelResults.length} sub-tasks (${parallelResults.filter((r) => r.success).length} success), ${allModifiedFiles.length} files, $${totalParallelCost.toFixed(4)}`,
+    });
+    emit({ type: 'attempt_complete', attemptNum: 1, success: allSuccess });
+
+    // 병렬 실행이 모두 실패하면 verification 건너뛰고 즉시 실패 반환
+    if (!allSuccess && allModifiedFiles.length === 0) {
+      const failedSubTasks = parallelResults.filter((r) => !r.success);
+      return {
+        success: false,
+        lastModifiedFiles,
+        totalCostUsd,
+        attemptCount: 1,
+        retryAttempts: [],
+        lastFailedChecks: failedSubTasks.map((r) => ({
+          id: r.subTaskId,
+          description: `Sub-task ${r.subTaskId} failed`,
+          actual: r.text.slice(0, 500),
+        })),
+        stopReason: 'parallel_all_failed',
+        hookContextAccumulator,
+        agentId: 'parallel',
+      };
+    }
+
+    // ─── Verification phase (병렬 결과 전체에 대해 1회) ─────
+    updateTaskStatus(taskId, 'verifying');
+    emit({ type: 'status_change', status: 'verifying', message: `Verifying parallel results...` });
+
+    // executeVerification은 단일 codingAttemptId를 받음 — 대표 ID 생성
+    const parallelCodingAttemptId = nanoid();
+
+    const verifyPhaseResult = await executeVerification({
+      taskId, projectDir, projectConfig, task, currentPlan,
+      lastModifiedFiles, attempt: 1, codingAttemptId: parallelCodingAttemptId,
+      useVerifyAgent, verifyAgent, lastVerdict, lastIssues, lastSuggestions,
+      hookEngine, hookContextAccumulator, totalCostUsd,
+      mcpManager: params.mcpManager,
+      signal, emit,
+    });
+
+    totalCostUsd = verifyPhaseResult.totalCostUsd;
+    hookContextAccumulator = verifyPhaseResult.hookContextAccumulator;
+
+    if (verifyPhaseResult.breakLoop) {
+      return {
+        success: false,
+        lastModifiedFiles,
+        totalCostUsd,
+        attemptCount: 1,
+        retryAttempts: [],
+        lastFailedChecks: verifyPhaseResult.lastFailedChecks,
+        replanFeedback: verifyPhaseResult.replanFeedback,
+        hookContextAccumulator,
+        agentId: 'parallel',
+      };
+    }
+
+    return {
+      success: verifyPhaseResult.allPassed,
+      lastModifiedFiles,
+      totalCostUsd,
+      attemptCount: 1,
+      retryAttempts: [],
+      lastFailedChecks: verifyPhaseResult.lastFailedChecks,
+      stopReason: verifyPhaseResult.allPassed ? undefined : 'parallel_verification_failed',
+      hookContextAccumulator,
+      agentId: 'parallel',
+    };
+  }
+  // ─── End parallel branch ─────────────────────────────
+
   for (let attempt = 1; attempt <= config.maxRetries; attempt++) {
     const isRetry = attempt > 1;
     if (isRetry) {
