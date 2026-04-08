@@ -1,0 +1,69 @@
+import { NextResponse } from 'next/server';
+import { readFileSync, existsSync } from 'fs';
+import { join } from 'path';
+import { homedir } from 'os';
+
+const CONFIG_PATH = join(homedir(), '.autodev', 'vlm-config.json');
+
+interface VlmConfig {
+  enabled: boolean;
+  provider: 'openrouter' | 'anthropic';
+  apiKey: string;
+  model: string;
+}
+
+function loadConfig(): VlmConfig {
+  const defaults: VlmConfig = {
+    enabled: false,
+    provider: 'openrouter',
+    apiKey: '',
+    model: 'anthropic/claude-sonnet-4-20250514',
+  };
+  if (!existsSync(CONFIG_PATH)) return defaults;
+  try {
+    return { ...defaults, ...JSON.parse(readFileSync(CONFIG_PATH, 'utf-8')) };
+  } catch { return defaults; }
+}
+
+export async function POST() {
+  const config = loadConfig();
+  if (!config.apiKey) {
+    return NextResponse.json({ status: 'error', message: 'No API key configured' });
+  }
+
+  try {
+    if (config.provider === 'openrouter') {
+      const res = await fetch('https://openrouter.ai/api/v1/models', {
+        headers: { 'Authorization': `Bearer ${config.apiKey}` },
+      });
+      if (res.ok) {
+        return NextResponse.json({ status: 'ok', message: 'OpenRouter connected' });
+      }
+      return NextResponse.json({ status: 'error', message: `HTTP ${res.status}` });
+    }
+
+    if (config.provider === 'anthropic') {
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': config.apiKey,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 10,
+          messages: [{ role: 'user', content: 'ping' }],
+        }),
+      });
+      if (res.ok) {
+        return NextResponse.json({ status: 'ok', message: 'Anthropic connected' });
+      }
+      return NextResponse.json({ status: 'error', message: `HTTP ${res.status}` });
+    }
+
+    return NextResponse.json({ status: 'error', message: `Unknown provider: ${config.provider}` });
+  } catch (err) {
+    return NextResponse.json({ status: 'error', message: String(err) });
+  }
+}

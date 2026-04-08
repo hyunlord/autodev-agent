@@ -330,18 +330,42 @@ export class VerifyAgent implements IAgent {
 
     // ─── Stage 2.5: Visual analysis (VLM) ──────────────
     if (evidence.screenshotPath) {
-      emit({ type: 'log', level: 'info', message: '[Verify] Stage 2.5: Visual analysis...' } as PipelineEvent);
+      // vlm-config.json에서 설정 읽기
+      let vlmEnabled = true;
       try {
-        const imageBuffer = readFileSync(evidence.screenshotPath as string);
-        const imageBase64 = imageBuffer.toString('base64');
-        const visualAnalysis = await this.analyzeVisual(imageBase64, input.originalPrompt, emit);
-        evidence.visualAnalysis = visualAnalysis;
-        emit({
-          type: 'log', level: 'info',
-          message: `[Verify] Visual analysis: score ${visualAnalysis.designScore}/15, ${visualAnalysis.issues.length} visual issue(s)`,
-        } as PipelineEvent);
-      } catch (err) {
-        emit({ type: 'log', level: 'info', message: `[Verify] Visual analysis skipped: ${err}` } as PipelineEvent);
+        const vlmConfigPath = join(process.env.HOME ?? '/tmp', '.autodev', 'vlm-config.json');
+        if (existsSync(vlmConfigPath)) {
+          const vlmConfig = JSON.parse(readFileSync(vlmConfigPath, 'utf-8'));
+          vlmEnabled = vlmConfig.enabled !== false;
+          if (vlmConfig.apiKey) {
+            if (vlmConfig.provider === 'openrouter' && !process.env.OPENROUTER_API_KEY) {
+              process.env.OPENROUTER_API_KEY = vlmConfig.apiKey;
+            } else if (vlmConfig.provider === 'anthropic' && !process.env.ANTHROPIC_API_KEY) {
+              process.env.ANTHROPIC_API_KEY = vlmConfig.apiKey;
+            }
+          }
+          if (vlmConfig.model) {
+            process.env.AUTODEV_VLM_MODEL = vlmConfig.model;
+          }
+        }
+      } catch { /* config 없으면 기본값 */ }
+
+      if (!vlmEnabled) {
+        emit({ type: 'log', level: 'info', message: '[VLM] Disabled in settings' } as PipelineEvent);
+      } else {
+        emit({ type: 'log', level: 'info', message: '[Verify] Stage 2.5: Visual analysis...' } as PipelineEvent);
+        try {
+          const imageBuffer = readFileSync(evidence.screenshotPath as string);
+          const imageBase64 = imageBuffer.toString('base64');
+          const visualAnalysis = await this.analyzeVisual(imageBase64, input.originalPrompt, emit);
+          evidence.visualAnalysis = visualAnalysis;
+          emit({
+            type: 'log', level: 'info',
+            message: `[Verify] Visual analysis: score ${visualAnalysis.designScore}/15, ${visualAnalysis.issues.length} visual issue(s)`,
+          } as PipelineEvent);
+        } catch (err) {
+          emit({ type: 'log', level: 'info', message: `[Verify] Visual analysis skipped: ${err}` } as PipelineEvent);
+        }
       }
     }
 
@@ -655,7 +679,7 @@ CRITICAL: Score 80+ ONLY if you have traced through the logic with concrete inpu
     }
   }
 
-  // ─── VLM: Visual analysis via Claude API Vision ───────
+  // ─── VLM: Visual analysis via OpenRouter / Anthropic Vision ───
   private async analyzeVisual(
     imageBase64: string,
     originalPrompt: string,
@@ -669,33 +693,7 @@ CRITICAL: Score 80+ ONLY if you have traced through the logic with concrete inpu
     issues: string[];
     strengths: string[];
   }> {
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) {
-      throw new Error('VLM requires ANTHROPIC_API_KEY');
-    }
-
-    emit({ type: 'log', level: 'info', message: '[Verify] VLM: calling Claude API Vision...' } as PipelineEvent);
-
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 1000,
-        messages: [{
-          role: 'user',
-          content: [
-            {
-              type: 'image',
-              source: { type: 'base64', media_type: 'image/png', data: imageBase64 },
-            },
-            {
-              type: 'text',
-              text: `You are a UI design quality reviewer. The user requested: "${originalPrompt.slice(0, 500)}"
+    const vlmPrompt = `You are a UI design quality reviewer. The user requested: "${originalPrompt.slice(0, 500)}"
 
 Rate the visual quality of this screenshot on these criteria:
 - Layout & Spacing (0-4): Proper alignment, consistent padding/margins, no overlapping or cramped elements
@@ -712,20 +710,79 @@ Respond with ONLY valid JSON (no markdown, no explanation):
   "completenessScore": <0-3>,
   "issues": ["specific visual issue 1"],
   "strengths": ["specific visual strength 1"]
-}`,
-            },
-          ],
-        }],
-      }),
-    });
+}`;
 
-    if (!res.ok) {
-      throw new Error(`Claude API Vision error: ${res.status} ${await res.text()}`);
+    const vlmModel = process.env.AUTODEV_VLM_MODEL ?? 'anthropic/claude-sonnet-4-20250514';
+    const openrouterKey = process.env.OPENROUTER_API_KEY;
+    const anthropicKey = process.env.ANTHROPIC_API_KEY;
+
+    // 1순위: OpenRouter (다양한 모델 지원)
+    if (openrouterKey) {
+      emit({ type: 'log', level: 'info', message: `[VLM] Using OpenRouter (${vlmModel})` } as PipelineEvent);
+
+      const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${openrouterKey}`,
+        },
+        body: JSON.stringify({
+          model: vlmModel,
+          max_tokens: 1000,
+          messages: [{
+            role: 'user',
+            content: [
+              { type: 'image_url', image_url: { url: `data:image/png;base64,${imageBase64}` } },
+              { type: 'text', text: vlmPrompt },
+            ],
+          }],
+        }),
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`OpenRouter VLM failed (${res.status}): ${errText.slice(0, 200)}`);
+      }
+
+      const data = await res.json() as { choices?: Array<{ message?: { content?: string } }> };
+      const text = data.choices?.[0]?.message?.content ?? '{}';
+      return JSON.parse(text.replace(/```json|```/g, '').trim());
     }
 
-    const data = await res.json() as { content?: Array<{ text?: string }> };
-    const text = data.content?.[0]?.text ?? '{}';
-    const cleaned = text.replace(/```json|```/g, '').trim();
-    return JSON.parse(cleaned);
+    // 2순위: Anthropic 직접
+    if (anthropicKey) {
+      emit({ type: 'log', level: 'info', message: '[VLM] Using Anthropic API (Claude Sonnet)' } as PipelineEvent);
+
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': anthropicKey,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 1000,
+          messages: [{
+            role: 'user',
+            content: [
+              { type: 'image', source: { type: 'base64', media_type: 'image/png', data: imageBase64 } },
+              { type: 'text', text: vlmPrompt },
+            ],
+          }],
+        }),
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`Anthropic VLM failed (${res.status}): ${errText.slice(0, 200)}`);
+      }
+
+      const data = await res.json() as { content?: Array<{ text?: string }> };
+      const text = data.content?.[0]?.text ?? '{}';
+      return JSON.parse(text.replace(/```json|```/g, '').trim());
+    }
+
+    throw new Error('VLM requires OPENROUTER_API_KEY or ANTHROPIC_API_KEY');
   }
 }
