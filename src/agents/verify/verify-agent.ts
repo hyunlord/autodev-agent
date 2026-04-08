@@ -227,6 +227,61 @@ export class VerifyAgent implements IAgent {
             evidence.screenshot = { pageText: ssResult.output };
             emit({ type: 'log', level: 'info', message: '[Verify] MCP Playwright screenshot captured' } as PipelineEvent);
           }
+
+          // Collect computed CSS styles for design quality assessment
+          const mcpEvaluate = input.tools?.find(t => t.name.includes('browser_evaluate'));
+          if (mcpEvaluate) {
+            try {
+              const styleCheckResult = await mcpEvaluate.execute({
+                expression: `(() => {
+                  const body = document.body;
+                  const cs = getComputedStyle(body);
+                  const buttons = Array.from(document.querySelectorAll('button'));
+                  const firstButton = buttons[0];
+                  const btnStyle = firstButton ? getComputedStyle(firstButton) : null;
+                  const container = document.querySelector('.container, .card, .counter-card, [class*="card"], [class*="container"], main, .app');
+                  const containerStyle = container ? getComputedStyle(container) : null;
+                  return JSON.stringify({
+                    body: {
+                      backgroundColor: cs.backgroundColor,
+                      color: cs.color,
+                      fontFamily: cs.fontFamily,
+                      fontSize: cs.fontSize,
+                    },
+                    button: btnStyle ? {
+                      backgroundColor: btnStyle.backgroundColor,
+                      borderRadius: btnStyle.borderRadius,
+                      padding: btnStyle.padding,
+                      cursor: btnStyle.cursor,
+                      border: btnStyle.border,
+                      transition: btnStyle.transition,
+                    } : null,
+                    container: containerStyle ? {
+                      backgroundColor: containerStyle.backgroundColor,
+                      borderRadius: containerStyle.borderRadius,
+                      boxShadow: containerStyle.boxShadow,
+                      padding: containerStyle.padding,
+                    } : null,
+                    meta: {
+                      buttonCount: buttons.length,
+                      hasCustomFont: !cs.fontFamily.includes('Times New Roman') && !cs.fontFamily.includes('serif'),
+                      title: document.title,
+                    }
+                  });
+                })()`,
+              });
+              if (styleCheckResult.success) {
+                try {
+                  evidence.computedStyles = JSON.parse(styleCheckResult.output ?? '{}');
+                  emit({ type: 'log', level: 'info', message: '[Verify] CSS computed styles collected via Playwright' } as PipelineEvent);
+                } catch {
+                  emit({ type: 'log', level: 'info', message: '[Verify] CSS style parse failed' } as PipelineEvent);
+                }
+              }
+            } catch (err) {
+              emit({ type: 'log', level: 'info', message: `[Verify] CSS style check failed: ${err}` } as PipelineEvent);
+            }
+          }
         } catch (err) {
           emit({ type: 'log', level: 'info', message: `[Verify] MCP Playwright failed, falling back to direct Playwright: ${err}` } as PipelineEvent);
         }
@@ -271,6 +326,19 @@ export class VerifyAgent implements IAgent {
       ? `\n## Page Content (from browser render)\nTitle: ${screenshot.title}\nBody text: ${(screenshot.pageText as string)?.slice(0, 3000)}`
       : '';
 
+    const computedStyles = evidence.computedStyles as Record<string, unknown> | undefined;
+    const styleSection = computedStyles
+      ? `\n## Computed CSS Styles (from live browser)\n\`\`\`json\n${JSON.stringify(computedStyles, null, 2)}\n\`\`\`
+
+Use these values to assess design quality:
+- body.backgroundColor "rgb(255, 255, 255)" or "rgba(0, 0, 0, 0)" = no custom background (likely unstyled)
+- button.borderRadius "0px" = no rounded corners (default browser style)
+- button.cursor not "pointer" = missing pointer cursor
+- button.transition "all 0s" or empty = no hover transitions
+- container.boxShadow "none" = no visual depth
+- meta.hasCustomFont = false means using default serif font (unprofessional)`
+      : '';
+
     const verifyFeedback = (input as any).context?.verifyFeedback as
       | { previousVerdict: string; issues: string[]; suggestions: string[]; attemptCount: number }
       | undefined;
@@ -304,6 +372,16 @@ Original user request, files created/modified, file contents, and optionally scr
 Adapt your strategy based on what was changed:
 
 **Frontend/HTML changes**: Read all the code carefully. Check that every requested feature has corresponding implementation. Verify event handlers are wired correctly. Check initial state rendering. If screenshots are provided, verify visual output matches requirements.
+
+**Design Quality Check (for all UI/frontend tasks)**:
+When evaluating frontend code, also assess visual quality on a 0-15 point scale:
+- **Layout & Spacing (0-4)**: Content is properly centered/aligned? Consistent padding/margins? No overlapping or cramped elements?
+- **Color & Typography (0-4)**: Cohesive color scheme (not default browser gray)? Readable font choices? Proper text hierarchy?
+- **Interactive Polish (0-4)**: Buttons have hover/active states? Smooth transitions? Cursor changes on interactive elements?
+- **Completeness (0-3)**: No unstyled elements? Consistent border-radius? Professional overall appearance?
+
+If the design quality score is below 8/15, add it as an issue with specific suggestions (e.g., "Buttons use default browser styling — add background-color, border-radius, padding, and hover state").
+Design quality alone should NOT cause a re-plan, but it CAN cause a re-code with specific visual fix instructions.
 **Backend/API changes**: Check endpoint implementations match requirements. Verify error handling exists. Check edge cases in data processing.
 **CLI/script changes**: Verify all requested functionality is implemented. Check error handling for invalid inputs.
 **Game/interactive logic**: Trace through the logic manually. Check win/lose/draw conditions are correct (this is a common failure point — LLMs frequently reverse win/lose conditions). Verify state management (score tracking, reset functionality).
@@ -355,6 +433,7 @@ ${input.modifiedFiles.join(', ')}
 === FILE CONTENTS ===
 ${fileContentsSection}
 ${screenshotSection}
+${styleSection}
 
 === ALL FILES IN PROJECT ===
 ${allFiles.join(', ')}
@@ -384,10 +463,14 @@ verdict meanings:
 - "fail": Cannot be fixed with current tools/approach
 
 Scoring:
-- 90-100: All features work correctly, good code quality
-- 70-89: Core features work, minor issues
-- 50-69: Some features work but significant issues
+- 90-100: All features work correctly, good code quality, AND polished visual design (if UI task)
+- 80-89: All features work, minor issues OR acceptable but basic visual design
+- 70-79: Core features work, some issues, visual design needs improvement
+- 50-69: Some features work but significant functional or visual issues
 - Below 50: Major features broken or missing
+
+For UI/frontend tasks: A fully functional but visually unstyled result should score no higher than 79.
+A result with broken functionality but beautiful design should score based on functionality (design doesn't compensate for broken features).
 
 CRITICAL: Score 80+ ONLY if you have traced through the logic with concrete inputs and verified correctness. Do NOT give high scores based on "the code looks reasonable."`;
 

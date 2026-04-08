@@ -14,9 +14,9 @@ export const DEV_MODE_PRESETS: DevModePreset[] = [
     name: 'Web Frontend',
     description: 'HTML/CSS/JS, React, Vue, Next.js 등 웹 프론트엔드',
     techStack: ['HTML', 'CSS', 'JavaScript', 'React', 'Vue', 'Next.js'],
-    planningHints: '반응형 디자인을 고려해라. 접근성(a11y)을 신경 써라. 브라우저 호환성을 확인해라.',
-    codingHints: '시맨틱 HTML 사용. CSS는 모바일 퍼스트. 이벤트 핸들러에 에러 처리. XSS 방지를 위해 textContent 사용.',
-    verifyHints: 'Playwright로 실제 렌더링 확인. 콘솔 에러 0건. 반응형은 사용자가 명시적으로 요청한 경우에만 검증.',
+    planningHints: '반응형 디자인을 고려해라. 접근성(a11y)을 신경 써라. 브라우저 호환성을 확인해라. 세련된 시각 디자인을 포함해라 — 색상 팔레트, 타이포그래피, 간격, 그림자, 둥근 모서리, 호버 효과를 구체적으로 지정해라.',
+    codingHints: '시맨틱 HTML 사용. CSS는 모바일 퍼스트. 이벤트 핸들러에 에러 처리. XSS 방지를 위해 textContent 사용. 모든 UI 요소에 의도적인 스타일링 필수 — 기본 브라우저 스타일 금지. 일관된 색상 스킴, 적절한 간격, 부드러운 트랜지션 적용.',
+    verifyHints: 'Playwright로 실제 렌더링 확인. 콘솔 에러 0건. 반응형은 사용자가 명시적으로 요청한 경우에만 검증. 시각적 완성도 확인: 기본 브라우저 스타일만 사용한 요소가 있으면 이슈로 보고.',
   },
   {
     id: 'api-backend',
@@ -33,8 +33,8 @@ export const DEV_MODE_PRESETS: DevModePreset[] = [
     description: '프론트엔드 + 백엔드 통합',
     techStack: ['Next.js', 'React', 'Node.js', 'Database'],
     planningHints: '프론트/백 분리 구조. API 인터페이스 먼저 정의. DB 스키마 설계 포함.',
-    codingHints: '타입을 프론트/백에서 공유. API 호출에 에러 핸들링. 로딩/에러 상태 UI.',
-    verifyHints: '프론트엔드 렌더링 + API 응답 모두 확인. E2E 흐름 검증.',
+    codingHints: '타입을 프론트/백에서 공유. API 호출에 에러 핸들링. 로딩/에러 상태 UI. 프론트엔드 UI는 시각적으로 완성된 상태여야 함 — 기본 스타일 금지.',
+    verifyHints: '프론트엔드 렌더링 + API 응답 모두 확인. E2E 흐름 검증. UI 시각적 완성도 확인.',
   },
   {
     id: 'cli-tool',
@@ -51,7 +51,7 @@ export const DEV_MODE_PRESETS: DevModePreset[] = [
     description: '브라우저 게임, Canvas, WebGL',
     techStack: ['HTML5 Canvas', 'JavaScript', 'WebGL', 'CSS Animation'],
     planningHints: '게임 루프 구조를 명확히. 승패/점수 로직을 수식으로 정의. 상태 관리 (시작/진행/종료).',
-    codingHints: '게임 로직을 구체적 입력으로 트레이스. requestAnimationFrame 사용. 키보드/마우스 이벤트. 상태 머신.',
+    codingHints: '게임 로직을 구체적 입력으로 트레이스. requestAnimationFrame 사용. 키보드/마우스 이벤트. 상태 머신. 게임 UI는 시각적으로 몰입감 있게 — 배경, 색상, 애니메이션 포함.',
     verifyHints: '승패 로직을 모든 경우의 수로 검증. 리셋이 모든 상태를 초기화하는지. 점수가 정확한지.',
   },
   {
@@ -60,7 +60,7 @@ export const DEV_MODE_PRESETS: DevModePreset[] = [
     description: 'React Native, Flutter, 모바일 웹',
     techStack: ['React Native', 'Flutter', 'PWA', 'Mobile Web'],
     planningHints: '터치 인터랙션 우선. 오프라인 동작 고려. 화면 크기 대응.',
-    codingHints: '터치 타겟 최소 44px. 스크롤 성능. 네트워크 상태 처리.',
+    codingHints: '터치 타겟 최소 44px. 스크롤 성능. 네트워크 상태 처리. 모바일 네이티브 느낌의 UI — 부드러운 트랜지션, 적절한 간격, 시스템 폰트.',
     verifyHints: '모바일 뷰포트에서 렌더링. 터치 이벤트 동작. 오프라인 모드.',
   },
 ];

@@ -74,9 +74,10 @@ lsof -ti:3000 | xargs kill -9 2>/dev/null
 ### 품질 항목 (부분 점수 가능)
 | 항목 | 배점 | 기준 |
 |------|------|------|
-| API Health | 20 | 7개 엔드포인트 200 비율 |
-| UI Pages | 15 | 페이지 접근 가능 비율 |
-| Verify Agent Review | 15 | 다른 LLM 리뷰 점수 |
+| API Health | 15 | 7개 엔드포인트 200 비율 |
+| UI Pages | 10 | 페이지 접근 가능 비율 |
+| Verify Agent Review | 10 | 다른 LLM 리뷰 점수 |
+| Visual Quality | 15 | UI 시각적 완성도 (레이아웃, 색상, 간격, 인터랙션) |
 
 ### 등급
 - A (90%+): 바로 커밋

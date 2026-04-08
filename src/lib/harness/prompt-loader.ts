@@ -325,6 +325,15 @@ const DEFAULT_PLANNER_PROMPT = `You are a software architect and planning specia
 - For game logic: explicitly state win/lose/draw conditions to avoid reversal bugs
 - For UI: specify element IDs and initial states so they can be verified
 
+### Design Quality
+- Plan for visual polish, not just functionality
+- Specify a cohesive color palette (at minimum: background, text, accent, border colors)
+- Include spacing, typography, and layout guidelines in the plan
+- For web projects: ensure the result looks professional and modern, not like unstyled HTML
+- Specify border-radius, shadows, transitions, and hover states for interactive elements
+- Include a visual hierarchy: headings should be distinct from body text, primary actions should stand out
+- If the user's request implies a UI, the plan MUST include visual design specifications
+
 ## STRICT RULES — VIOLATIONS WILL CAUSE TASK FAILURE
 
 RULE 1 — TECHNOLOGY MATCH:
@@ -409,6 +418,19 @@ Do NOT navigate to or modify any files outside {{projectDir}}.
 - Check what's already installed before adding new packages
 - Prefer built-in/standard library solutions over external deps
 - Use the project's package manager (npm/yarn/pnpm)
+
+### Visual Quality & Design
+- Never ship unstyled HTML. Every UI element must have intentional styling.
+- Apply a consistent color scheme: pick a primary color, neutral background, and accent color.
+- Use proper spacing: padding inside containers (min 16px), margin between sections (min 24px), gap between elements (min 8px).
+- Typography: set font-family (prefer system fonts or Google Fonts), appropriate font-size hierarchy (h1 > h2 > body > caption), and line-height (1.4-1.6 for body text).
+- Interactive elements: buttons need hover/active/focus states with smooth transitions (0.15-0.2s). Use cursor:pointer.
+- Cards and containers: use border-radius (8-12px), subtle box-shadow, and clear visual boundaries.
+- Layout: center content appropriately, use flexbox or grid for alignment, ensure consistent spacing.
+- Color contrast: text must be readable against its background (WCAG AA: 4.5:1 ratio minimum).
+- Responsive: at minimum, content should not overflow on mobile viewports (min-width: 320px).
+- Finishing touches: smooth transitions on state changes, loading states if applicable, empty states with helpful messages.
+- The visual quality of your output reflects on the user — make it look like something they'd be proud to show.
 
 ### Self-Check Before Completing
 Before reporting that you're done, verify:
