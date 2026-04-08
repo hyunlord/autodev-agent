@@ -1,7 +1,7 @@
 import type { IAgent, AgentInput, AgentOutput } from '../interfaces';
 import type { PipelineEvent } from '../../lib/types';
 import type { PlanningMode } from '../../lib/types';
-import { generatePlan, type Plan, type PlanResult } from '../../worker/planning';
+import { generatePlan, PlanSchema, type Plan, type PlanResult } from '../../worker/planning';
 import type { ProjectConfig } from '../../lib/detection/project-type';
 import { resolveCli } from '../../lib/cli-resolver';
 import { getExeca } from '../../lib/execa';
@@ -103,6 +103,7 @@ export class DebatePlanner implements IAgent {
       emit({ type: 'log', level: 'warn', message: `[Challenger] Found ${challengeResult.issues.length} issues: ${challengeResult.issues.join('; ')}` } as PipelineEvent);
 
       // ─── Step 1c: Drafter revision — challenge 반영 수정 ───
+      // Direct CLI call (no planner template) — keeps prompt under 5000 chars
       emit({ type: 'log', level: 'info', message: '[Debate] Step 1c: Drafter revising plan...' } as PipelineEvent);
 
       const revisionPrompt = `${input.prompt}
@@ -113,7 +114,7 @@ Previous plan summary:
 ${currentPlan.summary}
 
 Previous coding prompt (truncated):
-${currentPlan.codingPrompt.slice(0, 3000)}
+${currentPlan.codingPrompt.slice(0, 1500)}
 
 A challenger agent found these issues:
 ${challengeResult.issues.map((issue: string, i: number) => `${i + 1}. ${issue}`).join('\n')}
@@ -121,22 +122,9 @@ ${challengeResult.issues.map((issue: string, i: number) => `${i + 1}. ${issue}`)
 ${challengeResult.suggestions.length > 0 ? `Suggestions:\n${challengeResult.suggestions.map((s: string, i: number) => `${i + 1}. ${s}`).join('\n')}` : ''}
 
 Revise the plan to address ALL issues above.
-If a challenge is invalid, explain why in the codingPrompt — don't silently ignore it.
-Keep the same JSON output format.`;
+If a challenge is invalid, explain why in the codingPrompt — don't silently ignore it.`;
 
-      emit({ type: 'log', level: 'info', message: `[Debate Step 1c] revision prompt length: ${revisionPrompt.length} chars (~${Math.ceil(revisionPrompt.length / 4)} tokens), mode: ${this.cliMode}, timeout: 240s` } as PipelineEvent);
-
-      const revisionResult = await generatePlan(
-        revisionPrompt,
-        projectConfig,
-        this.cliMode,
-        undefined,
-        (msg) => emit({ type: 'log', level: 'info', message: `[Drafter Revision] ${msg}` } as PipelineEvent),
-        workspaceContext,
-        input.context.projectDir,
-        input.config.systemPrompt ?? null,
-        240_000,
-      );
+      const revisionResult = await this.runDrafterRevision(revisionPrompt, emit);
 
       totalCost += revisionResult.costUsd;
       totalInputTokens += revisionResult.inputTokens;
@@ -380,5 +368,103 @@ Verdicts:
 
     // Fallback: approve if QC fails
     return { verdict: 'approved', feedback: 'QC unavailable, auto-approved', costUsd: 0 };
+  }
+
+  // ─── Direct CLI call for revision (bypasses loadPrompt template) ───
+  // Why: generatePlan() wraps userPrompt with planner template + workspaceContext,
+  // doubling prompt size. For revision, we already have the previous plan's
+  // context embedded in revisionPrompt — no template needed. This keeps prompt
+  // under 5000 chars and fits within the 180s timeout.
+  private async runDrafterRevision(
+    revisionPrompt: string,
+    emit: (e: PipelineEvent) => void,
+  ): Promise<PlanResult> {
+    const fullPrompt = `${revisionPrompt}
+
+## Output Format
+Respond with ONLY valid JSON matching this schema (no markdown fences, no explanation):
+{
+  "summary": "One-line description of the plan",
+  "estimatedFiles": ["file1", "file2"],
+  "codingPrompt": "Detailed instructions for the coding agent",
+  "verificationSpec": {
+    "steps": [
+      { "id": "v1", "type": "file_check" | "build_check" | "http_check" | "dom_check" | "port_check", "description": "...", "filePath": "relative/path" }
+    ]
+  }
+}`;
+
+    emit({
+      type: 'log',
+      level: 'info',
+      message: `[Debate Step 1c] direct CLI, prompt length: ${fullPrompt.length} chars (~${Math.ceil(fullPrompt.length / 4)} tokens), mode: ${this.cliMode}, timeout: 180s`,
+    } as PipelineEvent);
+
+    const ex = await getExeca();
+    const startTime = Date.now();
+    let stdout = '';
+    let exitCode: number | undefined;
+
+    const useGemini = this.cliMode === 'gemini-cli';
+    const cliPath = useGemini
+      ? await resolveCli('gemini')
+      : await resolveCli('claude');
+
+    if (!cliPath) {
+      throw new Error(`${useGemini ? 'Gemini' : 'Claude'} CLI not found for revision`);
+    }
+
+    const args = useGemini
+      ? ['--output-format', 'json', '-y']
+      : ['--output-format', 'text', '--max-turns', '3', '--dangerously-skip-permissions'];
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 180_000);
+    try {
+      const result = await ex(cliPath, args, {
+        cwd: '/tmp',
+        timeout: 180_000,
+        reject: false,
+        input: fullPrompt,
+        cancelSignal: controller.signal,
+      } as any);
+      stdout = (result as any).stdout ?? '';
+      exitCode = (result as any).exitCode;
+    } finally {
+      clearTimeout(timer);
+    }
+
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+
+    if (exitCode !== 0) {
+      const isTimeout = exitCode === 143;
+      const reason = isTimeout ? `TIMEOUT after ${elapsed}s (limit: 180s)` : `exit ${exitCode}`;
+      throw new Error(`Drafter revision CLI failed (${reason}): ${stdout.slice(0, 500)}`);
+    }
+
+    // Gemini wraps output in JSON envelope
+    if (useGemini) {
+      try {
+        const envelope = JSON.parse(stdout);
+        stdout = envelope.response ?? envelope.result ?? envelope.text ?? stdout;
+      } catch { /* not JSON envelope */ }
+    }
+
+    emit({
+      type: 'log',
+      level: 'info',
+      message: `[Drafter Revision] CLI done in ${elapsed}s, output: ${stdout.length} chars`,
+    } as PipelineEvent);
+
+    const parsed = extractJson<unknown>(stdout, 'summary');
+    const plan = PlanSchema.parse(parsed);
+
+    const inputTokens = Math.ceil(fullPrompt.length / 4);
+    const outputTokens = Math.ceil(stdout.length / 4);
+    const costUsd = useGemini
+      ? (inputTokens / 1_000_000) * 1.25 + (outputTokens / 1_000_000) * 10.0
+      : (inputTokens / 1_000_000) * 3.0 + (outputTokens / 1_000_000) * 15.0;
+
+    return { plan, costUsd, inputTokens, outputTokens };
   }
 }
