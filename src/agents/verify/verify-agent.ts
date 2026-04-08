@@ -221,7 +221,27 @@ export class VerifyAgent implements IAgent {
       if (mcpNavigate && mcpScreenshot) {
         try {
           const fileUrl = `file://${join(input.projectDir, htmlFile)}`;
-          await mcpNavigate.execute({ url: fileUrl });
+          const navResult = await mcpNavigate.execute({ url: fileUrl });
+
+          // MCP Playwright는 file:// 프로토콜을 차단할 수 있음 — navigate 성공 여부 확인
+          if (!navResult.success) {
+            throw new Error(`MCP navigate failed: ${(navResult.output ?? '').slice(0, 200)}`);
+          }
+
+          // 페이지 로드 대기 — navigate가 즉시 리턴해서 about:blank 상태에서 screenshot 찍히는 문제 방지
+          // MCP Playwright browser_wait_for는 { text, textGone, time } 파라미터 지원 (selector는 없음)
+          const mcpWaitFor = input.tools?.find(t => t.name.includes('browser_wait_for'));
+          if (mcpWaitFor) {
+            try {
+              await mcpWaitFor.execute({ time: 2 });
+            } catch {
+              // browser_wait_for 실패 시 setTimeout 폴백
+              await new Promise(resolve => setTimeout(resolve, 2000));
+            }
+          } else {
+            await new Promise(resolve => setTimeout(resolve, 3000));
+          }
+
           const ssResult = await mcpScreenshot.execute({});
           if (ssResult.success) {
             evidence.screenshot = { pageText: ssResult.output };
