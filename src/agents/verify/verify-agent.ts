@@ -227,10 +227,12 @@ export class VerifyAgent implements IAgent {
             evidence.screenshot = { pageText: ssResult.output };
             emit({ type: 'log', level: 'info', message: '[Verify] MCP Playwright screenshot captured' } as PipelineEvent);
 
-            // 이미지 데이터 보존 — base64 또는 파일 경로 추출
-            const ssData = ssResult.data as Record<string, unknown> | undefined;
-            const imageBase64 = (ssData?.['base64'] ?? ssData?.['image']) as string | undefined;
-            const imagePath = (ssData?.['path'] ?? ssData?.['screenshotPath']) as string | undefined;
+            // 이미지 데이터 보존 — MCP CallToolResult.content[]에서 image 블록 찾기
+            // MCP screenshot은 { content: [{ type: 'image', data: '<base64>', mimeType: 'image/png' }], isError: false } 반환
+            const ssData = ssResult.data as { content?: Array<{ type: string; data?: string; mimeType?: string }> } | undefined;
+            const imageBlock = ssData?.content?.find(c => c.type === 'image' && c.data);
+            const imageBase64 = imageBlock?.data;
+            const imagePath = undefined as string | undefined;
 
             if (imageBase64) {
               try {
