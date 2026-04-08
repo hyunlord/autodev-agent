@@ -17,7 +17,7 @@ function loadConfig(): VlmConfig {
     enabled: false,
     provider: 'openrouter',
     apiKey: '',
-    model: 'anthropic/claude-sonnet-4-20250514',
+    model: 'google/gemini-2.5-flash',
   };
   if (!existsSync(CONFIG_PATH)) return defaults;
   try {

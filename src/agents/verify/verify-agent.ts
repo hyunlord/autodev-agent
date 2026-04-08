@@ -712,7 +712,7 @@ Respond with ONLY valid JSON (no markdown, no explanation):
   "strengths": ["specific visual strength 1"]
 }`;
 
-    const vlmModel = process.env.AUTODEV_VLM_MODEL ?? 'anthropic/claude-sonnet-4-20250514';
+    const vlmModel = process.env.AUTODEV_VLM_MODEL ?? 'google/gemini-2.5-flash';
     const openrouterKey = process.env.OPENROUTER_API_KEY;
     const anthropicKey = process.env.ANTHROPIC_API_KEY;
 
