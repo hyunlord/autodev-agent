@@ -158,36 +158,49 @@ const [tasks, setTasks] = useState<Task[]>([]);
           <h1 className="text-3xl font-bold">AutoDev Agent</h1>
           <p className="text-gray-400 mt-1">Universal AI Development Orchestrator</p>
         </div>
-        <Link
-          href="/harness"
-          className="px-3 py-1.5 text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg transition-colors"
-        >
-          ⚙ Harness
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link
+            href="/usage"
+            className="px-3 py-1.5 text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg transition-colors"
+          >
+            📊 Usage
+          </Link>
+          <Link
+            href="/harness"
+            className="px-3 py-1.5 text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg transition-colors"
+          >
+            ⚙ Harness
+          </Link>
+        </div>
       </header>
 
       {usage && usage.totals.costUsd > 0 && (
         <div className="mb-6 bg-gray-900/50 rounded-xl border border-gray-800 p-4">
           {/* Top row: totals */}
-          <div className="flex items-center gap-6 mb-4">
-            <div>
-              <p className="text-[10px] text-gray-500 uppercase tracking-wider">Total cost</p>
-              <p className="text-lg font-bold text-gray-200">${usage.totals.costUsd.toFixed(4)}</p>
-            </div>
-            <div>
-              <p className="text-[10px] text-gray-500 uppercase tracking-wider">Total tokens</p>
-              <p className="text-lg font-bold text-gray-200">{usage.totals.tokens.toLocaleString()}</p>
-            </div>
-            <div>
-              <p className="text-[10px] text-gray-500 uppercase tracking-wider">Attempts</p>
-              <p className="text-lg font-bold text-gray-200">{usage.totals.attempts}</p>
-            </div>
-            {usage.harness && usage.harness.totalCommands > 0 && (
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-6">
               <div>
-                <p className="text-[10px] text-gray-500 uppercase tracking-wider">Harness commands</p>
-                <p className="text-lg font-bold text-gray-200">{usage.harness.totalCommands}</p>
+                <p className="text-[10px] text-gray-500 uppercase tracking-wider">Total cost</p>
+                <p className="text-lg font-bold text-gray-200">${usage.totals.costUsd.toFixed(4)}</p>
               </div>
-            )}
+              <div>
+                <p className="text-[10px] text-gray-500 uppercase tracking-wider">Total tokens</p>
+                <p className="text-lg font-bold text-gray-200">{usage.totals.tokens.toLocaleString()}</p>
+              </div>
+              <div>
+                <p className="text-[10px] text-gray-500 uppercase tracking-wider">Attempts</p>
+                <p className="text-lg font-bold text-gray-200">{usage.totals.attempts}</p>
+              </div>
+              {usage.harness && usage.harness.totalCommands > 0 && (
+                <div>
+                  <p className="text-[10px] text-gray-500 uppercase tracking-wider">Harness commands</p>
+                  <p className="text-lg font-bold text-gray-200">{usage.harness.totalCommands}</p>
+                </div>
+              )}
+            </div>
+            <Link href="/usage" className="text-xs text-indigo-400 hover:text-indigo-300">
+              View Details →
+            </Link>
           </div>
 
           {/* Agent bars */}
