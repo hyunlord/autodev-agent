@@ -118,6 +118,49 @@ export async function buildProjectContext(
 }
 
 /**
+ * Compact context (~500 tokens) — Planning 단계에서 사용.
+ * 과잉 컨텍스트는 성능 -3%, 비용 +20% (연구 근거).
+ */
+export function formatContextCompact(ctx: ProjectContext): string {
+  const parts: string[] = ['## Project snapshot (compact)'];
+
+  if (ctx.gitBranch) parts.push(`Branch: ${ctx.gitBranch}`);
+  if (ctx.changedFiles.length > 0) {
+    parts.push(`Changed: ${ctx.changedFiles.slice(0, 10).join(', ')}${ctx.changedFiles.length > 10 ? ` (+${ctx.changedFiles.length - 10} more)` : ''}`);
+  }
+
+  // 트리는 depth 1만 (최대 15줄)
+  if (ctx.projectTree) {
+    const lines = ctx.projectTree.split('\n').slice(0, 15);
+    parts.push(`Files (${ctx.fileCount} total):\n${lines.join('\n')}`);
+  }
+
+  // package.json은 scripts만
+  if (ctx.packageInfo) {
+    parts.push(`Package: ${ctx.packageInfo.name}, scripts: ${ctx.packageInfo.scripts.join(', ')}`);
+  }
+
+  // tsconfig 핵심만
+  if (ctx.tsConfig) {
+    parts.push(`TypeScript: strict=${ctx.tsConfig.strict}, target=${ctx.tsConfig.target}`);
+  }
+
+  // .autodev memory (있으면)
+  if (ctx.autodevMemory) {
+    parts.push(ctx.autodevMemory.slice(0, 300));
+  }
+
+  return parts.join('\n');
+}
+
+/**
+ * Full context — Coding 단계 또는 상세 분석에서 사용.
+ */
+export function formatContextFull(ctx: ProjectContext): string {
+  return formatContext(ctx);
+}
+
+/**
  * Format ProjectContext into a string for prompt injection.
  */
 export function formatContext(ctx: ProjectContext): string {

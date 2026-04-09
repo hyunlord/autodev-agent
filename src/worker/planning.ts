@@ -40,6 +40,27 @@ export const SubTaskSchema = z.object({
   dependsOn: z.array(z.string()).optional(),
 });
 
+export const AcceptanceCriteriaSchema = z.object({
+  build: z.object({
+    commands: z.array(z.string()),
+    mustPass: z.boolean().default(true),
+  }).optional(),
+  requiredFiles: z.array(z.string()).optional(),
+  ui: z.object({
+    routes: z.array(z.object({
+      path: z.string(),
+      mustHaveElements: z.array(z.string()).optional(),
+      interactions: z.array(z.object({
+        action: z.string(),
+        assert: z.string(),
+      })).optional(),
+    })).optional(),
+  }).optional(),
+  design: z.object({
+    minVlmScore: z.number().optional(),
+  }).optional(),
+}).optional();
+
 export const PlanSchema = z.object({
   summary: z.string(),
   taskCategory: z.string().optional(),
@@ -48,6 +69,7 @@ export const PlanSchema = z.object({
   subTasks: z.array(SubTaskSchema).optional(),
   estimatedFiles: z.array(z.string()),
   verificationSpec: VerificationSpecSchema,
+  acceptanceCriteria: AcceptanceCriteriaSchema,
 });
 
 export type Plan = z.infer<typeof PlanSchema>;

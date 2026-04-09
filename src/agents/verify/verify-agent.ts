@@ -83,6 +83,31 @@ export class VerifyAgent implements IAgent {
 
     const evidence = await this.collectEvidence(verifyInput, emit);
 
+    // ─── Stage 2.8: Acceptance criteria check ──────────
+    const plan = (verifyInput as any).plan;
+    const ac = plan?.acceptanceCriteria;
+    if (ac) {
+      emit({ type: 'log', level: 'info', message: '[Verify] Checking acceptance criteria...' } as PipelineEvent);
+      const acFails: string[] = [];
+
+      // 필수 파일 체크
+      if (ac.requiredFiles) {
+        for (const f of ac.requiredFiles as string[]) {
+          if (!existsSync(join(verifyInput.projectDir, f))) {
+            acFails.push(`Required file missing: ${f}`);
+          }
+        }
+      }
+
+      if (acFails.length > 0) {
+        emit({ type: 'log', level: 'warn', message: `[Verify] ${acFails.length} acceptance criteria failed` } as PipelineEvent);
+      } else {
+        emit({ type: 'log', level: 'info', message: '[Verify] Acceptance criteria: all passed' } as PipelineEvent);
+      }
+      evidence.acceptanceFails = acFails;
+      evidence.hasAcceptanceCriteria = true;
+    }
+
     // ─── Stage 3: LLM judgment ────────────────────────
     emit({ type: 'log', level: 'info', message: '[Verify] Stage 3: LLM judgment...' } as PipelineEvent);
 
@@ -436,6 +461,13 @@ Use these values to assess design quality:
       ? `\n## Visual Analysis (VLM screenshot review)\nDesign Score: ${visualAnalysis.designScore}/15 (Layout: ${visualAnalysis.layoutScore}/4 | Color: ${visualAnalysis.colorScore}/4 | Interaction: ${visualAnalysis.interactionScore}/4 | Completeness: ${visualAnalysis.completenessScore}/3)\n${visualAnalysis.issues.length > 0 ? `Visual Issues:\n${visualAnalysis.issues.map(i => `- ${i}`).join('\n')}` : 'No visual issues found.'}\n${visualAnalysis.strengths.length > 0 ? `Visual Strengths:\n${visualAnalysis.strengths.map(s => `- ${s}`).join('\n')}` : ''}`
       : '';
 
+    const acFails = evidence.acceptanceFails as string[] | undefined;
+    const acceptanceSection = acFails && acFails.length > 0
+      ? `\n## Acceptance Criteria FAILURES\n${acFails.map(f => `- FAIL: ${f}`).join('\n')}\nThese are hard requirements. If any fail, verdict MUST be "re-code" or "fail".`
+      : evidence.hasAcceptanceCriteria
+        ? '\n## Acceptance Criteria: ALL PASSED'
+        : '';
+
     const verifyFeedback = (input as any).context?.verifyFeedback as
       | { previousVerdict: string; issues: string[]; suggestions: string[]; attemptCount: number }
       | undefined;
@@ -532,6 +564,7 @@ ${fileContentsSection}
 ${screenshotSection}
 ${styleSection}
 ${visualSection}
+${acceptanceSection}
 
 === ALL FILES IN PROJECT ===
 ${allFiles.join(', ')}

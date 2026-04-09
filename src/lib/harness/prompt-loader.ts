@@ -381,7 +381,29 @@ Respond with ONLY valid JSON matching this schema:
   "taskCategory": "frontend" | "backend" | "fullstack" | "fix" | "refactor" | "test" | "docs"
 }
 
-RULE 4 — PARALLEL DECOMPOSITION (subTasks, OPTIONAL):
+RULE 4 — ACCEPTANCE CRITERIA (optional but recommended):
+Include an "acceptanceCriteria" object with machine-checkable assertions:
+{
+  "acceptanceCriteria": {
+    "build": { "commands": ["npm run build"], "mustPass": true },
+    "requiredFiles": ["index.html"],
+    "ui": {
+      "routes": [{
+        "path": "/",
+        "mustHaveElements": ["#count", "#increment"],
+        "interactions": [
+          { "action": "click:#increment", "assert": "#count contains '1'" }
+        ]
+      }]
+    },
+    "design": { "minVlmScore": 10 }
+  }
+}
+Keep it minimal — only include checks that are directly testable.
+If the task is not UI-related, omit "ui" and "design".
+If uncertain, omit acceptanceCriteria entirely (it's optional).
+
+RULE 5 — PARALLEL DECOMPOSITION (subTasks, OPTIONAL):
 - The "subTasks" field is OPTIONAL. Only include it when the work can be split into INDEPENDENT pieces that touch DIFFERENT files.
 - If you include subTasks, the system will run each sub-task in parallel using a separate coding agent process.
 - Rules:

@@ -52,6 +52,7 @@ const [tasks, setTasks] = useState<Task[]>([]);
   const [systemPrompt, setSystemPrompt] = useState('');
   const [executionMode, setExecutionMode] = useState<'single' | 'auto-cycle' | 'interview'>('single');
   const [maxCycles, setMaxCycles] = useState(10);
+  const [costPref, setCostPref] = useState<'cheap' | 'balanced' | 'quality'>('balanced');
   const [chainTask, setChainTask] = useState<{ id: string; prompt: string } | null>(null);
 
   const [usage, setUsage] = useState<{
@@ -131,6 +132,7 @@ const [tasks, setTasks] = useState<Task[]>([]);
         planningMode,
         agentId: selectedAgent,
         autoApprove,
+        costPreference: costPref,
         systemPrompt: systemPrompt || undefined,
         executionMode,
         maxCycles: executionMode === 'auto-cycle' ? maxCycles : 1,
@@ -419,6 +421,29 @@ const [tasks, setTasks] = useState<Task[]>([]);
               ⚠ Plan review를 건너뛰고 바로 코딩을 시작합니다
             </p>
           )}
+        </div>
+        <div className="mt-3 flex items-center gap-3">
+          <label className="text-xs text-gray-500">Cost:</label>
+          <div className="flex gap-1">
+            {([
+              { id: 'cheap' as const, label: '💰 Budget' },
+              { id: 'balanced' as const, label: '⚖️ Balanced' },
+              { id: 'quality' as const, label: '🎯 Quality' },
+            ]).map((pref) => (
+              <button
+                key={pref.id}
+                type="button"
+                onClick={() => setCostPref(pref.id)}
+                className={`px-2.5 py-1 text-xs rounded-lg transition-colors ${
+                  costPref === pref.id
+                    ? 'bg-indigo-600 text-white'
+                    : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                }`}
+              >
+                {pref.label}
+              </button>
+            ))}
+          </div>
         </div>
         <div className="mt-3 flex items-center gap-3">
           <label className="text-xs text-gray-500">Execution:</label>

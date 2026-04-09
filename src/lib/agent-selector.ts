@@ -4,9 +4,21 @@ import type { ICodingAgent } from './plugins/interfaces';
 // Fallback order if recommended agent is not available
 const DEFAULT_AGENT_ORDER = ['claude-code', 'gemini-cli', 'codex-cli', 'aider', 'cline-cli'];
 
+// 에이전트별 상대 비용 (1=저렴, 3=비쌈)
+const AGENT_COST_TIER: Record<string, number> = {
+  'claude-code': 3,
+  'codex-cli': 2,
+  'gemini-cli': 1,
+  'aider': 1,
+  'cline-cli': 2,
+};
+
+export type CostPreference = 'cheap' | 'balanced' | 'quality';
+
 export async function selectAgent(
   recommendedAgentId?: string | null,
   userOverrideId?: string | null,
+  costPreference?: CostPreference,
 ): Promise<{ agent: ICodingAgent; agentId: string; autoSelected: boolean }> {
   // 1. User manually selected an agent (not 'auto') — always respect
   if (userOverrideId && userOverrideId !== 'auto') {
@@ -16,15 +28,35 @@ export async function selectAgent(
     }
   }
 
-  // 2. LLM recommended an agent — try it
-  if (recommendedAgentId) {
+  // 2. LLM recommended an agent — try it (balanced 모드에서만)
+  if (recommendedAgentId && (!costPreference || costPreference === 'balanced')) {
     const recommended = PluginRegistry.instance.getAgent(recommendedAgentId);
     if (recommended && await recommended.isAvailable()) {
       return { agent: recommended, agentId: recommended.id, autoSelected: true };
     }
   }
 
-  // 3. Fallback: first available in default order
+  // 3. Cost preference 기반 자동 선택
+  if (costPreference && costPreference !== 'balanced') {
+    const available: ICodingAgent[] = [];
+    for (const id of DEFAULT_AGENT_ORDER) {
+      const agent = PluginRegistry.instance.getAgent(id);
+      if (agent && await agent.isAvailable()) {
+        available.push(agent);
+      }
+    }
+
+    if (available.length > 0) {
+      if (costPreference === 'cheap') {
+        available.sort((a, b) => (AGENT_COST_TIER[a.id] ?? 2) - (AGENT_COST_TIER[b.id] ?? 2));
+      } else if (costPreference === 'quality') {
+        available.sort((a, b) => (AGENT_COST_TIER[b.id] ?? 2) - (AGENT_COST_TIER[a.id] ?? 2));
+      }
+      return { agent: available[0], agentId: available[0].id, autoSelected: true };
+    }
+  }
+
+  // 4. Fallback: first available in default order
   for (const agentId of DEFAULT_AGENT_ORDER) {
     const agent = PluginRegistry.instance.getAgent(agentId);
     if (agent && await agent.isAvailable()) {
@@ -32,7 +64,7 @@ export async function selectAgent(
     }
   }
 
-  // 4. Absolute fallback: any available
+  // 5. Absolute fallback: any available
   const all = PluginRegistry.instance.listAgents();
   for (const agent of all) {
     if (await agent.isAvailable()) {

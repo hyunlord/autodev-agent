@@ -7,7 +7,7 @@ import { nanoid } from 'nanoid';
 import { detectProjectType, type ProjectConfig } from '../lib/detection/project-type';
 import { selectAgent } from '../lib/agent-selector';
 import { McpManager } from '../lib/harness/mcp-manager';
-import { buildProjectContext, formatContext } from '../lib/harness/context-builder';
+import { buildProjectContext, formatContextCompact, formatContext } from '../lib/harness/context-builder';
 import type { McpServerInfo } from '../lib/plugins/interfaces';
 import type { AttemptRecord } from './retry';
 import { generateEscalationReport } from './escalation';
@@ -153,7 +153,7 @@ export async function runPipeline(taskId: string, rawEmit: EmitFn, signal?: Abor
       } catch { /* ignore */ }
     }
     const projectCtx = await buildProjectContext(projectDir, previousTaskSummary);
-    let workspaceContext = formatContext(projectCtx);
+    let workspaceContext = formatContextCompact(projectCtx);
     if (planningMcpPrompt) {
       workspaceContext += '\n' + planningMcpPrompt;
     }
