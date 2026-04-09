@@ -1,5 +1,5 @@
 import { PluginRegistry } from '../lib/plugins/registry';
-import { selectAgent } from '../lib/agent-selector';
+import { selectAgent, type CostPreference } from '../lib/agent-selector';
 import type { SubTask } from './planning';
 import type { EmitFn } from './pipeline-types';
 import type { PipelineEvent } from '../lib/types';
@@ -28,8 +28,9 @@ export async function executeParallelCoding(params: {
   workspaceContext: string;
   emit: EmitFn;
   signal?: AbortSignal;
+  costPreference?: CostPreference;
 }): Promise<ParallelResult[]> {
-  const { subTasks, projectDir, systemPrompt, workspaceContext, emit, signal } = params;
+  const { subTasks, projectDir, systemPrompt, workspaceContext, emit, signal, costPreference } = params;
 
   const independent = subTasks.filter((t) => !t.dependsOn || t.dependsOn.length === 0);
   const dependent = subTasks.filter((t) => t.dependsOn && t.dependsOn.length > 0);
@@ -52,7 +53,7 @@ export async function executeParallelCoding(params: {
 
     const parallelResults = await Promise.all(
       independent.map((subTask) =>
-        executeSubTask(subTask, projectDir, systemPrompt, workspaceContext, emit, signal),
+        executeSubTask(subTask, projectDir, systemPrompt, workspaceContext, emit, signal, costPreference),
       ),
     );
     results.push(...parallelResults);
@@ -116,6 +117,7 @@ export async function executeParallelCoding(params: {
       workspaceContext,
       emit,
       signal,
+      costPreference,
     );
     results.push(result);
   }
@@ -130,11 +132,12 @@ async function executeSubTask(
   workspaceContext: string,
   emit: EmitFn,
   signal?: AbortSignal,
+  costPreference?: CostPreference,
 ): Promise<ParallelResult> {
   const startTime = Date.now();
 
   // 에이전트 선택: subTask.agent 지정 시 해당 사용, 아니면 기본 fallback 순서
-  const selection = await selectAgent(subTask.agent ?? null, null);
+  const selection = await selectAgent(subTask.agent ?? null, null, costPreference);
   const agent = selection.agent;
   const agentId = selection.agentId;
 

@@ -211,7 +211,6 @@ export class ClaudeCodeAgent implements ICodingAgent {
       reject: false,
       env: {
         ...process.env,
-        ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
       },
     });
 

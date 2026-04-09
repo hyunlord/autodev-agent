@@ -20,9 +20,6 @@ export class VerifyAgent implements IAgent {
   }
 
   async isAvailable(): Promise<boolean> {
-    if (this.llm === 'claude-api') {
-      return !!process.env.ANTHROPIC_API_KEY;
-    }
     const cliName = this.llm.replace('-cli', '');
     const resolved = await resolveCli(cliName);
     return resolved !== null;
@@ -32,7 +29,7 @@ export class VerifyAgent implements IAgent {
    * Coding Agent와 다른 LLM을 자동 선택
    */
   static async selectDifferentFrom(codingAgentId: string): Promise<VerifyAgent> {
-    const candidates = ['gemini-cli', 'claude-cli', 'claude-api'];
+    const candidates = ['gemini-cli', 'codex-cli', 'claude-cli'];
     const codingLlm = codingAgentId.replace('claude-code', 'claude-cli');
 
     for (const candidate of candidates) {
@@ -41,11 +38,6 @@ export class VerifyAgent implements IAgent {
       if (await agent.isAvailable()) {
         return agent;
       }
-    }
-
-    // claude-api는 Coding이 Claude가 아닐 때만
-    if (!codingLlm.includes('claude') && process.env.ANTHROPIC_API_KEY) {
-      return new VerifyAgent('claude-api');
     }
 
     // Last resort: 같은 LLM (자기 합리화 위험 있지만 없는 것보다 나음)
@@ -425,10 +417,8 @@ export class VerifyAgent implements IAgent {
           const vlmConfig = JSON.parse(readFileSync(vlmConfigPath, 'utf-8'));
           vlmEnabled = vlmConfig.enabled !== false;
           if (vlmConfig.apiKey) {
-            if (vlmConfig.provider === 'openrouter' && !process.env.OPENROUTER_API_KEY) {
+            if ((vlmConfig.provider === 'openrouter' || !vlmConfig.provider) && !process.env.OPENROUTER_API_KEY) {
               process.env.OPENROUTER_API_KEY = vlmConfig.apiKey;
-            } else if (vlmConfig.provider === 'anthropic' && !process.env.ANTHROPIC_API_KEY) {
-              process.env.ANTHROPIC_API_KEY = vlmConfig.apiKey;
             }
           }
           if (vlmConfig.model) {
@@ -704,7 +694,7 @@ CRITICAL: Score 80+ ONLY if you have traced through the logic with concrete inpu
             '--output-format', 'text',
             '--max-turns', '2',
             '--dangerously-skip-permissions',
-          ], { cwd: input.projectDir, reject: false, timeout: 120_000, signal: controller.signal } as any);
+          ], { cwd: input.projectDir, reject: false, timeout: 120_000, cancelSignal: controller.signal } as any);
           stdout = (result as any).stdout ?? '';
         } finally {
           clearTimeout(timer);
@@ -735,27 +725,11 @@ CRITICAL: Score 80+ ONLY if you have traced through the logic with concrete inpu
           const result = await ex(cliPath, [
             'exec', '--full-auto', '--sandbox', 'workspace-write', '--json',
             verifyPrompt.slice(0, 12000),
-          ], { cwd: input.projectDir, reject: false, timeout: 120_000, signal: controller.signal } as any);
+          ], { cwd: input.projectDir, reject: false, timeout: 120_000, cancelSignal: controller.signal } as any);
           stdout = (result as any).stdout ?? '';
         } finally {
           clearTimeout(timer);
         }
-      } else if (this.llm === 'claude-api') {
-        const apiKey = process.env.ANTHROPIC_API_KEY;
-        if (!apiKey) throw new Error('ANTHROPIC_API_KEY not set');
-        const res = await fetch('https://api.anthropic.com/v1/messages', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-          body: JSON.stringify({
-            model: 'claude-sonnet-4-20250514',
-            max_tokens: 2048,
-            messages: [{ role: 'user', content: verifyPrompt }],
-          }),
-        });
-        const data = await res.json() as { content?: Array<{ text?: string }>; usage?: { input_tokens?: number; output_tokens?: number } };
-        stdout = data.content?.[0]?.text ?? '';
-        inputTokens = data.usage?.input_tokens ?? 0;
-        outputTokens = data.usage?.output_tokens ?? 0;
       }
 
       // ─── Debug: dump response ───────────────────────────
@@ -839,77 +813,40 @@ Respond with ONLY valid JSON (no markdown, no explanation):
 
     const vlmModel = process.env.AUTODEV_VLM_MODEL ?? 'google/gemini-3.1-flash-lite-preview';
     const openrouterKey = process.env.OPENROUTER_API_KEY;
-    const anthropicKey = process.env.ANTHROPIC_API_KEY;
 
-    // 1순위: OpenRouter (다양한 모델 지원)
-    if (openrouterKey) {
-      emit({ type: 'log', level: 'info', message: `[VLM] Using OpenRouter (${vlmModel})` } as PipelineEvent);
-
-      const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${openrouterKey}`,
-        },
-        body: JSON.stringify({
-          model: vlmModel,
-          max_tokens: 1000,
-          temperature: 0,
-          messages: [{
-            role: 'user',
-            content: [
-              { type: 'image_url', image_url: { url: `data:image/png;base64,${imageBase64}` } },
-              { type: 'text', text: vlmPrompt },
-            ],
-          }],
-        }),
-      });
-
-      if (!res.ok) {
-        const errText = await res.text();
-        throw new Error(`OpenRouter VLM failed (${res.status}): ${errText.slice(0, 200)}`);
-      }
-
-      const data = await res.json() as { choices?: Array<{ message?: { content?: string } }> };
-      const text = data.choices?.[0]?.message?.content ?? '{}';
-      return JSON.parse(text.replace(/```json|```/g, '').trim());
+    if (!openrouterKey) {
+      throw new Error('VLM requires OPENROUTER_API_KEY');
     }
 
-    // 2순위: Anthropic 직접
-    if (anthropicKey) {
-      emit({ type: 'log', level: 'info', message: '[VLM] Using Anthropic API (Claude Sonnet)' } as PipelineEvent);
+    emit({ type: 'log', level: 'info', message: `[VLM] Using OpenRouter (${vlmModel})` } as PipelineEvent);
 
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': anthropicKey,
-          'anthropic-version': '2023-06-01',
-        },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 1000,
-          temperature: 0,
-          messages: [{
-            role: 'user',
-            content: [
-              { type: 'image', source: { type: 'base64', media_type: 'image/png', data: imageBase64 } },
-              { type: 'text', text: vlmPrompt },
-            ],
-          }],
-        }),
-      });
+    const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${openrouterKey}`,
+      },
+      body: JSON.stringify({
+        model: vlmModel,
+        max_tokens: 1000,
+        temperature: 0,
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'image_url', image_url: { url: `data:image/png;base64,${imageBase64}` } },
+            { type: 'text', text: vlmPrompt },
+          ],
+        }],
+      }),
+    });
 
-      if (!res.ok) {
-        const errText = await res.text();
-        throw new Error(`Anthropic VLM failed (${res.status}): ${errText.slice(0, 200)}`);
-      }
-
-      const data = await res.json() as { content?: Array<{ text?: string }> };
-      const text = data.content?.[0]?.text ?? '{}';
-      return JSON.parse(text.replace(/```json|```/g, '').trim());
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`OpenRouter VLM failed (${res.status}): ${errText.slice(0, 200)}`);
     }
 
-    throw new Error('VLM requires OPENROUTER_API_KEY or ANTHROPIC_API_KEY');
+    const data = await res.json() as { choices?: Array<{ message?: { content?: string } }> };
+    const text = data.choices?.[0]?.message?.content ?? '{}';
+    return JSON.parse(text.replace(/```json|```/g, '').trim());
   }
 }

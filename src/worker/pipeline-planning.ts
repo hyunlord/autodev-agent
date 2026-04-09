@@ -98,19 +98,33 @@ export async function executePlanning(params: {
     emit({ type: 'log', level: 'info',
       message: `[Debate] ${debateResult.totalRounds} round(s), cost: $${debateOutput.costUsd.toFixed(4)}` });
   } else {
-    planResult = await generatePlan(
-      task.prompt,
-      projectConfig,
-      planMode,
-      taskConfig.codingPrompt ? {
-        codingPrompt: taskConfig.codingPrompt,
-        verificationChecklist: taskConfig.verificationChecklist ?? '',
-      } : undefined,
-      (msg) => emit({ type: 'log', level: 'info', message: msg }),
-      effectiveWorkspaceContext,
-      projectDir,
-      systemPrompt,
-    );
+    const planOpts = taskConfig.codingPrompt ? {
+      codingPrompt: taskConfig.codingPrompt,
+      verificationChecklist: taskConfig.verificationChecklist ?? '',
+    } : undefined;
+    const logFn = (msg: string) => emit({ type: 'log', level: 'info', message: msg });
+
+    try {
+      planResult = await generatePlan(
+        task.prompt, projectConfig, planMode, planOpts, logFn,
+        effectiveWorkspaceContext, projectDir, systemPrompt,
+      );
+    } catch (planErr) {
+      const errMsg = String(planErr);
+      // Credit exhaustion fallback: claude-cli → gemini-cli
+      if (
+        (planMode === 'claude-cli' || planMode === 'auto') &&
+        /credit balance is too low|insufficient_quota|rate_limit|billing/i.test(errMsg)
+      ) {
+        emit({ type: 'log', level: 'warn', message: `[Planning] ${planMode} credit exhausted, falling back to gemini-cli` });
+        planResult = await generatePlan(
+          task.prompt, projectConfig, 'gemini-cli' as PlanningMode, planOpts, logFn,
+          effectiveWorkspaceContext, projectDir, systemPrompt,
+        );
+      } else {
+        throw planErr;
+      }
+    }
   }
   const plan = planResult.plan;
 

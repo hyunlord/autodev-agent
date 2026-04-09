@@ -416,6 +416,7 @@ async function runSingleCycle(
   let { agent, agentId, autoSelected } = await selectAgent(
     plan.recommendedAgent,
     (task as any).agentId,
+    taskConfig.costPreference ?? undefined,
   );
   emit({ type: 'log', level: 'info', message: `${autoSelected ? 'Auto-selected' : 'Using'} agent: ${agent.name} (${taskCategory})` });
 

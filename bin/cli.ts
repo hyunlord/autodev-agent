@@ -61,16 +61,11 @@ program.parse();
 async function runSetupWizard(): Promise<void> {
   intro('AutoDev Agent — First Run Setup');
 
-  const anthropicKey = await text({
-    message: 'Anthropic API Key (optional, only for API planning mode):',
-    placeholder: 'sk-ant-... (press Enter to skip)',
+  const openrouterKey = await text({
+    message: 'OpenRouter API Key (optional, for VLM visual analysis):',
+    placeholder: 'sk-or-... (press Enter to skip)',
   });
-  if (isCancel(anthropicKey)) process.exit(0);
-
-  const openaiKey = await text({
-    message: 'OpenAI API Key (optional, for GPT-4o VLM):',
-    placeholder: 'sk-...',
-  });
+  if (isCancel(openrouterKey)) process.exit(0);
 
   const projectDir = await text({
     message: 'Default project directory:',
@@ -79,11 +74,8 @@ async function runSetupWizard(): Promise<void> {
   });
 
   let envContent = '';
-  if (anthropicKey && !isCancel(anthropicKey) && String(anthropicKey).trim()) {
-    envContent += `ANTHROPIC_API_KEY=${anthropicKey}\n`;
-  }
-  if (openaiKey && !isCancel(openaiKey)) {
-    envContent += `OPENAI_API_KEY=${openaiKey}\n`;
+  if (openrouterKey && !isCancel(openrouterKey) && String(openrouterKey).trim()) {
+    envContent += `OPENROUTER_API_KEY=${openrouterKey}\n`;
   }
   if (projectDir && !isCancel(projectDir)) {
     envContent += `AUTODEV_DEFAULT_PROJECT_DIR=${projectDir}\n`;

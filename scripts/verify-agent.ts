@@ -46,7 +46,7 @@ async function main() {
   const available = await verifyAgent.isAvailable();
 
   if (!available) {
-    console.log('⚠ Verify Agent not available (need gemini, codex, or ANTHROPIC_API_KEY)');
+    console.log('⚠ Verify Agent not available (need gemini-cli, codex-cli, or claude-cli)');
     console.log('  Skipping LLM review.');
     console.log(JSON.stringify({ score: 10, issues: ['Verify Agent unavailable'], verdict: 'warn' }));
     process.exit(0);

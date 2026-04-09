@@ -1,6 +1,6 @@
 export type TaskStatus = 'pending' | 'planning' | 'plan_review' | 'coding' | 'verifying' | 'retrying' | 'completed' | 'failed' | 'escalated' | 'interview';
 
-export type PlanningMode = 'claude-cli' | 'gemini-cli' | 'codex-cli' | 'api' | 'manual' | 'debate';
+export type PlanningMode = 'claude-cli' | 'gemini-cli' | 'codex-cli' | 'api' | 'manual' | 'debate' | 'auto';
 
 export type ExecutionMode = 'single' | 'auto-cycle' | 'interview';
 

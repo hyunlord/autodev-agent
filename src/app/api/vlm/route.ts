@@ -7,7 +7,7 @@ const CONFIG_PATH = join(homedir(), '.autodev', 'vlm-config.json');
 
 interface VlmConfig {
   enabled: boolean;
-  provider: 'openrouter' | 'anthropic';
+  provider: 'openrouter';
   apiKey: string;
   model: string;
 }

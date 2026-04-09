@@ -116,6 +116,7 @@ export async function executeCodingLoop(params: {
       workspaceContext,
       emit,
       signal,
+      costPreference: _codeTaskCfg.costPreference,
     });
 
     // 결과 합산
@@ -193,8 +194,28 @@ export async function executeCodingLoop(params: {
     updateTaskStatus(taskId, 'verifying');
     emit({ type: 'status_change', status: 'verifying', message: `Verifying parallel results...` });
 
-    // executeVerification은 단일 codingAttemptId를 받음 — 대표 ID 생성
+    // executeVerification은 단일 codingAttemptId를 받음 — 대표 attempt row 생성
     const parallelCodingAttemptId = nanoid();
+    db.insert(attempts).values({
+      id: parallelCodingAttemptId,
+      taskId,
+      attemptNum: 1,
+      agentId: 'parallel',
+      phase: 'coding',
+      status: allSuccess ? 'success' : 'error',
+      input: JSON.stringify({ subTaskCount: parallelResults.length }),
+      output: JSON.stringify({
+        modifiedFiles: allModifiedFiles,
+        costUsd: totalParallelCost,
+        successCount: parallelResults.filter((r) => r.success).length,
+      }),
+      errorLog: null,
+      errorHash: null,
+      costUsd: totalParallelCost,
+      tokenCount: totalParallelInputTokens + totalParallelOutputTokens,
+      durationMs: parallelDurationMs,
+      createdAt: new Date().toISOString(),
+    }).run();
 
     const verifyPhaseResult = await executeVerification({
       taskId, projectDir, projectConfig, task, currentPlan,

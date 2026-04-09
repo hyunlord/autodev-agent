@@ -74,7 +74,7 @@ export class AgentRegistry {
     }
 
     if (role === 'verify') {
-      for (const llm of ['gemini-cli', 'claude-cli', 'claude-api']) {
+      for (const llm of ['gemini-cli', 'codex-cli', 'claude-cli']) {
         const agent = new VerifyAgent(llm);
         if (await agent.isAvailable()) results.push(agent);
       }

@@ -107,24 +107,6 @@ Rules:
           } catch { continue; }
         }
       } catch { /* use raw */ }
-    } else if (mode === 'api') {
-      const apiKey = process.env.ANTHROPIC_API_KEY;
-      if (!apiKey) return NextResponse.json({ error: 'ANTHROPIC_API_KEY not set' }, { status: 500 });
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01',
-        },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 4096,
-          messages: [{ role: 'user', content: prompt }],
-        }),
-      });
-      const data = await res.json() as { content?: Array<{ text?: string }> };
-      stdout = data.content?.[0]?.text ?? '';
     }
 
     // Parse response — extract JSON from potentially messy CLI output

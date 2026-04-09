@@ -3,13 +3,12 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 
 export default function SetupPage() {
-  const [anthropicKey, setAnthropicKey] = useState('');
   const [saving, setSaving] = useState(false);
   const router = useRouter();
 
   // VLM settings
   const [vlmEnabled, setVlmEnabled] = useState(false);
-  const [vlmProvider, setVlmProvider] = useState<'openrouter' | 'anthropic'>('openrouter');
+  const [vlmProvider, setVlmProvider] = useState<'openrouter'>('openrouter');
   const [vlmApiKey, setVlmApiKey] = useState('');
   const [vlmModel, setVlmModel] = useState('google/gemini-3.1-flash-lite-preview');
   const [vlmStatus, setVlmStatus] = useState<'idle' | 'ok' | 'error' | 'testing'>('idle');
@@ -42,7 +41,7 @@ export default function SetupPage() {
       fetch('/api/setup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ anthropicKey }),
+        body: JSON.stringify({}),
       }),
       fetch('/api/vlm', {
         method: 'POST',
@@ -57,18 +56,6 @@ export default function SetupPage() {
     <div className="min-h-screen flex items-center justify-center bg-gray-950 text-gray-100">
       <div className="w-full max-w-md p-8 space-y-6">
         <h1 className="text-2xl font-bold">AutoDev Setup</h1>
-        <p className="text-gray-400">API key is optional — only needed for &apos;API&apos; planning mode.</p>
-        <div>
-          <label className="block text-sm text-gray-400 mb-1">Anthropic API Key</label>
-          <input
-            type="password"
-            value={anthropicKey}
-            onChange={(e) => setAnthropicKey(e.target.value)}
-            placeholder="sk-ant-..."
-            className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-gray-100 placeholder-gray-600 focus:outline-none focus:border-indigo-500"
-          />
-        </div>
-
         {/* VLM Settings */}
         <div className="bg-gray-900/50 rounded-xl border border-gray-800 p-4 space-y-3">
           <h3 className="text-sm font-semibold">Visual Analysis (VLM)</h3>
@@ -91,17 +78,12 @@ export default function SetupPage() {
               <div>
                 <label className="block text-xs text-gray-500 mb-1">API Provider</label>
                 <div className="flex gap-1">
-                  {(['openrouter', 'anthropic'] as const).map(p => (
-                    <button
-                      key={p}
-                      onClick={() => setVlmProvider(p)}
-                      className={`px-2.5 py-1 text-xs rounded-lg transition-colors ${
-                        vlmProvider === p ? 'bg-indigo-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-gray-300'
-                      }`}
-                    >
-                      {p === 'openrouter' ? 'OpenRouter' : 'Anthropic'}
-                    </button>
-                  ))}
+                  <button
+                    onClick={() => setVlmProvider('openrouter')}
+                    className="px-2.5 py-1 text-xs rounded-lg transition-colors bg-indigo-600 text-white"
+                  >
+                    OpenRouter
+                  </button>
                 </div>
               </div>
 
@@ -111,7 +93,7 @@ export default function SetupPage() {
                   type="password"
                   value={vlmApiKey}
                   onChange={(e) => setVlmApiKey(e.target.value)}
-                  placeholder={vlmProvider === 'openrouter' ? 'sk-or-...' : 'sk-ant-...'}
+                  placeholder="sk-or-..."
                   className="w-full px-3 py-2 text-xs bg-gray-800 border border-gray-700 rounded-lg text-gray-300 placeholder-gray-600 focus:outline-none focus:border-indigo-500"
                 />
               </div>

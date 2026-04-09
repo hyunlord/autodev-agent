@@ -7,17 +7,13 @@ const ENV_PATH = join(DATA_DIR, '.env');
 
 export async function POST(req: Request) {
   const body = await req.json();
-  const { anthropicKey, openaiKey } = body;
-
-  if (!anthropicKey || typeof anthropicKey !== 'string') {
-    return NextResponse.json({ error: 'anthropicKey is required' }, { status: 400 });
-  }
+  const { openaiKey } = body;
 
   if (!existsSync(DATA_DIR)) {
     mkdirSync(DATA_DIR, { recursive: true });
   }
 
-  let envContent = `ANTHROPIC_API_KEY=${anthropicKey}\n`;
+  let envContent = '';
   if (openaiKey) {
     envContent += `OPENAI_API_KEY=${openaiKey}\n`;
   }

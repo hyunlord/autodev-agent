@@ -7,7 +7,7 @@ const CONFIG_PATH = join(homedir(), '.autodev', 'vlm-config.json');
 
 interface VlmConfig {
   enabled: boolean;
-  provider: 'openrouter' | 'anthropic';
+  provider: 'openrouter';
   apiKey: string;
   model: string;
 }
@@ -42,27 +42,7 @@ export async function POST() {
       return NextResponse.json({ status: 'error', message: `HTTP ${res.status}` });
     }
 
-    if (config.provider === 'anthropic') {
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': config.apiKey,
-          'anthropic-version': '2023-06-01',
-        },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 10,
-          messages: [{ role: 'user', content: 'ping' }],
-        }),
-      });
-      if (res.ok) {
-        return NextResponse.json({ status: 'ok', message: 'Anthropic connected' });
-      }
-      return NextResponse.json({ status: 'error', message: `HTTP ${res.status}` });
-    }
-
-    return NextResponse.json({ status: 'error', message: `Unknown provider: ${config.provider}` });
+    return NextResponse.json({ status: 'error', message: `HTTP unknown provider` });
   } catch (err) {
     return NextResponse.json({ status: 'error', message: String(err) });
   }

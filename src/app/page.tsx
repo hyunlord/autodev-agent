@@ -322,7 +322,7 @@ const [tasks, setTasks] = useState<Task[]>([]);
           <p className="mt-1 text-xs text-gray-500">Uses Codex CLI for planning.</p>
         )}
         {planningMode === 'api' && (
-          <p className="mt-1 text-xs text-yellow-500">Uses Claude API directly. Requires ANTHROPIC_API_KEY environment variable.</p>
+          <p className="mt-1 text-xs text-yellow-500">Uses Claude API directly (requires Anthropic SDK).</p>
         )}
         {planningMode === 'debate' && (
           <div className="mt-2 space-y-2">

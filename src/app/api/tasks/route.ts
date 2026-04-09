@@ -46,6 +46,7 @@ export async function POST(req: Request) {
       codingPrompt: body.codingPrompt ?? null,
       verificationChecklist: body.verificationChecklist ?? null,
       autoApprove: body.autoApprove ?? false,
+      ...(body.costPreference ? { costPreference: body.costPreference } : {}),
     }),
     result: null,
     parentTaskId,
