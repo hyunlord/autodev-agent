@@ -1,66 +1,60 @@
 # AutoDev Agent
 
-Universal AI Development Agent Orchestrator
+Universal AI development orchestrator. Submit a goal in plain language → AutoDev plans, codes, and verifies automatically.
 
-> Plan → Code → Verify → Retry — fully automated, locally hosted.
+## Features
+
+- **Multi-Agent Pipeline**: Plan → Code → Verify with independent LLM agents
+- **Cross-LLM Verification**: Coding agent ≠ Verify agent (prevents self-rationalization)
+- **5 Coding Agents**: Claude Code, Codex CLI, Gemini CLI, Aider, Cline
+- **Debate Mode**: Drafter → Challenger → Quality Checker for complex tasks
+- **VLM Design Scoring**: Screenshot → Vision LLM → 0-15 design quality score
+- **Hook System**: 12 pipeline events × 4 hook types (command/script/agent/http)
+- **Web Dashboard**: Real-time monitoring, plan review, diff preview, cost tracking
 
 ## Quick Start
 
-### Option 1: Docker (recommended for trying out)
-
 ```bash
-docker compose up
-```
-
-Open [http://localhost:3000](http://localhost:3000)
-
-> **Note:** Docker runs in Manual planning mode by default. The `claude` CLI is not installed inside the container. To use Auto or API modes, run locally instead.
-
-### Option 2: Local Development
-
-**Prerequisites:** Node.js 18+, pnpm
-
-```bash
-# Install dependencies
+git clone https://github.com/hyunlord/autodev-agent.git
+cd autodev-agent
+cp .env.example .env  # Add your API keys
 pnpm install
-
-# Install Playwright browser
-npx playwright install chromium
-
-# Start dev server
 pnpm dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000)
+Open http://localhost:3000
 
-### First Run
+## Requirements
 
-1. Open the dashboard at `http://localhost:3000`
-2. (Optional) Go to `/setup` to configure API keys
-3. Create a task — choose a planning mode:
-   - **Auto**: Uses `claude` CLI (requires `claude login`)
-   - **Manual**: Paste your own coding prompt + checklist
-   - **API**: Uses Claude API directly (requires API key)
+- Node.js 18+
+- pnpm
+- At least one coding CLI installed: `claude` (Claude Code), `codex` (Codex CLI), or `gemini` (Gemini CLI)
 
 ## Architecture
 
 ```
-Browser (localhost:3000)
-  │ SSE (real-time progress)
-  ▼
-Next.js Server (API Routes)
-  │ IPC
-  ▼
-Worker Process
-  ├── Planning (CLI auto / Manual / API)
-  ├── Coding (Claude Code CLI)
-  └── Verification
-       ├── Build check (exit code)
-       ├── Port check (TCP)
-       ├── HTTP check (status)
-       ├── DOM check (Playwright)
-       └── VLM check (screenshot → CLI)
+User → Dashboard → API → Worker (IPC)
+                            ├── Planning (Normal / Debate)
+                            ├── Coding (5 agents)
+                            ├── Verification
+                            │   ├── Stage 1: Mechanical checks
+                            │   ├── Stage 2: Evidence (files + screenshot + CSS)
+                            │   ├── Stage 2.5: VLM design analysis
+                            │   └── Stage 3: LLM judgment
+                            └── Retry / Re-plan
 ```
+
+## Configuration
+
+- `.autodev/agents/*.md` — Agent-specific instructions
+- `.autodev/hooks.json` — Pipeline hooks
+- `.autodev/mcp/config.json` — MCP server config
+- `.autodev/prompts/*.md` — Custom prompt library
+- `.env` — API keys (see .env.example)
+
+## Tech Stack
+
+Next.js 15 · TypeScript (strict) · SQLite + Drizzle ORM · Tailwind CSS
 
 ## License
 

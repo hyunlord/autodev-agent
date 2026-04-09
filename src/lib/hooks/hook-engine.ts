@@ -89,12 +89,21 @@ export class HookEngine {
       }],
       PostCode: [{
         matcher: '',
-        hooks: [{
-          name: 'file-check',
-          type: 'command',
-          command: "ls {{projectDir}}/*.html {{projectDir}}/*.js {{projectDir}}/*.ts 2>/dev/null | head -5 || echo 'No output files'",
-          blocking: false,
-        }],
+        hooks: [
+          {
+            name: 'file-check',
+            type: 'command',
+            command: "ls {{projectDir}}/*.html {{projectDir}}/*.js {{projectDir}}/*.ts 2>/dev/null | head -5 || echo 'No output files'",
+            blocking: false,
+          },
+          {
+            name: 'postcode-build',
+            type: 'command',
+            command: "test -f {{projectDir}}/package.json && (cd {{projectDir}} && npm run build 2>&1 | tail -5) || echo 'No package.json — skip build'",
+            blocking: true,
+            timeout: 60,
+          },
+        ],
       }],
       TaskComplete: [{
         matcher: '',

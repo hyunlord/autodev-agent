@@ -108,6 +108,46 @@ export class VerifyAgent implements IAgent {
       evidence.hasAcceptanceCriteria = true;
     }
 
+    // ─── Stage 2.9a: SAST scan (optional) ─────────────
+    if (ac?.security?.semgrepScan || process.env.AUTODEV_SAST_ENABLED === '1') {
+      emit({ type: 'log', level: 'info', message: '[Verify] Running SAST scan...' } as PipelineEvent);
+      try {
+        const ex = await getExeca();
+        const sastResult = await ex('npx', ['semgrep', 'scan', '--config=auto', '--json', '--quiet', verifyInput.projectDir], {
+          timeout: 60_000, reject: false,
+        } as any);
+        if ((sastResult as any).exitCode === 0) {
+          const findings = JSON.parse((sastResult as any).stdout ?? '{}').results?.length ?? 0;
+          evidence.sastFindings = findings;
+          emit({ type: 'log', level: findings > 0 ? 'warn' : 'info',
+            message: `[Verify] SAST: ${findings} finding(s)` } as PipelineEvent);
+        }
+      } catch {
+        emit({ type: 'log', level: 'info', message: '[Verify] SAST scan skipped (semgrep not available)' } as PipelineEvent);
+      }
+    }
+
+    // ─── Stage 2.9b: A11y scan (via MCP browser_evaluate) ──
+    if (evidence.screenshotPath) {
+      const mcpEvaluate = verifyInput.tools?.find(t => t.name.includes('browser_evaluate'));
+      if (mcpEvaluate) {
+        try {
+          const axeResult = await mcpEvaluate.execute({
+            expression: `(async()=>{const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/axe-core/4.9.1/axe.min.js';document.head.appendChild(s);await new Promise(r=>s.onload=r);const res=await axe.run();return JSON.stringify({violations:res.violations.length,details:res.violations.slice(0,5).map(v=>v.description)})})()`,
+          });
+          if (axeResult.success && axeResult.output) {
+            const parsed = JSON.parse(axeResult.output);
+            evidence.a11yViolations = parsed.violations;
+            evidence.a11yDetails = parsed.details;
+            emit({ type: 'log', level: parsed.violations > 0 ? 'warn' : 'info',
+              message: `[Verify] A11y: ${parsed.violations} violation(s)` } as PipelineEvent);
+          }
+        } catch {
+          emit({ type: 'log', level: 'info', message: '[Verify] A11y scan skipped' } as PipelineEvent);
+        }
+      }
+    }
+
     // ─── Stage 3: LLM judgment ────────────────────────
     emit({ type: 'log', level: 'info', message: '[Verify] Stage 3: LLM judgment...' } as PipelineEvent);
 
@@ -404,11 +444,28 @@ export class VerifyAgent implements IAgent {
         try {
           const imageBuffer = readFileSync(evidence.screenshotPath as string);
           const imageBase64 = imageBuffer.toString('base64');
-          const visualAnalysis = await this.analyzeVisual(imageBase64, input.originalPrompt, emit);
-          evidence.visualAnalysis = visualAnalysis;
+          const vlmRuns = parseInt(process.env.AUTODEV_VLM_RUNS ?? '1');
+
+          if (vlmRuns > 1) {
+            emit({ type: 'log', level: 'info', message: `[VLM] Running ${vlmRuns}x for majority voting` } as PipelineEvent);
+            const results = await Promise.all(
+              Array.from({ length: vlmRuns }, () => this.analyzeVisual(imageBase64, input.originalPrompt, emit)),
+            );
+            const avgScore = Math.round(results.reduce((s, r) => s + r.designScore, 0) / results.length);
+            evidence.visualAnalysis = {
+              ...results[0],
+              designScore: avgScore,
+              issues: [...new Set(results.flatMap(r => r.issues))],
+              strengths: [...new Set(results.flatMap(r => r.strengths))],
+            };
+          } else {
+            evidence.visualAnalysis = await this.analyzeVisual(imageBase64, input.originalPrompt, emit);
+          }
+
+          const va = evidence.visualAnalysis as { designScore: number; issues: string[] };
           emit({
             type: 'log', level: 'info',
-            message: `[Verify] Visual analysis: score ${visualAnalysis.designScore}/15, ${visualAnalysis.issues.length} visual issue(s)`,
+            message: `[Verify] Visual analysis: score ${va.designScore}/15, ${va.issues.length} visual issue(s)${vlmRuns > 1 ? ` (${vlmRuns}x avg)` : ''}`,
           } as PipelineEvent);
         } catch (err) {
           emit({ type: 'log', level: 'info', message: `[Verify] Visual analysis skipped: ${err}` } as PipelineEvent);
@@ -459,6 +516,17 @@ Use these values to assess design quality:
     } | undefined;
     const visualSection = visualAnalysis
       ? `\n## Visual Analysis (VLM screenshot review)\nDesign Score: ${visualAnalysis.designScore}/15 (Layout: ${visualAnalysis.layoutScore}/4 | Color: ${visualAnalysis.colorScore}/4 | Interaction: ${visualAnalysis.interactionScore}/4 | Completeness: ${visualAnalysis.completenessScore}/3)\n${visualAnalysis.issues.length > 0 ? `Visual Issues:\n${visualAnalysis.issues.map(i => `- ${i}`).join('\n')}` : 'No visual issues found.'}\n${visualAnalysis.strengths.length > 0 ? `Visual Strengths:\n${visualAnalysis.strengths.map(s => `- ${s}`).join('\n')}` : ''}`
+      : '';
+
+    const sastFindings = evidence.sastFindings as number | undefined;
+    const sastSection = sastFindings != null
+      ? `\n## Security Scan (SAST)\n${sastFindings} finding(s) detected.${sastFindings > 0 ? ' Review security issues before passing.' : ' No issues found.'}`
+      : '';
+
+    const a11yViolations = evidence.a11yViolations as number | undefined;
+    const a11yDetails = (evidence.a11yDetails ?? []) as string[];
+    const a11ySection = a11yViolations != null
+      ? `\n## Accessibility (axe-core)\nViolations: ${a11yViolations}${a11yDetails.length > 0 ? '\n' + a11yDetails.map(d => `- ${d}`).join('\n') : ''}`
       : '';
 
     const acFails = evidence.acceptanceFails as string[] | undefined;
@@ -565,6 +633,8 @@ ${screenshotSection}
 ${styleSection}
 ${visualSection}
 ${acceptanceSection}
+${sastSection}
+${a11ySection}
 
 === ALL FILES IN PROJECT ===
 ${allFiles.join(', ')}
@@ -784,6 +854,7 @@ Respond with ONLY valid JSON (no markdown, no explanation):
         body: JSON.stringify({
           model: vlmModel,
           max_tokens: 1000,
+          temperature: 0,
           messages: [{
             role: 'user',
             content: [
@@ -818,6 +889,7 @@ Respond with ONLY valid JSON (no markdown, no explanation):
         body: JSON.stringify({
           model: 'claude-sonnet-4-20250514',
           max_tokens: 1000,
+          temperature: 0,
           messages: [{
             role: 'user',
             content: [
