@@ -225,6 +225,55 @@ claude hooks add post-tool-use --scope project \
 4. PASS가 나올 때까지 반복한다
 5. "3번 시도했는데 안 됩니다"는 허용 — 사용자에게 보고
 
+### 강제 실행 체크리스트 — 이것을 건너뛰면 작업 미완료
+
+모든 코드 변경 작업에서 **반드시** 아래 순서를 따른다:
+
+#### Step 1: Build (필수)
+```bash
+pnpm build
+```
+실패하면 즉시 수정. 빌드 통과 없이 다음 단계 진행 금지.
+
+#### Step 2: Verify Quick (필수)
+```bash
+pnpm verify
+```
+Build + TypeScript + API Health 점검. 결과 표 출력 필수.
+
+#### Step 3: Verify Cross (커밋 전 필수)
+```bash
+pnpm verify:cross
+```
+다른 LLM(Gemini)이 코드를 리뷰한다.
+- A/B 등급 → 커밋 가능
+- C 등급 → 수정 후 재검증
+- F 등급 → 반드시 수정
+
+#### Step 4: UI 변경 시 추가 (해당 시)
+```bash
+pnpm dev &
+# Playwright MCP로 localhost:3000 접속
+# 변경된 페이지 스크린샷 확인
+# 콘솔 에러 체크
+kill %1
+```
+
+#### Step 5: 커밋
+모든 검증 통과 후에만 커밋한다.
+```bash
+git add . && git commit -m "feat/fix: 설명"
+git push origin main
+```
+
+### 절대 규칙 (위반 시 작업 미완료)
+
+1. **`pnpm verify` 결과 표 없이 "완료"라고 보고하면 미완료 처리**
+2. **verify:cross 없이 커밋하면 미완료 처리**
+3. **UI 변경 시 Playwright로 실제 확인 안 하면 미완료 처리**
+4. **"빌드가 통과할 것 같아서" verify 스킵하면 미완료 처리**
+5. **한 줄 변경이라도 verify 실행**
+
 ### Harness 설정 변경 (자연어 제어)
 
 사용자가 harness 설정 변경을 요청하면 해당 .autodev/ 파일을 직접 수정한다.

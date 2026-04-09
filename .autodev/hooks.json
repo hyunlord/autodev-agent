@@ -1,33 +1,54 @@
 {
   "$schema": "https://autodev.dev/schemas/hooks.json",
-  "version": 1,
+  "version": 2,
   "hooks": {
     "PostPlan": [{
       "matcher": "",
       "hooks": [{
         "name": "plan-log",
         "type": "command",
-        "command": "echo '[Hook] PostPlan: plan generated successfully'",
+        "command": "echo '[Hook] Plan generated — review before coding'",
         "timeout": 5,
         "blocking": false
       }]
     }],
     "PostCode": [{
       "matcher": "",
+      "hooks": [
+        {
+          "name": "build-gate",
+          "type": "command",
+          "command": "cd \"{{projectDir}}\" && pnpm build",
+          "timeout": 300,
+          "blocking": true,
+          "description": "Build must pass after every code change (exit code preserved)"
+        },
+        {
+          "name": "ts-check",
+          "type": "command",
+          "command": "cd \"{{projectDir}}\" && npx tsc --noEmit 2>&1 | tail -20 || true",
+          "timeout": 60,
+          "blocking": false,
+          "description": "TypeScript type check (warning only — tail=20 keeps enough context)"
+        }
+      ]
+    }],
+    "PreVerify": [{
+      "matcher": "",
       "hooks": [{
-        "name": "build-gate",
+        "name": "verify-announce",
         "type": "command",
-        "command": "cd {{projectDir}} && ls *.html 2>/dev/null && echo 'HTML found' || echo 'No HTML'",
-        "timeout": 10,
+        "command": "echo '[Hook] Starting verification — different LLM will review'",
+        "timeout": 5,
         "blocking": false
       }]
     }],
     "TaskComplete": [{
       "matcher": "",
       "hooks": [{
-        "name": "done-log",
+        "name": "complete-log",
         "type": "command",
-        "command": "echo '[Hook] Task completed!'",
+        "command": "echo '[Hook] Task completed — check verify score before committing'",
         "blocking": false
       }]
     }]

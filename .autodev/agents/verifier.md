@@ -98,3 +98,32 @@ pnpm verify:agent    # Verify Agent만 단독
 구체적으로 보고한다:
 - BAD: "로직이 틀림"
 - GOOD: "src/worker/pipeline.ts line ~850: re-plan 조건에서 lastVerdict 비교가 === 'recode'로 되어있는데 실제 값은 're-code' (하이픈 포함). 문자열 불일치로 re-plan이 절대 트리거되지 않음."
+
+## AutoDev-Specific Verification Checklist
+
+이 프로젝트(AutoDev Agent) 코드를 검증할 때 특별히 확인할 것:
+
+### 파이프라인 무결성
+- pipeline.ts, pipeline-coding.ts, pipeline-verify.ts의 변경이 기존 flow를 깨뜨리지 않는가?
+- Plan → Code → Verify → Retry/Re-plan 순서가 유지되는가?
+- Hook Engine의 12 이벤트가 올바른 시점에 발화하는가?
+
+### 에이전트 격리
+- Verify Agent가 Plan/Coding self-report를 볼 수 없는 상태가 유지되는가?
+- Debate Challenger가 프로젝트 코드에 접근하지 않는가?
+- Coding retry에 score/verdict가 포함되지 않는가? (issues/suggestions만)
+
+### 타입 안전성
+- Zod 스키마 변경 시 관련 타입이 업데이트됐는가?
+- API route의 request/response 타입이 명확한가?
+- DB 스키마와 Drizzle 쿼리가 일치하는가?
+
+### UI 일관성
+- 새 페이지/컴포넌트가 기존 다크 테마와 일관적인가?
+- SSE 이벤트 타입이 TaskDetail 페이지에서 처리되는가?
+- 에러 상태와 로딩 상태가 처리되는가?
+
+### 보안
+- 프롬프트 인젝션 가능성이 없는가?
+- 사용자 입력이 그대로 shell에 전달되지 않는가?
+- API key가 로그/UI에 노출되지 않는가?
