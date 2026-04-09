@@ -19,7 +19,7 @@ async function main() {
   console.log('🔍 Verify Agent — Layer 1 Code Review');
   console.log('');
 
-  // 1. Get changed files (staged + unstaged + untracked)
+  // 1. Get changed files (staged + unstaged + untracked, fallback to last commit diff)
   let changedFiles: string[] = [];
   try {
     const statusOutput = execSync('git status --porcelain', { cwd: projectDir, encoding: 'utf-8' });
@@ -29,7 +29,16 @@ async function main() {
       .filter(f => !f.startsWith('.git/'));
   } catch {
     console.log('⚠ No git status available');
-    process.exit(0);
+  }
+
+  // Fallback: if no uncommitted changes, check last commit (verify.sh calls us after commit)
+  if (changedFiles.length === 0) {
+    try {
+      const diffOutput = execSync('git diff --name-only HEAD~1 HEAD', { cwd: projectDir, encoding: 'utf-8' });
+      changedFiles = diffOutput.trim().split('\n')
+        .filter(Boolean)
+        .filter(f => !f.startsWith('.git/'));
+    } catch { /* no previous commit */ }
   }
 
   if (changedFiles.length === 0) {
