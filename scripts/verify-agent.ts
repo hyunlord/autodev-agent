@@ -42,7 +42,8 @@ async function main() {
   console.log('');
 
   // 2. Select Verify Agent (different from Claude Code)
-  const verifyAgent = await VerifyAgent.selectDifferentFrom('claude-code');
+  const { primary: verifyAgent, fallbacks } = await VerifyAgent.selectDifferentFrom('claude-code');
+  verifyAgent.fallbackLlms = fallbacks;
   const available = await verifyAgent.isAvailable();
 
   if (!available) {

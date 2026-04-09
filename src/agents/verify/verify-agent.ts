@@ -12,6 +12,7 @@ export class VerifyAgent implements IAgent {
   readonly name: string;
   readonly role = 'verify' as const;
   private llm: string;
+  fallbackLlms: string[] = [];
 
   constructor(llm?: string) {
     this.llm = llm ?? 'claude-cli';
@@ -28,20 +29,28 @@ export class VerifyAgent implements IAgent {
   /**
    * Coding Agent와 다른 LLM을 자동 선택
    */
-  static async selectDifferentFrom(codingAgentId: string): Promise<VerifyAgent> {
-    const candidates = ['gemini-cli', 'codex-cli', 'claude-cli'];
+  static async selectDifferentFrom(codingAgentId: string): Promise<{ primary: VerifyAgent; fallbacks: string[] }> {
+    const candidates = ['codex-cli', 'gemini-cli', 'claude-cli'];
     const codingLlm = codingAgentId.replace('claude-code', 'claude-cli');
 
+    const available: string[] = [];
     for (const candidate of candidates) {
       if (candidate === codingLlm) continue;
       const agent = new VerifyAgent(candidate);
       if (await agent.isAvailable()) {
-        return agent;
+        available.push(candidate);
       }
     }
 
-    // Last resort: 같은 LLM (자기 합리화 위험 있지만 없는 것보다 나음)
-    return new VerifyAgent('claude-cli');
+    if (available.length === 0) {
+      // Last resort: 같은 LLM (자기 합리화 위험 있지만 없는 것보다 나음)
+      return { primary: new VerifyAgent('claude-cli'), fallbacks: [] };
+    }
+
+    return {
+      primary: new VerifyAgent(available[0]),
+      fallbacks: available.slice(1),
+    };
   }
 
   async invoke(input: AgentInput): Promise<AgentOutput> {
@@ -759,9 +768,18 @@ CRITICAL: Score 80+ ONLY if you have traced through the logic with concrete inpu
       };
 
     } catch (err) {
-      emit({ type: 'log', level: 'warn', message: `[Verify] LLM judgment failed: ${err}` } as PipelineEvent);
+      emit({ type: 'log', level: 'warn', message: `[Verify] ${this.llm} LLM judgment failed: ${err}` } as PipelineEvent);
 
-      // Fallback: if LLM fails, assume pass if mechanical checks passed
+      // Fallback: try next available LLM
+      if (this.fallbackLlms && this.fallbackLlms.length > 0) {
+        const nextLlm = this.fallbackLlms[0];
+        emit({ type: 'log', level: 'info', message: `[Verify] ${this.llm} failed, retrying with ${nextLlm}` } as PipelineEvent);
+        const fallbackAgent = new VerifyAgent(nextLlm);
+        fallbackAgent.fallbackLlms = this.fallbackLlms.slice(1);
+        return fallbackAgent.runLlmJudgment(input, evidence, emit);
+      }
+
+      // All LLMs exhausted: fallback score
       return {
         verifyResult: {
           passed: true,

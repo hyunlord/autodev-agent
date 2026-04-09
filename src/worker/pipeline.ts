@@ -422,7 +422,8 @@ async function runSingleCycle(
 
   // ─── Verify Agent Selection ────────────────────────────
   const { VerifyAgent } = await import('../agents/verify/verify-agent');
-  const verifyAgent = await VerifyAgent.selectDifferentFrom(agentId);
+  const { primary: verifyAgent, fallbacks } = await VerifyAgent.selectDifferentFrom(agentId);
+  verifyAgent.fallbackLlms = fallbacks;
   const useVerifyAgent = await verifyAgent.isAvailable();
 
   if (useVerifyAgent) {

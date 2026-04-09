@@ -44,7 +44,7 @@ export class AgentRegistry {
   }
 
   /** Get or create a verify agent (different from coding agent) */
-  static async getVerifyAgent(codingAgentId: string): Promise<VerifyAgent> {
+  static async getVerifyAgent(codingAgentId: string): Promise<{ primary: VerifyAgent; fallbacks: string[] }> {
     return VerifyAgent.selectDifferentFrom(codingAgentId);
   }
 
