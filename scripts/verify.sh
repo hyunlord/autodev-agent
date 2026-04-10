@@ -85,8 +85,9 @@ done
 
 # Cleanup
 kill $DEV_PID 2>/dev/null
-sleep 1
+sleep 2
 lsof -ti:3000 | xargs kill -9 2>/dev/null || true
+sleep 1
 
 if [ $API_PASS -eq $API_TOTAL ]; then
   add_score "API Health" 20 20 "${API_PASS}/${API_TOTAL} OK"
@@ -119,8 +120,9 @@ if [ "$MODE" = "full" ] || [ "$MODE" = "cross" ]; then
   done
 
   kill $DEV_PID 2>/dev/null
-  sleep 1
+  sleep 2
   lsof -ti:3000 | xargs kill -9 2>/dev/null || true
+  sleep 1
 
   if [ $UI_PASS -eq $UI_TOTAL ]; then
     add_score "UI Pages" 15 15 "${UI_PASS}/${UI_TOTAL} OK"
