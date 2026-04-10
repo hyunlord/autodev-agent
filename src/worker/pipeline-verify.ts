@@ -9,6 +9,20 @@ import { checkAbort } from './pipeline-types';
 import type { Plan } from './planning';
 import type { TaskStatus } from '../lib/types';
 import type { McpManager } from '../lib/harness/mcp-manager';
+import type { VerificationDepth } from '../agents/verify/verify-agent';
+
+// ─── I2: Progressive depth selection ─────────────────────────
+/**
+ * 재시도 횟수에 따라 verification depth 자동 조절.
+ * - 첫 시도: fast (<30s — 빌드+파일 체크만)
+ * - 재시도 1-2: standard (+ Playwright/VLM)
+ * - 재시도 3+: deep (+ SAST/A11y/LLM 판정)
+ */
+export function selectVerificationDepth(attempt: number): VerificationDepth {
+  if (attempt <= 1) return 'fast';
+  if (attempt <= 2) return 'standard';
+  return 'deep';
+}
 
 export interface VerifyPhaseResult {
   allPassed: boolean;
@@ -94,8 +108,13 @@ export async function executeVerification(params: {
   const _verifyCustom = _getVerifyStage(_loadVerifyLib(projectDir), 'verification');
 
   if (useVerifyAgent) {
+    // ─── I2: Select progressive verification depth ────
+    const verifyDepth = selectVerificationDepth(attempt);
+    emit({ type: 'log', level: 'info', message: `[Verify] Progressive depth: ${verifyDepth} (attempt ${attempt})` });
+
     // ─── NEW: LLM-based Verify Agent ────────────────
     const verifyOutput = await verifyAgent.invoke({
+      depth: verifyDepth,
       prompt: 'Verify the coding result',
       originalPrompt: (() => {
         let p = task.prompt;

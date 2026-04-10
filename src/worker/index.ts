@@ -34,9 +34,59 @@ for (const agent of agents) {
 }
 console.log(`[Worker] Registered ${agents.length} agents: ${agents.map(a => a.id).join(', ')}`);
 
-// ─── Task tracking with AbortController ────────────────────────
+// ─── J2: Worker Pool with concurrency limit ─────────────────────
 
+const MAX_CONCURRENT_PIPELINES = parseInt(process.env.AUTODEV_MAX_WORKERS ?? '3', 10);
 const activeTasks = new Map<string, AbortController>();
+const pendingQueue: Array<{ taskId: string }> = [];
+
+function canAcceptWork(): boolean {
+  return activeTasks.size < MAX_CONCURRENT_PIPELINES;
+}
+
+function processQueue(): void {
+  while (pendingQueue.length > 0 && canAcceptWork()) {
+    const next = pendingQueue.shift()!;
+    startPipeline(next.taskId);
+  }
+}
+
+function startPipeline(taskId: string): void {
+  const abortController = new AbortController();
+  activeTasks.set(taskId, abortController);
+  console.log(`[Worker] Starting pipeline for task ${taskId} (active: ${activeTasks.size}/${MAX_CONCURRENT_PIPELINES})`);
+
+  const emit = (event: PipelineEvent) => {
+    process.send?.({ taskId, event });
+  };
+
+  runPipeline(taskId, emit, abortController.signal)
+    .catch((err) => {
+      if (abortController.signal.aborted) {
+        console.log(`[Worker] Task ${taskId} was cancelled`);
+        emit({ type: 'task_complete', success: false, summary: 'Task cancelled by user' });
+      } else {
+        console.error(`[Worker] Pipeline error for task ${taskId}:`, err);
+        emit({
+          type: 'task_complete', success: false,
+          summary: `Pipeline crashed: ${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
+    })
+    .finally(() => {
+      activeTasks.delete(taskId);
+      processQueue(); // 다음 대기 작업 시작
+    });
+}
+
+function getWorkerPoolStatus() {
+  return {
+    activeWorkers: activeTasks.size,
+    maxWorkers: MAX_CONCURRENT_PIPELINES,
+    pendingQueue: pendingQueue.length,
+    activeTasks: [...activeTasks.keys()],
+  };
+}
 
 process.on('message', async (msg: WorkerMessage) => {
   if (msg.type === 'dispatch') {
@@ -47,46 +97,39 @@ process.on('message', async (msg: WorkerMessage) => {
       return;
     }
 
-    const abortController = new AbortController();
-    activeTasks.set(taskId, abortController);
-    console.log(`[Worker] Starting pipeline for task ${taskId}`);
-
-    const emit = (event: PipelineEvent) => {
-      process.send?.({ taskId, event });
-    };
-
-    try {
-      await runPipeline(taskId, emit, abortController.signal);
-    } catch (err) {
-      if (abortController.signal.aborted) {
-        console.log(`[Worker] Task ${taskId} was cancelled`);
-        emit({
-          type: 'task_complete',
-          success: false,
-          summary: 'Task cancelled by user',
-        });
-      } else {
-        console.error(`[Worker] Pipeline error for task ${taskId}:`, err);
-        emit({
-          type: 'task_complete',
-          success: false,
-          summary: `Pipeline crashed: ${err instanceof Error ? err.message : String(err)}`,
-        });
-      }
-    } finally {
-      activeTasks.delete(taskId);
+    if (canAcceptWork()) {
+      startPipeline(taskId);
+    } else {
+      pendingQueue.push({ taskId });
+      console.log(`[Worker] Task ${taskId} queued (position: ${pendingQueue.length})`);
+      process.send?.({
+        taskId,
+        event: { type: 'log', level: 'info', message: `Queued (position ${pendingQueue.length}, ${activeTasks.size}/${MAX_CONCURRENT_PIPELINES} active)` } as PipelineEvent,
+      });
     }
   }
 
   if (msg.type === 'cancel') {
     const taskId = msg.taskId;
+    // Remove from queue if pending
+    const queueIdx = pendingQueue.findIndex(q => q.taskId === taskId);
+    if (queueIdx >= 0) {
+      pendingQueue.splice(queueIdx, 1);
+      console.log(`[Worker] Task ${taskId} removed from queue`);
+      return;
+    }
+    // Abort if active
     const controller = activeTasks.get(taskId);
     if (controller) {
       console.log(`[Worker] Cancelling task ${taskId}...`);
       controller.abort();
     } else {
-      console.log(`[Worker] Task ${taskId} not found in active tasks`);
+      console.log(`[Worker] Task ${taskId} not found in active tasks or queue`);
     }
+  }
+
+  if ((msg as any).type === 'status') {
+    process.send?.({ type: 'pool_status', ...getWorkerPoolStatus() });
   }
 });
 

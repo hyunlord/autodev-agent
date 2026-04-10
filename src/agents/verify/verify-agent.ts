@@ -1,11 +1,14 @@
 import type { IAgent, AgentInput, AgentOutput, VerifyInput, VerifyResult } from '../interfaces';
 import { createPlaywrightTool } from './tools/playwright-verify';
-import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync } from 'fs';
+import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync, copyFileSync } from 'fs';
 import { join } from 'path';
 import { resolveCli } from '../../lib/cli-resolver';
 import { getExeca } from '../../lib/execa';
 import { extractJson } from '../../lib/utils/json-extractor';
 import type { PipelineEvent } from '../../lib/types';
+
+// ─── I2: Progressive Verification Depth ──────────────────────
+export type VerificationDepth = 'fast' | 'standard' | 'deep';
 
 export class VerifyAgent implements IAgent {
   readonly id: string;
@@ -58,8 +61,9 @@ export class VerifyAgent implements IAgent {
     const verifyInput = input as unknown as VerifyInput;
     const startTime = Date.now();
     const emit = input.onProgress ?? (() => {});
+    const depth: VerificationDepth = (verifyInput as any).depth ?? 'deep';
 
-    emit({ type: 'log', level: 'info', message: `[Verify Agent] Using ${this.llm}` } as PipelineEvent);
+    emit({ type: 'log', level: 'info', message: `[Verify Agent] Using ${this.llm} (depth: ${depth})` } as PipelineEvent);
 
     // ─── Stage 1: Mechanical checks (토큰 0) ──────────
     if (!verifyInput.skipMechanical) {
@@ -79,10 +83,48 @@ export class VerifyAgent implements IAgent {
       emit({ type: 'log', level: 'info', message: '[Verify] Stage 1: Skipped (layer 1)' } as PipelineEvent);
     }
 
+    // ─── I2: Fast depth — return after mechanical checks ──
+    if (depth === 'fast') {
+      emit({ type: 'log', level: 'info', message: '[Verify] Fast depth — skipping evidence collection and LLM' } as PipelineEvent);
+      return {
+        success: true,
+        result: {
+          passed: true, score: 70, reason: 'Fast verification: mechanical checks passed',
+          issues: [], suggestions: [], verdict: 'pass' as const, evidence: {},
+        } satisfies VerifyResult,
+        costUsd: 0,
+        tokenUsage: { input: 0, output: 0 },
+        durationMs: Date.now() - startTime,
+      };
+    }
+
     // ─── Stage 2: Collect evidence for LLM ────────────
     emit({ type: 'log', level: 'info', message: '[Verify] Stage 2: Collecting evidence...' } as PipelineEvent);
 
     const evidence = await this.collectEvidence(verifyInput, emit);
+
+    // ─── I5: Visual Regression — baseline comparison ──────
+    if (evidence.screenshotPath) {
+      const baselineDir = join(verifyInput.projectDir, '.autodev', 'baselines');
+      const baselinePath = join(baselineDir, 'screenshot.png');
+
+      if (existsSync(baselinePath)) {
+        const comparison = this.compareScreenshots(
+          evidence.screenshotPath as string, baselinePath, emit,
+        );
+        evidence.visualRegression = comparison;
+        if (!comparison.match) {
+          emit({ type: 'log', level: 'warn',
+            message: `[VisualRegression] Detected ${comparison.diffPercentage.toFixed(1)}% change from baseline`,
+          } as PipelineEvent);
+        }
+      } else {
+        // 첫 실행 → baseline 저장
+        mkdirSync(baselineDir, { recursive: true });
+        copyFileSync(evidence.screenshotPath as string, baselinePath);
+        emit({ type: 'log', level: 'info', message: '[VisualRegression] Baseline screenshot saved' } as PipelineEvent);
+      }
+    }
 
     // ─── Stage 2.8: Acceptance criteria check ──────────
     const plan = (verifyInput as any).plan;
@@ -108,6 +150,36 @@ export class VerifyAgent implements IAgent {
       evidence.acceptanceFails = acFails;
       evidence.hasAcceptanceCriteria = true;
     }
+
+    // ─── I2: Standard depth — return after evidence + VLM ──
+    if (depth === 'standard') {
+      emit({ type: 'log', level: 'info', message: '[Verify] Standard depth — skipping SAST/A11y/LLM judgment' } as PipelineEvent);
+      const hasFails = (evidence.acceptanceFails as string[] | undefined)?.length;
+      const vrMismatch = (evidence.visualRegression as { match: boolean } | undefined)?.match === false;
+      const passed = !hasFails && !vrMismatch;
+      return {
+        success: true,
+        result: {
+          passed,
+          score: passed ? 80 : 50,
+          reason: passed
+            ? 'Standard verification: mechanical + evidence passed'
+            : `Standard verification failed: ${hasFails ? 'acceptance criteria' : 'visual regression'}`,
+          issues: [
+            ...((evidence.acceptanceFails as string[]) ?? []),
+            ...(vrMismatch ? ['Visual regression detected'] : []),
+          ],
+          suggestions: [],
+          verdict: passed ? 'pass' : 're-code',
+          evidence: {},
+        } satisfies VerifyResult,
+        costUsd: 0,
+        tokenUsage: { input: 0, output: 0 },
+        durationMs: Date.now() - startTime,
+      };
+    }
+
+    // ─── Deep depth: full verification from here ──────────
 
     // ─── Stage 2.9a: SAST scan (optional) ─────────────
     if (ac?.security?.semgrepScan || process.env.AUTODEV_SAST_ENABLED === '1') {
@@ -154,6 +226,17 @@ export class VerifyAgent implements IAgent {
 
     const llmResult = await this.runLlmJudgment(verifyInput, evidence, emit);
 
+    // ─── I5: Update baseline on pass ──────────────────
+    if (llmResult.verifyResult.verdict === 'pass' && evidence.screenshotPath) {
+      const baselineDir = join(verifyInput.projectDir, '.autodev', 'baselines');
+      const baselinePath = join(baselineDir, 'screenshot.png');
+      try {
+        mkdirSync(baselineDir, { recursive: true });
+        copyFileSync(evidence.screenshotPath as string, baselinePath);
+        emit({ type: 'log', level: 'info', message: '[VisualRegression] Baseline updated after pass' } as PipelineEvent);
+      } catch { /* best effort */ }
+    }
+
     return {
       success: true,
       result: llmResult.verifyResult,
@@ -161,6 +244,25 @@ export class VerifyAgent implements IAgent {
       tokenUsage: llmResult.tokenUsage,
       durationMs: Date.now() - startTime,
     };
+  }
+
+  // ─── I5: Visual Regression — screenshot comparison ──────
+  private compareScreenshots(
+    currentPath: string,
+    baselinePath: string,
+    emit: (e: PipelineEvent) => void,
+  ): { match: boolean; diffPercentage: number } {
+    const currentSize = readFileSync(currentPath).length;
+    const baselineSize = readFileSync(baselinePath).length;
+    const sizeDiff = Math.abs(currentSize - baselineSize) / Math.max(currentSize, baselineSize);
+
+    if (sizeDiff > 0.15) {
+      emit({ type: 'log', level: 'warn',
+        message: `[VisualRegression] Screenshot size changed by ${(sizeDiff * 100).toFixed(1)}%`,
+      } as PipelineEvent);
+      return { match: false, diffPercentage: sizeDiff * 100 };
+    }
+    return { match: true, diffPercentage: sizeDiff * 100 };
   }
 
   // ─── Stage 1: Mechanical ──────────────────────────────

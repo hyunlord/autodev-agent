@@ -22,8 +22,15 @@ export async function GET() {
     })
   );
 
+  // J2: Worker Pool status
+  const maxWorkers = parseInt(process.env.AUTODEV_MAX_WORKERS ?? '3', 10);
+
   return NextResponse.json({
     agents,
+    workerPool: {
+      maxWorkers,
+      configuredVia: process.env.AUTODEV_MAX_WORKERS ? 'AUTODEV_MAX_WORKERS' : 'default',
+    },
     timestamp: new Date().toISOString(),
   });
 }

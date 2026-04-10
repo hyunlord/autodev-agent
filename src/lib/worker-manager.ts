@@ -5,7 +5,8 @@ import type { PipelineEvent } from './types';
 
 export type WorkerMessage =
   | { type: 'dispatch'; taskId: string }
-  | { type: 'cancel'; taskId: string };
+  | { type: 'cancel'; taskId: string }
+  | { type: 'status' };
 
 export type WorkerEvent = {
   taskId: string;
