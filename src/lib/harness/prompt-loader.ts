@@ -1,6 +1,7 @@
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
+import { createHash } from 'crypto';
 
 // Frontmatter parser (simple — no external deps)
 function parseFrontmatter(content: string): { frontmatter: Record<string, any>; body: string } {
@@ -36,6 +37,8 @@ export interface LoadedPrompt {
   frontmatter: Record<string, any>;
   source: 'project' | 'global' | 'default';
   filePath?: string;
+  /** md5 hash (first 8 chars) of the prompt content for version tracking */
+  version: string;
 }
 
 /**
@@ -65,12 +68,14 @@ export function loadPrompt(
     if (existsSync(projectPath)) {
       const raw = readFileSync(projectPath, 'utf-8');
       const { frontmatter, body } = parseFrontmatter(raw);
+      const content = templateVars ? resolveTemplate(body, templateVars) : body;
       return {
-        content: templateVars ? resolveTemplate(body, templateVars) : body,
+        content,
         rawContent: body,
         frontmatter,
         source: 'project',
         filePath: projectPath,
+        version: computePromptVersion(body),
       };
     }
   }
@@ -80,12 +85,14 @@ export function loadPrompt(
   if (existsSync(globalPath)) {
     const raw = readFileSync(globalPath, 'utf-8');
     const { frontmatter, body } = parseFrontmatter(raw);
+    const content = templateVars ? resolveTemplate(body, templateVars) : body;
     return {
-      content: templateVars ? resolveTemplate(body, templateVars) : body,
+      content,
       rawContent: body,
       frontmatter,
       source: 'global',
       filePath: globalPath,
+      version: computePromptVersion(body),
     };
   }
 
@@ -96,6 +103,7 @@ export function loadPrompt(
     rawContent: defaultContent,
     frontmatter: getDefaultFrontmatter(role),
     source: 'default',
+    version: computePromptVersion(defaultContent),
   };
 }
 
@@ -154,6 +162,41 @@ export function loadMcpConfig(projectDir?: string): McpConfig {
   }
 
   return defaultConfig;
+}
+
+// ─── Prompt version helper ────────────────────────────────
+
+/** Compute a short version hash (first 8 chars of md5) from prompt content */
+export function computePromptVersion(content: string): string {
+  return createHash('md5').update(content).digest('hex').slice(0, 8);
+}
+
+// ─── K7: Cache boundary markers ──────────────────────────
+
+export const CACHE_BOUNDARY = '\n<!-- CACHE_BOUNDARY: dynamic content below -->\n';
+
+/**
+ * Build a prompt with cache boundary marker separating static and dynamic parts.
+ * Static parts (agent role, rules, skills) are cacheable across requests.
+ * Dynamic parts (task context, project state) change every request.
+ *
+ * For CLI agents the marker is stripped to a simple separator.
+ * For future API direct calls, the marker indicates where to set cache_control.
+ */
+export function buildCacheablePrompt(parts: {
+  staticParts: string[];
+  dynamicParts: string[];
+}): string {
+  return parts.staticParts.filter(Boolean).join('\n') +
+    CACHE_BOUNDARY +
+    parts.dynamicParts.filter(Boolean).join('\n');
+}
+
+/**
+ * Strip cache boundary marker for CLI agents that don't support it.
+ */
+export function stripCacheBoundary(prompt: string): string {
+  return prompt.replace(CACHE_BOUNDARY, '\n---\n');
 }
 
 // ─── MCP types and helpers ─────────────────────────────────

@@ -1,0 +1,1 @@
+ALTER TABLE `attempts` ADD `prompt_versions` text;

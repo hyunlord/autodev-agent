@@ -55,13 +55,29 @@ export async function executePlanning(params: {
     emit({ type: 'log', level: 'info', message: `Dev Mode preset: ${_planDevPreset.name}` });
   }
 
-  // ─── Prompt Library injection ──────────────────────────
-  const { loadPromptLibrary, getPromptsForStage } = await import('../lib/harness/prompt-library');
+  // ─── Prompt Library injection (K6: index-only for planning) ──
+  const { loadPromptLibrary, getPromptIndex, getPromptsForStage } = await import('../lib/harness/prompt-library');
   const _planPromptLib = loadPromptLibrary(projectDir);
-  const _planningCustom = getPromptsForStage(_planPromptLib, 'planning');
-  if (_planningCustom) {
-    effectiveWorkspaceContext += _planningCustom;
-    emit({ type: 'log', level: 'info', message: `Prompt library: ${_planPromptLib.filter(p => p.stage === 'planning' || p.stage === 'all').length} planning prompt(s) loaded` });
+  const _planningIndex = getPromptIndex(_planPromptLib, 'planning');
+  if (_planningIndex) {
+    effectiveWorkspaceContext += _planningIndex;
+    emit({ type: 'log', level: 'info', message: `Prompt library: ${_planPromptLib.filter(p => p.stage === 'planning' || p.stage === 'all').length} planning prompt(s) indexed` });
+  }
+
+  // ─── Skills injection (K5) ──────────────────────────────
+  const { loadSkillIndex, activateSkills, getSkillPromptsForStage } = await import('../lib/harness/skills-loader');
+  const _skillIndex = loadSkillIndex(projectDir);
+  const _activeSkills = activateSkills(_skillIndex, {
+    projectType: projectConfig?.type,
+    taskCategory: undefined,  // not yet known at planning time
+    files: undefined,
+  }, projectDir);
+  const _skillPlanning = getSkillPromptsForStage(_activeSkills, 'planning');
+  if (_skillPlanning) {
+    effectiveWorkspaceContext += _skillPlanning;
+  }
+  if (_skillIndex.length > 0) {
+    emit({ type: 'log', level: 'info', message: `[Skills] ${_skillIndex.length} indexed, ${_activeSkills.filter(s => s._loaded).length} activated` });
   }
 
   if (planMode === 'debate') {

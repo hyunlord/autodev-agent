@@ -1,0 +1,15 @@
+id: react-ui
+name: React UI Polishing
+version: 1.0.0
+triggers:
+  - projectType: react
+  - projectType: nextjs
+  - taskCategory: frontend
+  - filePattern: "*.tsx"
+mcp:
+  enable:
+    - playwright
+verification:
+  gates:
+    - pnpm build
+  default: pnpm verify:cross

@@ -42,6 +42,7 @@ export const attempts = sqliteTable('attempts', {
   costUsd:     real('cost_usd'),
   tokenCount:  integer('token_count'),
   durationMs:  integer('duration_ms'),
+  promptVersions: text('prompt_versions'),  // JSON: { planner: "a3b2c1d4", coder: "e5f6g7h8", ... }
   createdAt:   text('created_at').notNull(),
 });
 

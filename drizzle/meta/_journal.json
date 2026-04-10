@@ -57,6 +57,13 @@
       "when": 1775540749514,
       "tag": "0007_bitter_ultimo",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1775830594348,
+      "tag": "0008_blue_swarm",
+      "breakpoints": true
     }
   ]
 }

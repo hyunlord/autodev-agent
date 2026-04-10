@@ -80,6 +80,16 @@ export async function executeCodingLoop(params: {
   const { loadPromptLibrary: _loadCodingLib, getPromptsForStage: _getCodingStage } = await import('../lib/harness/prompt-library');
   const _codePromptLib = _loadCodingLib(projectDir);
 
+  // K5: Skills for coding stage (loaded once outside retry loop)
+  const { loadSkillIndex: _loadSkills, activateSkills: _activateSkills, getSkillPromptsForStage: _getSkillPrompts } = await import('../lib/harness/skills-loader');
+  const _codingSkillIndex = _loadSkills(projectDir);
+  const _codingActiveSkills = _activateSkills(_codingSkillIndex, {
+    projectType: projectConfig?.type,
+    taskCategory: currentPlan.taskCategory,
+    files: currentPlan.estimatedFiles,
+  }, projectDir);
+  const _skillCoding = _getSkillPrompts(_codingActiveSkills, 'coding');
+
   // ─── Reset retry state for this plan ───────────────────
   const retryCtrl = new RetryController({
     maxAttempts: config.maxRetries,
@@ -295,6 +305,10 @@ ${currentPlan.codingPrompt}`;
     if (_codingCustom) {
       codingPrompt += _codingCustom;
     }
+    // K5: Skills injection for coding stage
+    if (_skillCoding) {
+      codingPrompt += _skillCoding;
+    }
     if (!isRetry && projectHistory.length > 0) {
       const historyContext = projectHistory.map(h => {
         try {
@@ -323,7 +337,7 @@ ${currentPlan.codingPrompt}`;
     }
 
     const coderPrompt = loadPrompt('coder', projectDir, { projectDir });
-    emit({ type: 'log', level: 'info', message: `Coder prompt: ${coderPrompt.source}${coderPrompt.filePath ? ` (${coderPrompt.filePath})` : ' (built-in)'}` });
+    emit({ type: 'log', level: 'info', message: `Coder prompt: ${coderPrompt.source}${coderPrompt.filePath ? ` (${coderPrompt.filePath})` : ' (built-in)'} [v${coderPrompt.version}]` });
 
     // Inject accumulated hook context into coding prompt
     if (hookContextAccumulator) {
@@ -357,6 +371,11 @@ ${currentPlan.codingPrompt}`;
     });
 
     const codingAttemptId = nanoid();
+    // K4: prompt version tracking
+    const _codingPromptVersions = JSON.stringify({
+      coder: coderPrompt.version,
+      skillsActive: _codingActiveSkills.filter(s => s._loaded).map(s => `${s.id}:${s.version}`),
+    });
     db.insert(attempts).values({
       id: codingAttemptId,
       taskId,
@@ -377,6 +396,7 @@ ${currentPlan.codingPrompt}`;
         ? codeResult.tokenUsage.inputTokens + codeResult.tokenUsage.outputTokens
         : null,
       durationMs: codeResult.durationMs,
+      promptVersions: _codingPromptVersions,
       createdAt: new Date().toISOString(),
     }).run();
 

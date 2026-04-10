@@ -546,6 +546,17 @@ async function runSingleCycle(
   // ─── Code → Verify retry loop ─────────────────────────
   let totalCostUsd = planResult.costUsd;
 
+  // K4: Collect prompt versions for tracking
+  const { loadPrompt: _loadPromptForVersion, computePromptVersion: _computeVersion } = await import('../lib/harness/prompt-loader');
+  const _plannerPromptVer = _loadPromptForVersion('planner', projectDir);
+  const _coderPromptVer = _loadPromptForVersion('coder', projectDir);
+  const _verifierPromptVer = _loadPromptForVersion('verifier', projectDir);
+  const _promptVersions = JSON.stringify({
+    planner: _plannerPromptVer.version,
+    coder: _coderPromptVer.version,
+    verifier: _verifierPromptVer.version,
+  });
+
   if (planResult.costUsd > 0) {
     emit({
       type: 'cost_update',
@@ -570,6 +581,7 @@ async function runSingleCycle(
       costUsd: planResult.costUsd,
       tokenCount: planResult.inputTokens + planResult.outputTokens,
       durationMs: null,
+      promptVersions: _promptVersions,
       createdAt: new Date().toISOString(),
     }).run();
   }
@@ -635,6 +647,7 @@ async function runSingleCycle(
             costUsd: replanResult.costUsd,
             tokenCount: replanResult.inputTokens + replanResult.outputTokens,
             durationMs: null,
+            promptVersions: _promptVersions,
             createdAt: new Date().toISOString(),
           }).run();
         }
