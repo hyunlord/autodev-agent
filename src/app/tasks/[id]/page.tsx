@@ -1,107 +1,27 @@
 'use client';
-import { useState, useEffect, use, useRef } from 'react';
-import Link from 'next/link';
+
+import { useState, useEffect, use } from 'react';
 import { useRouter } from 'next/navigation';
-import { planToMermaid } from '@/lib/utils/plan-to-mermaid';
-
-interface TaskDetail {
-  id: string;
-  prompt: string;
-  status: string;
-  projectDir: string | null;
-  result?: string | object;
-  createdAt: string;
-  updatedAt: string;
-  attempts: any[];
-  events: any[];
-}
-
-interface PipelineEvent {
-  type: string;
-  status?: string;
-  message?: string;
-  success?: boolean;
-  summary?: string;
-  level?: string;
-  [key: string]: any;
-}
-
-const STAGES = ['pending', 'planning', 'plan_review', 'coding', 'verifying', 'completed'];
-
-function MermaidDiagram({ chart }: { chart: string }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [rendered, setRendered] = useState(false);
-
-  useEffect(() => {
-    if (!ref.current || rendered) return;
-    import('mermaid').then(mermaid => {
-      mermaid.default.initialize({
-        startOnLoad: false,
-        theme: 'dark',
-        themeVariables: {
-          primaryColor: '#7c3aed',
-          primaryTextColor: '#fff',
-          lineColor: '#6b7280',
-          secondaryColor: '#1f2937',
-        },
-      });
-      mermaid.default.run({ nodes: [ref.current!] });
-      setRendered(true);
-    });
-  }, [chart, rendered]);
-
-  return <div ref={ref} className="mermaid text-sm overflow-x-auto">{chart}</div>;
-}
-
-function StageIndicator({ currentStatus }: { currentStatus: string }) {
-  const currentIdx = STAGES.indexOf(currentStatus);
-  const isFailed = currentStatus === 'failed' || currentStatus === 'escalated';
-
-  return (
-    <div className="flex items-center gap-2 mb-6">
-      {STAGES.map((stage, i) => {
-        let color = 'bg-gray-700 text-gray-500';
-        if (isFailed && i === currentIdx) {
-          color = 'bg-red-900 text-red-300';
-        } else if (i < currentIdx || currentStatus === 'completed') {
-          color = 'bg-green-900 text-green-300';
-        } else if (i === currentIdx) {
-          color = 'bg-indigo-900 text-indigo-300';
-        }
-
-        return (
-          <div key={stage} className="flex items-center gap-2">
-            {i > 0 && <div className={`w-8 h-0.5 ${i <= currentIdx ? 'bg-green-700' : 'bg-gray-700'}`} />}
-            <span className={`px-3 py-1 rounded-full text-xs font-medium capitalize ${color}`}>
-              {stage === 'plan_review' ? 'review' : stage}
-            </span>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
+import { TaskHeader } from './components/TaskHeader';
+import { TimelineView } from './components/TimelineView';
+import { DiffView } from './components/DiffView';
+import { ArtifactView } from './components/ArtifactView';
+import { Sidebar } from './components/Sidebar';
+import type { TaskDetail, PipelineEvent, PlanData, LiveUsage, VerificationResult, ScreenshotData, CycleInfo } from './components/types';
 
 export default function TaskDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
+
+  // --- State ---
   const [task, setTask] = useState<TaskDetail | null>(null);
   const [liveEvents, setLiveEvents] = useState<PipelineEvent[]>([]);
-  const [screenshots, setScreenshots] = useState<Array<{ path: string; checkId: string }>>([]);
+  const [screenshots, setScreenshots] = useState<ScreenshotData[]>([]);
   const [currentStatus, setCurrentStatus] = useState('pending');
-  const [verificationResults, setVerificationResults] = useState<Array<{ checkId: string; status: string; detail: string }>>([]);
+  const [verificationResults, setVerificationResults] = useState<VerificationResult[]>([]);
   const [escalationReport, setEscalationReport] = useState<string | null>(null);
   const [attemptCount, setAttemptCount] = useState(1);
-  const [planData, setPlanData] = useState<{
-    summary: string;
-    codingPrompt: string;
-    estimatedFiles: string[];
-    verificationSpec: { steps: Array<{ id: string; type: string; description: string; [key: string]: any }> };
-    taskCategory?: string;
-    agentName?: string;
-    agentId?: string;
-    autoSelected?: boolean;
-  } | null>(null);
+  const [planData, setPlanData] = useState<PlanData | null>(null);
   const [editingPlan, setEditingPlan] = useState(false);
   const [editedCodingPrompt, setEditedCodingPrompt] = useState('');
   const [previewFile, setPreviewFile] = useState<{ path: string; content: string; language: string } | null>(null);
@@ -109,19 +29,18 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
   const [interviewQuestions, setInterviewQuestions] = useState<string[]>([]);
   const [interviewAnswers, setInterviewAnswers] = useState<Record<number, string>>({});
   const [submittingAnswers, setSubmittingAnswers] = useState(false);
-  const [cycleInfo, setCycleInfo] = useState<{ current: number; max: number; steps: string[] }>({ current: 0, max: 0, steps: [] });
+  const [cycleInfo, setCycleInfo] = useState<CycleInfo>({ current: 0, max: 0, steps: [] });
   const [planTab, setPlanTab] = useState<'json' | 'diagram'>('json');
   const [diffData, setDiffData] = useState<any>(null);
   const [diffView, setDiffView] = useState<'unified' | 'split'>('unified');
   const [diffLoading, setDiffLoading] = useState(false);
   const [selectedDiffFile, setSelectedDiffFile] = useState<string | null>(null);
-  const [liveUsage, setLiveUsage] = useState<{
-    totalCostUsd: number;
-    totalInputTokens: number;
-    totalOutputTokens: number;
-    agentCosts: Record<string, number>;
-  }>({ totalCostUsd: 0, totalInputTokens: 0, totalOutputTokens: 0, agentCosts: {} });
+  const [liveUsage, setLiveUsage] = useState<LiveUsage>({
+    totalCostUsd: 0, totalInputTokens: 0, totalOutputTokens: 0, agentCosts: {},
+  });
+  const [activeTab, setActiveTab] = useState<'timeline' | 'diff' | 'artifacts'>('timeline');
 
+  // --- Initial fetch + hydration ---
   useEffect(() => {
     window.scrollTo(0, 0);
 
@@ -131,23 +50,20 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
         setTask(data);
         setCurrentStatus(data.status);
 
-        // Hydrate cycle info from DB
         if (data.maxCycles > 1) {
           setCycleInfo(prev => ({ ...prev, current: data.cycleCount ?? 0, max: data.maxCycles ?? 0 }));
         }
 
-        // Hydrate plan from DB
         if (data.plan) {
           const plan = typeof data.plan === 'string' ? JSON.parse(data.plan) : data.plan;
           setPlanData(plan);
           setEditedCodingPrompt(plan.codingPrompt ?? '');
         }
 
-        // Hydrate events from DB (each has { type, data, createdAt } where data is JSON string)
         if (data.events && Array.isArray(data.events) && data.events.length > 0) {
           const storedEvents: PipelineEvent[] = [];
-          const storedVerifications: Array<{ checkId: string; status: string; detail: string }> = [];
-          const storedScreenshots: Array<{ path: string; checkId: string }> = [];
+          const storedVerifications: VerificationResult[] = [];
+          const storedScreenshots: ScreenshotData[] = [];
           let storedEscalation: string | null = null;
           let maxAttempt = 1;
           const storedUsage = { totalCostUsd: 0, totalInputTokens: 0, totalOutputTokens: 0, agentCosts: {} as Record<string, number> };
@@ -207,6 +123,7 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
       });
   }, [id]);
 
+  // --- Project tasks ---
   useEffect(() => {
     if (task?.projectDir) {
       fetch(`/api/tasks?projectDir=${encodeURIComponent(task.projectDir)}&limit=10`)
@@ -216,6 +133,7 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
     }
   }, [task?.projectDir, id]);
 
+  // --- SSE ---
   useEffect(() => {
     const es = new EventSource(`/api/events?taskId=${id}`);
     es.onmessage = (e) => {
@@ -268,6 +186,7 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
     return () => es.close();
   }, [id]);
 
+  // --- Handlers ---
   const loadFilePreview = async (filePath: string) => {
     if (!task?.projectDir) return;
     if (previewFile?.path === filePath) {
@@ -316,772 +235,159 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
     ? (() => { try { return typeof task.result === 'string' ? JSON.parse(task.result) : task.result; } catch { return null; } })()
     : null;
 
+  const handleApprovePlan = async (edited?: boolean) => {
+    const planToSend = edited ? { ...planData, codingPrompt: editedCodingPrompt } : undefined;
+    await fetch(`/api/tasks/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'approve', plan: planToSend }),
+    });
+  };
+
+  const handleRejectPlan = async () => {
+    await fetch(`/api/tasks/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'reject' }),
+    });
+    setCurrentStatus('failed');
+  };
+
+  const handleSubmitInterview = async (answers: Record<number, string>) => {
+    setSubmittingAnswers(true);
+    await fetch(`/api/tasks/${id}/interview`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ answers }),
+    });
+    setSubmittingAnswers(false);
+    setCurrentStatus('pending');
+  };
+
+  const handleSkipInterview = async () => {
+    await fetch(`/api/tasks/${id}/interview`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ answers: {} }),
+    });
+    setCurrentStatus('pending');
+  };
+
+  const handleStopCycle = async () => {
+    await fetch(`/api/tasks/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'stop' }),
+    });
+  };
+
+  // --- Loading ---
   if (!task) {
     return (
-      <div className="min-h-screen p-8 max-w-4xl mx-auto">
-        <p className="text-gray-400">Loading...</p>
+      <div className="min-h-screen bg-gray-950 flex items-center justify-center">
+        <div className="flex items-center gap-3">
+          <div className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
+          <span className="text-sm text-gray-500">Loading task...</span>
+        </div>
       </div>
     );
   }
 
+  // --- Render ---
   return (
-    <div className="min-h-screen p-8 max-w-4xl mx-auto">
-      <Link href="/" className="text-indigo-400 hover:text-indigo-300 text-sm mb-4 inline-block">
-        &larr; Back to Dashboard
-      </Link>
+    <div className="min-h-screen bg-gray-950 flex flex-col">
+      <TaskHeader
+        task={task}
+        currentStatus={currentStatus}
+        liveUsage={liveUsage}
+        attemptCount={attemptCount}
+      />
 
-      <h1 className="text-2xl font-bold mb-2">Task Detail</h1>
-      <p className="text-gray-300 mb-4">{task.prompt}</p>
-
-      {task.projectDir && (
-        <div className="flex items-center gap-2 mb-4">
-          <code className="text-sm text-gray-400 bg-gray-800 px-2 py-1 rounded">{task.projectDir}</code>
-          <button
-            onClick={async () => {
-              await fetch('/api/workspace/open', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ path: task.projectDir }),
-              });
-            }}
-            className="px-2.5 py-1 text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg transition-colors"
-          >
-            📂 Open Folder
-          </button>
-        </div>
-      )}
-
-      {attemptCount > 1 && (
-        <p className="text-sm text-yellow-400 mb-2">
-          Attempt {attemptCount} of 3
-        </p>
-      )}
-
-      <StageIndicator currentStatus={currentStatus} />
-
-      {(liveUsage.totalCostUsd > 0 || currentStatus === 'coding') && (
-        <div className="mb-4 flex items-center gap-4 px-3 py-2 bg-gray-900/50 rounded-lg border border-gray-800 text-xs">
-          <div className="flex items-center gap-1.5">
-            <span className="text-gray-500">Cost:</span>
-            <span className="text-gray-200 font-medium">${liveUsage.totalCostUsd.toFixed(4)}</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="text-gray-500">Tokens:</span>
-            <span className="text-gray-200">
-              {(liveUsage.totalInputTokens + liveUsage.totalOutputTokens).toLocaleString()}
-            </span>
-            <span className="text-gray-600 text-[10px]">
-              ({liveUsage.totalInputTokens.toLocaleString()} in / {liveUsage.totalOutputTokens.toLocaleString()} out)
-            </span>
-          </div>
-          {Object.keys(liveUsage.agentCosts).length > 1 && (
-            <div className="flex items-center gap-1.5">
-              <span className="text-gray-500">By agent:</span>
-              {Object.entries(liveUsage.agentCosts).map(([aid, cost]) => (
-                <span key={aid} className="text-gray-400">
-                  {aid}: ${(cost as number).toFixed(4)}
-                </span>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {cycleInfo.max > 1 && (
-        <div className="mb-4 p-3 bg-amber-950/20 rounded-lg border border-amber-800/50">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs text-amber-400 font-medium">
-              Auto-cycle: {cycleInfo.current}/{cycleInfo.max}
-            </span>
-            {currentStatus !== 'completed' && currentStatus !== 'failed' && (
+      {/* Split panel: 7:3 on md+, stacked on mobile */}
+      <div className="flex-1 flex flex-col md:grid md:grid-cols-[7fr_3fr] md:h-[calc(100vh-48px)]">
+        {/* Left panel — Tabs */}
+        <div className="border-b md:border-b-0 md:border-r border-gray-800 flex flex-col min-h-0">
+          <div className="flex border-b border-gray-800 flex-shrink-0">
+            {(['timeline', 'diff', 'artifacts'] as const).map(tab => (
               <button
-                onClick={async () => {
-                  await fetch(`/api/tasks/${id}`, {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ action: 'stop' }),
-                  });
-                }}
-                className="px-2 py-1 text-xs bg-red-900/50 hover:bg-red-900 text-red-300 rounded transition-colors"
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={`flex-1 py-2.5 text-xs font-medium border-b-2 transition-colors ${
+                  activeTab === tab
+                    ? 'border-indigo-500 text-indigo-400 bg-gray-900/50'
+                    : 'border-transparent text-gray-500 hover:text-gray-400'
+                }`}
               >
-                Stop
+                {tab === 'timeline' ? 'Timeline' : tab === 'diff' ? 'Diff' : 'Artifacts'}
               </button>
-            )}
-          </div>
-          <div className="w-full bg-gray-800 rounded-full h-1.5 mb-2">
-            <div
-              className="bg-amber-500 h-1.5 rounded-full transition-all"
-              style={{ width: `${(cycleInfo.current / cycleInfo.max) * 100}%` }}
-            />
-          </div>
-          {cycleInfo.steps.length > 0 && (
-            <div className="space-y-1 mt-2">
-              {cycleInfo.steps.map((step, i) => (
-                <p key={i} className="text-xs text-gray-400">{step}</p>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {currentStatus === 'interview' && interviewQuestions.length > 0 && (
-        <div className="bg-teal-900/20 border border-teal-800 rounded-xl p-4 mb-4">
-          <h3 className="text-sm font-semibold text-teal-400 mb-3">
-            💬 작업을 더 잘 이해하기 위해 몇 가지 질문이 있어요
-          </h3>
-          <div className="space-y-3">
-            {interviewQuestions.map((q, i) => (
-              <div key={i}>
-                <p className="text-xs text-gray-300 mb-1">{i + 1}. {q}</p>
-                <input
-                  type="text"
-                  value={interviewAnswers[i] ?? ''}
-                  onChange={e => setInterviewAnswers(prev => ({ ...prev, [i]: e.target.value }))}
-                  placeholder="답변을 입력하세요..."
-                  className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-200 placeholder-gray-600 outline-none focus:border-teal-600"
-                />
-              </div>
             ))}
           </div>
-          <div className="flex gap-2 mt-4">
-            <button
-              onClick={async () => {
-                setSubmittingAnswers(true);
-                await fetch(`/api/tasks/${id}/interview`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ answers: interviewAnswers }),
-                });
-                setSubmittingAnswers(false);
-                setCurrentStatus('pending');
-              }}
-              disabled={submittingAnswers || Object.keys(interviewAnswers).length === 0}
-              className="px-4 py-2 bg-teal-600 hover:bg-teal-500 text-white text-sm rounded-lg disabled:opacity-50 transition-colors"
-            >
-              {submittingAnswers ? '제출 중...' : '답변 제출 → Planning 시작'}
-            </button>
-            <button
-              onClick={async () => {
-                await fetch(`/api/tasks/${id}/interview`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ answers: {} }),
-                });
-                setCurrentStatus('pending');
-              }}
-              className="px-4 py-2 text-gray-400 hover:text-gray-200 text-sm transition-colors"
-            >
-              건너뛰기
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Task Configuration */}
-      <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-4 mb-4">
-        <h3 className="text-xs text-gray-500 uppercase tracking-wider mb-2">Task Configuration</h3>
-        <div className="grid grid-cols-2 gap-2 text-xs">
-          <div>
-            <span className="text-gray-500">Planning: </span>
-            <span className="text-gray-300">{(task as any).planningMode ?? 'auto'}</span>
-          </div>
-          <div>
-            <span className="text-gray-500">Agent: </span>
-            <span className="text-gray-300">{(task as any).agentId ?? 'auto'}</span>
-          </div>
-          <div>
-            <span className="text-gray-500">Mode: </span>
-            <span className="text-gray-300">{(task as any).executionMode ?? 'single'}</span>
-          </div>
-          <div>
-            <span className="text-gray-500">Auto-approve: </span>
-            <span className="text-gray-300">
-              {(() => {
-                try {
-                  const cfg = typeof (task as any).config === 'string' ? JSON.parse((task as any).config as string) : (task as any).config;
-                  return (cfg as any)?.autoApprove ? 'Yes' : 'No';
-                } catch { return 'No'; }
-              })()}
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* Interview Q&A — show recorded Q&A from config */}
-      {(() => {
-        try {
-          const cfg = typeof (task as any).config === 'string' ? JSON.parse((task as any).config as string) : (task as any).config;
-          const questions = (cfg as any)?.interviewQuestions as string[] | undefined;
-          const answers = (cfg as any)?.interviewAnswers;
-          if (questions && questions.length > 0) {
-            return (
-              <div className="bg-amber-900/10 border border-amber-800/50 rounded-xl p-4 mb-4">
-                <h3 className="text-xs text-amber-400 uppercase tracking-wider mb-2">💬 Interview</h3>
-                <div className="space-y-2">
-                  {questions.map((q: string, i: number) => (
-                    <div key={i} className="text-xs">
-                      <p className="text-gray-400">Q: {q}</p>
-                      <p className="text-gray-200">A: {answers?.[i] ?? answers?.[String(i)] ?? '(no answer)'}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            );
-          }
-        } catch {}
-        return null;
-      })()}
-
-      {planData && (
-        <section className="mb-6 p-5 bg-indigo-950/20 rounded-lg border border-indigo-800/50">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-3">
-              <h2 className="text-lg font-semibold text-indigo-300">
-                {currentStatus === 'plan_review' ? 'Plan Review' : 'Plan'}
-              </h2>
-              <div className="flex gap-1">
-                <button
-                  onClick={() => setPlanTab('json')}
-                  className={`px-2 py-0.5 text-xs rounded transition-colors ${planTab === 'json' ? 'bg-indigo-700 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}
-                >
-                  JSON
-                </button>
-                <button
-                  onClick={() => setPlanTab('diagram')}
-                  className={`px-2 py-0.5 text-xs rounded transition-colors ${planTab === 'diagram' ? 'bg-indigo-700 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}
-                >
-                  Diagram
-                </button>
-              </div>
-            </div>
-            {currentStatus === 'plan_review' && (
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setEditingPlan(!editingPlan)}
-                  className="px-3 py-1.5 text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg transition-colors"
-                >
-                  {editingPlan ? 'Preview' : 'Edit'}
-                </button>
-                <button
-                  onClick={async () => {
-                    await fetch(`/api/tasks/${id}`, {
-                      method: 'PATCH',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ action: 'reject' }),
-                    });
-                    setCurrentStatus('failed');
-                  }}
-                  className="px-3 py-1.5 text-xs bg-red-900/50 hover:bg-red-900 text-red-300 rounded-lg transition-colors"
-                >
-                  Reject
-                </button>
-                <button
-                  onClick={async () => {
-                    const planToSend = editingPlan ? {
-                      ...planData,
-                      codingPrompt: editedCodingPrompt,
-                    } : undefined;
-                    await fetch(`/api/tasks/${id}`, {
-                      method: 'PATCH',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ action: 'approve', plan: planToSend }),
-                    });
-                  }}
-                  className="px-4 py-1.5 text-xs bg-green-700 hover:bg-green-600 text-white rounded-lg transition-colors font-medium"
-                >
-                  Approve &amp; Run
-                </button>
-              </div>
+          <div className="flex-1 overflow-y-auto p-5">
+            {activeTab === 'timeline' && (
+              <TimelineView
+                currentStatus={currentStatus}
+                planData={planData}
+                liveEvents={liveEvents}
+                liveUsage={liveUsage}
+                verificationResults={verificationResults}
+                screenshots={screenshots}
+                cycleInfo={cycleInfo}
+                taskCreatedAt={task.createdAt}
+                taskId={id}
+                onStopCycle={handleStopCycle}
+              />
+            )}
+            {activeTab === 'diff' && (
+              <DiffView
+                task={task}
+                parsedResult={parsedResult}
+                diffData={diffData}
+                diffLoading={diffLoading}
+                diffView={diffView}
+                selectedDiffFile={selectedDiffFile}
+                previewFile={previewFile}
+                onSetDiffView={setDiffView}
+                onLoadDiff={loadDiff}
+                onToggleDiffFile={toggleDiffFile}
+                onLoadFilePreview={loadFilePreview}
+              />
+            )}
+            {activeTab === 'artifacts' && (
+              <ArtifactView
+                planData={planData}
+                screenshots={screenshots}
+                verificationResults={verificationResults}
+                escalationReport={escalationReport}
+              />
             )}
           </div>
-
-          {planTab === 'diagram' && (
-            <div className="bg-gray-900 rounded-lg p-4 min-h-32">
-              <MermaidDiagram chart={planToMermaid(planData)} />
-            </div>
-          )}
-
-          {planTab === 'json' && <div className="space-y-4">
-            <div>
-              <p className="text-xs text-gray-500 mb-1">Summary</p>
-              <p className="text-sm text-gray-200">{planData.summary}</p>
-            </div>
-
-            {(planData.taskCategory || planData.agentName) && (
-              <div className="flex items-center gap-4">
-                {planData.taskCategory && (
-                  <div>
-                    <p className="text-xs text-gray-500 mb-0.5">Category</p>
-                    <span className="text-xs px-2 py-0.5 bg-indigo-900/30 text-indigo-300 rounded-full">
-                      {planData.taskCategory}
-                    </span>
-                  </div>
-                )}
-                {planData.agentName && (
-                  <div>
-                    <p className="text-xs text-gray-500 mb-0.5">Agent</p>
-                    <span className="text-xs px-2 py-0.5 bg-gray-800 text-gray-300 rounded">
-                      {planData.autoSelected ? '🤖 ' : ''}{planData.agentName}
-                    </span>
-                  </div>
-                )}
-              </div>
-            )}
-
-            <div>
-              <p className="text-xs text-gray-500 mb-1">Estimated files</p>
-              <div className="flex flex-wrap gap-1">
-                {planData.estimatedFiles.map((f, i) => (
-                  <code key={i} className="text-xs bg-gray-800 text-gray-300 px-1.5 py-0.5 rounded">{f}</code>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <p className="text-xs text-gray-500 mb-1">Coding prompt</p>
-              {editingPlan && currentStatus === 'plan_review' ? (
-                <textarea
-                  value={editedCodingPrompt}
-                  onChange={(e) => setEditedCodingPrompt(e.target.value)}
-                  rows={12}
-                  className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-gray-300 text-xs font-mono focus:outline-none focus:border-indigo-500 resize-y"
-                />
-              ) : (
-                <pre className="text-xs text-gray-300 bg-gray-900 p-3 rounded-lg overflow-x-auto max-h-64 whitespace-pre-wrap font-mono">{planData.codingPrompt}</pre>
-              )}
-            </div>
-
-            <div>
-              <p className="text-xs text-gray-500 mb-1">Verification steps</p>
-              <div className="space-y-1">
-                {planData.verificationSpec.steps.map((s: any, i: number) => (
-                  <div key={i} className="text-xs text-gray-400 bg-gray-900 px-2 py-1.5 rounded flex items-center gap-2">
-                    <span className="text-indigo-400 font-mono">{s.id}</span>
-                    <span className="text-gray-600">&middot;</span>
-                    <span className="text-gray-500">{s.type}</span>
-                    <span className="text-gray-600">&middot;</span>
-                    <span className="text-gray-300">{s.description}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>}
-          {(task as any).systemPrompt && (
-            <div className="mt-3 pt-3 border-t border-gray-800">
-              <p className="text-xs text-gray-500 mb-1">System prompt</p>
-              <pre className="text-xs text-gray-400 bg-gray-900 p-2 rounded max-h-24 overflow-y-auto whitespace-pre-wrap font-mono">
-                {(task as any).systemPrompt}
-              </pre>
-            </div>
-          )}
-        </section>
-      )}
-
-      {(currentStatus === 'completed' || currentStatus === 'failed' || currentStatus === 'escalated') && task.result && (
-        <div className={`mb-6 p-4 rounded-lg border ${
-          currentStatus === 'completed'
-            ? 'bg-green-950/20 border-green-900/50'
-            : 'bg-red-950/20 border-red-900/50'
-        }`}>
-          <div className="flex items-center gap-3 mb-3">
-            <span className="text-2xl">{currentStatus === 'completed' ? '✅' : '❌'}</span>
-            <div>
-              <h3 className="font-semibold text-gray-100">
-                {currentStatus === 'completed' ? 'Task Completed' : currentStatus === 'escalated' ? 'Task Escalated' : 'Task Failed'}
-              </h3>
-              <p className="text-sm text-gray-400">{parsedResult?.summary ?? ''}</p>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {parsedResult?.attempts !== undefined && (
-              <div className="bg-gray-900/50 rounded-lg p-3">
-                <p className="text-xs text-gray-500">Attempts</p>
-                <p className="text-lg font-bold text-gray-200">{parsedResult.attempts}</p>
-              </div>
-            )}
-            {parsedResult?.costUsd !== undefined && (
-              <div className="bg-gray-900/50 rounded-lg p-3">
-                <p className="text-xs text-gray-500">Cost</p>
-                <p className="text-lg font-bold text-gray-200">${Number(parsedResult.costUsd).toFixed(4)}</p>
-              </div>
-            )}
-            {parsedResult?.modifiedFiles && (
-              <div className="bg-gray-900/50 rounded-lg p-3">
-                <p className="text-xs text-gray-500">Files Modified</p>
-                <p className="text-lg font-bold text-gray-200">{parsedResult.modifiedFiles.length}</p>
-              </div>
-            )}
-            {task.updatedAt && task.createdAt && (
-              <div className="bg-gray-900/50 rounded-lg p-3">
-                <p className="text-xs text-gray-500">Duration</p>
-                <p className="text-lg font-bold text-gray-200">
-                  {Math.round((new Date(task.updatedAt).getTime() - new Date(task.createdAt).getTime()) / 1000)}s
-                </p>
-              </div>
-            )}
-          </div>
-          {parsedResult?.modifiedFiles?.length > 0 && (
-            <div className="mt-3 pt-3 border-t border-gray-800">
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-xs text-gray-500">Modified Files</p>
-                <div className="flex gap-1">
-                  <button
-                    onClick={() => { setDiffView('unified'); loadDiff(); }}
-                    className={`text-[10px] px-2 py-0.5 rounded ${diffView === 'unified' ? 'bg-indigo-900/50 text-indigo-300' : 'text-gray-500 hover:text-gray-300'}`}
-                  >
-                    Unified
-                  </button>
-                  <button
-                    onClick={() => { setDiffView('split'); loadDiff(); }}
-                    className={`text-[10px] px-2 py-0.5 rounded ${diffView === 'split' ? 'bg-indigo-900/50 text-indigo-300' : 'text-gray-500 hover:text-gray-300'}`}
-                  >
-                    Split
-                  </button>
-                </div>
-              </div>
-              <div className="space-y-1 mb-3">
-                {parsedResult.modifiedFiles.map((f: string, i: number) => {
-                  const fileDiff = diffData?.files?.find((d: any) => d.path === f);
-                  return (
-                    <button
-                      key={i}
-                      onClick={() => toggleDiffFile(f)}
-                      className={`flex items-center justify-between w-full text-left text-xs px-2 py-1.5 rounded transition-colors ${
-                        selectedDiffFile === f
-                          ? 'bg-indigo-900/30 text-indigo-300 border border-indigo-800'
-                          : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
-                      }`}
-                    >
-                      <span>{fileDiff?.status === 'added' ? '🆕' : fileDiff?.status === 'deleted' ? '🗑️' : '📄'} {f}</span>
-                      {fileDiff && (
-                        <span className="flex gap-1 shrink-0">
-                          {fileDiff.additions > 0 && <span className="text-green-400">+{fileDiff.additions}</span>}
-                          {fileDiff.deletions > 0 && <span className="text-red-400">-{fileDiff.deletions}</span>}
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-              {diffLoading && <div className="text-xs text-gray-500 p-3">Loading diff...</div>}
-              {selectedDiffFile && diffData && (
-                <DiffViewer
-                  fileDiff={diffData.files?.find((d: any) => d.path === selectedDiffFile)}
-                  mode={diffView}
-                  fallbackContent={previewFile?.content}
-                  onLoadFallback={() => loadFilePreview(selectedDiffFile)}
-                />
-              )}
-              {selectedDiffFile && !diffData && !diffLoading && (
-                <div className="text-xs text-gray-500 p-3 bg-gray-900 rounded">
-                  Diff not available. Showing file content.
-                  {previewFile && (
-                    <pre className="mt-2 text-gray-300 overflow-x-auto max-h-96"><code>{previewFile.content}</code></pre>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-          {(currentStatus === 'completed' || currentStatus === 'failed') && (
-            <div className="mt-4 pt-3 border-t border-gray-800">
-              <button
-                onClick={() => router.push(`/?chain=${id}`)}
-                className="px-4 py-2 text-sm bg-indigo-700 hover:bg-indigo-600 text-white rounded-lg transition-colors"
-              >
-                ↪ 이어서 작업하기
-              </button>
-            </div>
-          )}
         </div>
-      )}
 
-      <section className="mb-6">
-        <h2 className="text-lg font-semibold mb-3">Live Events</h2>
-        <div className="bg-gray-900 rounded-lg border border-gray-800 p-4 max-h-96 overflow-y-auto space-y-2">
-          {liveEvents.length === 0 ? (
-            <p className="text-gray-500 text-sm">Waiting for events...</p>
-          ) : (
-            liveEvents.map((event, i) => (
-              <div key={i} className="text-sm font-mono">
-                {event.type === 'status_change' && (
-                  <span className="text-blue-400">[{event.status}] {event.message}</span>
-                )}
-                {event.type === 'log' && (
-                  <span className={event.level === 'error' ? 'text-red-400' : event.level === 'warn' ? 'text-yellow-400' : 'text-gray-400'}>
-                    [{event.level}] {event.message}
-                  </span>
-                )}
-                {event.type === 'task_complete' && (
-                  <span className={event.success ? 'text-green-400' : 'text-red-400'}>
-                    [complete] {event.summary}
-                  </span>
-                )}
-                {event.type === 'attempt_start' && (
-                  <span className="text-purple-400">
-                    [coding] Starting attempt #{event.attemptNum} with {event.agentId}
-                  </span>
-                )}
-                {event.type === 'attempt_complete' && (
-                  <span className={event.success ? 'text-green-400' : 'text-red-400'}>
-                    [attempt] #{event.attemptNum} {event.success ? 'succeeded' : 'failed'}
-                    {event.error ? `: ${event.error}` : ''}
-                  </span>
-                )}
-                {event.type === 'verification_result' && (
-                  <span className={event.status === 'pass' ? 'text-green-400' : event.status === 'fail' ? 'text-red-400' : 'text-gray-500'}>
-                    [{event.status === 'pass' ? '✓' : event.status === 'fail' ? '✗' : '○'}] {event.detail}
-                  </span>
-                )}
-                {event.type === 'screenshot' && (
-                  <span className="text-cyan-400">
-                    [📸] Screenshot captured for {event.checkId}
-                  </span>
-                )}
-                {event.type === 'escalation' && (
-                  <span className="text-red-400">
-                    [⚠] Task escalated — see report below
-                  </span>
-                )}
-                {event.type === 'cycle_start' && (
-                  <span className="text-amber-400">
-                    [cycle] Starting cycle {event.cycleNum}/{event.totalCycles}
-                  </span>
-                )}
-                {event.type === 'cycle_complete' && (
-                  <span className={event.success ? 'text-green-400' : 'text-yellow-400'}>
-                    [cycle] Cycle {event.cycleNum} {event.success ? 'completed' : 'failed'}: {event.summary}
-                  </span>
-                )}
-                {event.type === 'auto_cycle_complete' && (
-                  <span className="text-amber-300">
-                    [auto-cycle] {event.summary}
-                  </span>
-                )}
-                {event.type === 'cost_update' && (
-                  <span className="text-emerald-400">
-                    [💰] ${((event as any).costUsd ?? 0).toFixed(4)} (total: ${((event as any).totalCostUsd ?? 0).toFixed(4)}) — {(event as any).agentId}
-                  </span>
-                )}
-                {!['status_change', 'log', 'task_complete', 'attempt_start', 'attempt_complete', 'verification_result', 'screenshot', 'escalation', 'cycle_start', 'cycle_complete', 'auto_cycle_complete', 'cost_update', 'interview_questions'].includes(event.type) && (
-                  <span className="text-gray-500">[{event.type}] {JSON.stringify(event)}</span>
-                )}
-              </div>
-            ))
-          )}
-        </div>
-      </section>
-
-      <section className="mb-6">
-        <h2 className="text-lg font-semibold mb-3">Verification Results</h2>
-        <div className="bg-gray-900 rounded-lg border border-gray-800 p-4 space-y-2">
-          {verificationResults.length === 0 ? (
-            <p className="text-gray-500 text-sm">No verification results yet.</p>
-          ) : (
-            verificationResults.map((vr, i) => (
-              <div key={i} className="flex items-start gap-3 p-2 rounded-lg bg-gray-800/50">
-                <span className={`mt-0.5 text-sm ${vr.status === 'pass' ? 'text-green-400' : vr.status === 'fail' ? 'text-red-400' : 'text-gray-500'}`}>
-                  {vr.status === 'pass' ? '\u2713' : vr.status === 'fail' ? '\u2717' : '\u25CB'}
-                </span>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm text-gray-200">{vr.detail}</p>
-                  <p className="text-xs text-gray-500 mt-0.5">{vr.checkId}</p>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      </section>
-
-      {task.attempts && task.attempts.length > 0 && (
-        <section className="mb-6">
-          <h2 className="text-lg font-semibold mb-3">Attempts ({task.attempts.length})</h2>
-          <div className="space-y-3">
-            {task.attempts.map((attempt: any, i: number) => (
-              <div key={i} className="bg-gray-900 rounded-lg border border-gray-800 p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2">
-                    <span className={`w-2 h-2 rounded-full ${attempt.status === 'success' ? 'bg-green-400' : 'bg-red-400'}`} />
-                    <span className="text-sm font-medium text-gray-200">
-                      Attempt #{attempt.attemptNum} — {attempt.agentId}
-                    </span>
-                    <span className={`text-xs px-1.5 py-0.5 rounded ${attempt.status === 'success' ? 'bg-green-900/50 text-green-400' : 'bg-red-900/50 text-red-400'}`}>
-                      {attempt.status}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-3 text-xs text-gray-500">
-                    {attempt.costUsd && <span>${Number(attempt.costUsd).toFixed(4)}</span>}
-                    {attempt.durationMs && <span>{(attempt.durationMs / 1000).toFixed(1)}s</span>}
-                    {attempt.tokenCount && <span>{attempt.tokenCount.toLocaleString()} tokens</span>}
-                  </div>
-                </div>
-                {attempt.errorLog && (
-                  <pre className="text-xs text-red-400 bg-red-950/20 p-2 rounded mt-2 max-h-24 overflow-y-auto whitespace-pre-wrap">
-                    {attempt.errorLog.slice(0, 500)}
-                  </pre>
-                )}
-                {attempt.verifications && attempt.verifications.length > 0 && (
-                  <div className="mt-2 pt-2 border-t border-gray-800">
-                    <p className="text-xs text-gray-500 mb-1">Verification ({attempt.verifications.filter((v: any) => v.status === 'pass').length}/{attempt.verifications.length} passed)</p>
-                    <div className="flex flex-wrap gap-1">
-                      {attempt.verifications.map((v: any, vi: number) => (
-                        <span key={vi} className={`text-xs px-1.5 py-0.5 rounded ${v.status === 'pass' ? 'bg-green-900/30 text-green-400' : v.status === 'fail' ? 'bg-red-900/30 text-red-400' : 'bg-gray-800 text-gray-500'}`}>
-                          {v.status === 'pass' ? '✓' : v.status === 'fail' ? '✗' : '○'} {v.checkId}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {escalationReport && (
-        <section className="mb-6">
-          <h2 className="text-lg font-semibold mb-3 text-red-400">Escalation Report</h2>
-          <div className="bg-red-950/30 rounded-lg border border-red-900/50 p-4">
-            <pre className="text-sm text-gray-300 whitespace-pre-wrap font-mono">{escalationReport}</pre>
-          </div>
-        </section>
-      )}
-
-      {projectTasks.length > 0 && (
-        <section className="mb-6">
-          <h2 className="text-lg font-semibold mb-3">Project History</h2>
-          <div className="space-y-2">
-            {projectTasks.map((pt) => (
-              <Link
-                key={pt.id}
-                href={`/tasks/${pt.id}`}
-                className="block p-3 bg-gray-900 rounded-lg border border-gray-800 hover:border-gray-600 transition-colors"
-              >
-                <div className="flex items-center justify-between">
-                  <p className="text-sm text-gray-300 truncate flex-1 mr-3">{pt.prompt}</p>
-                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                    pt.status === 'completed' ? 'bg-green-900 text-green-300' :
-                    pt.status === 'failed' ? 'bg-red-900 text-red-300' :
-                    'bg-gray-700 text-gray-300'
-                  }`}>
-                    {pt.status}
-                  </span>
-                </div>
-                <p className="text-xs text-gray-500 mt-1">{new Date(pt.createdAt).toLocaleString()}</p>
-              </Link>
-            ))}
-          </div>
-        </section>
-      )}
-
-      <section>
-        <h2 className="text-lg font-semibold mb-3">Screenshots</h2>
-        <div className="bg-gray-900 rounded-lg border border-gray-800 p-4">
-          {screenshots.length === 0 ? (
-            <p className="text-gray-500 text-sm">No screenshots captured yet.</p>
-          ) : (
-            <div className="grid grid-cols-1 gap-4">
-              {screenshots.map((ss, i) => (
-                <div key={i} className="space-y-1">
-                  <p className="text-xs text-gray-400">Check: {ss.checkId}</p>
-                  <img
-                    src={`/api/screenshots/${encodeURIComponent(ss.path)}`}
-                    alt={`Screenshot for ${ss.checkId}`}
-                    className="w-full rounded-lg border border-gray-700"
-                  />
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function DiffViewer({
-  fileDiff, mode, fallbackContent, onLoadFallback,
-}: {
-  fileDiff: any;
-  mode: 'unified' | 'split';
-  fallbackContent?: string;
-  onLoadFallback?: () => void;
-}) {
-  if (!fileDiff || fileDiff.hunks.length === 0) {
-    if (onLoadFallback && !fallbackContent) onLoadFallback();
-    return fallbackContent ? (
-      <div className="rounded-lg border border-gray-700 overflow-hidden">
-        <div className="px-3 py-1.5 bg-gray-800 border-b border-gray-700 text-xs text-gray-400">No diff — current content</div>
-        <pre className="p-3 text-xs text-gray-300 overflow-x-auto max-h-96 bg-gray-950"><code>{fallbackContent}</code></pre>
-      </div>
-    ) : null;
-  }
-  if (mode === 'split') return <SplitDiff fileDiff={fileDiff} />;
-  return <UnifiedDiff fileDiff={fileDiff} />;
-}
-
-function UnifiedDiff({ fileDiff }: { fileDiff: any }) {
-  return (
-    <div className="rounded-lg border border-gray-700 overflow-hidden">
-      <div className="flex items-center justify-between px-3 py-1.5 bg-gray-800 border-b border-gray-700">
-        <span className="text-xs text-gray-400 font-mono">{fileDiff.path}</span>
-        <span className="text-xs"><span className="text-green-400">+{fileDiff.additions}</span> <span className="text-red-400">-{fileDiff.deletions}</span></span>
-      </div>
-      <div className="overflow-x-auto max-h-[500px] overflow-y-auto bg-gray-950">
-        {fileDiff.hunks.map((hunk: any, hi: number) => (
-          <div key={hi}>
-            <div className="px-3 py-1 text-xs text-blue-400 bg-blue-900/20 font-mono">{hunk.header}</div>
-            {hunk.lines.map((line: any, li: number) => (
-              <div key={li} className={`px-3 font-mono text-xs leading-5 whitespace-pre ${
-                line.type === 'add' ? 'bg-green-900/20 text-green-300' :
-                line.type === 'remove' ? 'bg-red-900/20 text-red-300' : 'text-gray-400'
-              }`}>
-                <span className="inline-block w-8 text-right text-gray-600 mr-2 select-none">
-                  {line.type === 'remove' ? line.oldLine : line.type === 'add' ? line.newLine : line.oldLine}
-                </span>
-                <span className="inline-block w-3 text-center select-none">
-                  {line.type === 'add' ? '+' : line.type === 'remove' ? '-' : ' '}
-                </span>
-                {line.content}
-              </div>
-            ))}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function SplitDiff({ fileDiff }: { fileDiff: any }) {
-  return (
-    <div className="rounded-lg border border-gray-700 overflow-hidden">
-      <div className="flex items-center justify-between px-3 py-1.5 bg-gray-800 border-b border-gray-700">
-        <span className="text-xs text-gray-400 font-mono">{fileDiff.path}</span>
-        <span className="text-xs"><span className="text-green-400">+{fileDiff.additions}</span> <span className="text-red-400">-{fileDiff.deletions}</span></span>
-      </div>
-      <div className="overflow-x-auto max-h-[500px] overflow-y-auto bg-gray-950">
-        {fileDiff.hunks.map((hunk: any, hi: number) => (
-          <div key={hi}>
-            <div className="px-3 py-1 text-xs text-blue-400 bg-blue-900/20 font-mono col-span-2">{hunk.header}</div>
-            <div className="grid grid-cols-2 divide-x divide-gray-800">
-              <div>
-                {hunk.lines.filter((l: any) => l.type !== 'add').map((line: any, li: number) => (
-                  <div key={li} className={`px-2 font-mono text-xs leading-5 whitespace-pre ${line.type === 'remove' ? 'bg-red-900/20 text-red-300' : 'text-gray-400'}`}>
-                    <span className="inline-block w-6 text-right text-gray-600 mr-1 select-none">{line.oldLine}</span>
-                    {line.content}
-                  </div>
-                ))}
-              </div>
-              <div>
-                {hunk.lines.filter((l: any) => l.type !== 'remove').map((line: any, li: number) => (
-                  <div key={li} className={`px-2 font-mono text-xs leading-5 whitespace-pre ${line.type === 'add' ? 'bg-green-900/20 text-green-300' : 'text-gray-400'}`}>
-                    <span className="inline-block w-6 text-right text-gray-600 mr-1 select-none">{line.newLine}</span>
-                    {line.content}
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        ))}
+        {/* Right panel — Sidebar */}
+        <Sidebar
+          task={task}
+          currentStatus={currentStatus}
+          planData={planData}
+          liveUsage={liveUsage}
+          editingPlan={editingPlan}
+          editedCodingPrompt={editedCodingPrompt}
+          planTab={planTab}
+          onSetEditingPlan={setEditingPlan}
+          onSetEditedCodingPrompt={setEditedCodingPrompt}
+          onSetPlanTab={setPlanTab}
+          onApprovePlan={handleApprovePlan}
+          onRejectPlan={handleRejectPlan}
+          interviewQuestions={interviewQuestions}
+          interviewAnswers={interviewAnswers}
+          submittingAnswers={submittingAnswers}
+          onSetInterviewAnswers={setInterviewAnswers}
+          onSubmitInterview={handleSubmitInterview}
+          onSkipInterview={handleSkipInterview}
+          attempts={task.attempts ?? []}
+          projectTasks={projectTasks}
+          parsedResult={parsedResult}
+          escalationReport={escalationReport}
+        />
       </div>
     </div>
   );
