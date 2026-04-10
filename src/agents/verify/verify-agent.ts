@@ -837,11 +837,21 @@ Example: {"passed":true,"score":85,"reason":"All features correct","issues":[],"
       } else if (this.llm === 'codex-cli') {
         const cliPath = await resolveCli('codex');
         if (!cliPath) throw new Error('Codex CLI not found');
-        // Codex has ~12K usable context — build a files-first prompt so truncation cuts instructions, not code
+        // Codex has ~12K usable context — files-first prompt with key context (total ≤11K)
+        const codexAcceptance = acFails && acFails.length > 0
+          ? `\nAcceptance FAIL (${acFails.length} item(s) — HARD requirements, verdict MUST be "re-code" if any fail): ${acFails.join('; ').slice(0, 400)}`
+          : evidence.hasAcceptanceCriteria ? '\nAcceptance: ALL PASSED' : '';
+        const codexPriorIssues = verifyFeedback
+          ? `\nPrior attempt #${verifyFeedback.attemptCount - 1} issues (${verifyFeedback.issues.length} total): ${verifyFeedback.issues.join('; ').slice(0, 400)}. Check if FIXED — do NOT re-report without evidence.`
+          : '';
+        const codexSast = sastFindings != null ? `\nSAST: ${sastFindings} finding(s).` : '';
+        const codexA11y = a11yViolations != null ? `\nA11y: ${a11yViolations} violation(s).` : '';
+        const codexContext = `${codexAcceptance}${codexPriorIssues}${codexSast}${codexA11y}`;
+
         const codexPrompt = `RESPOND WITH ONLY VALID JSON. No markdown, no explanation, no code fences.
 Required: {"passed":bool,"score":0-100,"reason":"...","issues":["..."],"suggestions":["..."],"verdict":"pass"|"re-code"|"re-plan"|"fail"}
 
-Files below may end with [--- END OF VISIBLE PORTION ---]. The rest exists on disk but was omitted for size. Do NOT report truncation, missing brackets, or incomplete files as issues.
+Files below may end with [--- END OF VISIBLE PORTION ---]. The rest exists on disk but was omitted for size. Do NOT report truncation as an issue.
 
 === FILES MODIFIED ===
 ${input.modifiedFiles.join(', ')}
@@ -849,10 +859,12 @@ ${input.modifiedFiles.join(', ')}
 === FILE CONTENTS ===
 ${fileContentsSection.slice(0, 8000)}
 
+=== CONTEXT ===
+${codexContext}
+
 === TASK ===
 Review this code for: 1) type errors 2) logic bugs 3) missing error handling 4) regressions 5) security issues.
 Original request: ${(input.originalPrompt ?? '').slice(0, 500)}
-${acceptanceSection ? acceptanceSection.slice(0, 500) : ''}
 
 Score 0-100. Be specific in issues. Respond ONLY with valid JSON.`;
         const controller = new AbortController();
@@ -888,7 +900,8 @@ Score 0-100. Be specific in issues. Respond ONLY with valid JSON.`;
       const parsed = extractJson<VerifyResult>(stdout, 'verdict');
 
       // Filter out truncation-related false positives from issues/suggestions
-      const truncationPattern = /truncat|incomplete.*file|cut\s*off|missing.*closing|missing.*bracket|syntactically\s*(invalid|incomplete)|abrupt.*end|file\s*ends?\s*(abruptly|prematurely)|not\s*fully\s*(shown|visible)|partial\s*file/i;
+      // Narrow filter: catch issues referencing our truncation markers or prompt-size truncation, but NOT legitimate code problems like "missing bracket" or "incomplete implementation"
+      const truncationPattern = /END OF VISIBLE PORTION|truncated for brevity|file was cut|only partial file shown|omitted from prompt for size|prompt (?:was )?(?:truncat|cut)|not fully (?:shown|visible|provided)|file (?:appears? |(?:is |was )?)(?:truncat|cut off)|(?:abrupt|premature)ly\b.{0,20}\b(?:end|truncat)/i;
       if (Array.isArray(parsed.issues)) {
         const before = parsed.issues.length;
         parsed.issues = parsed.issues.filter((issue: string) => !truncationPattern.test(issue));
