@@ -149,11 +149,81 @@ export function extractJson<T = any>(raw: string, requiredField?: string): T {
   }
   attempts.push('Stage 4: no valid JSON lines found');
 
+  // Stage 5: Regex fallback — extract verdict/score from natural language
+  if (requiredField === 'verdict') {
+    const verdictMatch = raw.match(/["']?verdict["']?\s*[:=]\s*["']?(pass|fail|re-code|re-plan)["']?/i);
+    const scoreMatch = raw.match(/["']?score["']?\s*[:=]\s*(\d+)/i);
+
+    if (verdictMatch || scoreMatch) {
+      const verdict = (verdictMatch?.[1]?.toLowerCase() ?? 'pass') as string;
+      const score = scoreMatch ? parseInt(scoreMatch[1], 10) : (verdict === 'pass' ? 70 : 40);
+      attempts.push(`Stage 5: regex extracted verdict=${verdict}, score=${score}`);
+      return {
+        passed: verdict === 'pass',
+        score: Math.min(score, 100),
+        reason: `Extracted via regex fallback from ${raw.length} char response`,
+        issues: extractListItems(raw, /issues?|problems?|bugs?/i),
+        suggestions: extractListItems(raw, /suggestions?|fix|recommend/i),
+        verdict,
+        evidence: {},
+      } as T;
+    }
+
+    // Sentiment fallback — detect positive/negative tone
+    const positivePatterns = /\b(pass|passes|passed|approved|looks good|no issues|all correct|well.?implemented|satisf)/i;
+    const negativePatterns = /\b(fail|fails|failed|reject|issues found|bugs? found|broken|incorrect|missing feature)/i;
+
+    if (positivePatterns.test(raw) || negativePatterns.test(raw)) {
+      const isPositive = positivePatterns.test(raw) && !negativePatterns.test(raw);
+      attempts.push(`Stage 5: sentiment fallback (${isPositive ? 'positive' : 'negative'})`);
+      return {
+        passed: isPositive,
+        score: isPositive ? 70 : 40,
+        reason: `Sentiment analysis fallback from ${raw.length} char response`,
+        issues: isPositive ? [] : extractListItems(raw, /issues?|problems?|bugs?/i),
+        suggestions: extractListItems(raw, /suggestions?|fix|recommend/i),
+        verdict: isPositive ? 'pass' : 're-code',
+        evidence: {},
+      } as T;
+    }
+
+    attempts.push('Stage 5: no verdict/score patterns or sentiment found');
+  }
+
   throw new Error(
     `Failed to extract JSON from CLI output (${raw.length} chars).\n` +
     `Attempts:\n${attempts.map((a, i) => `  ${i + 1}. ${a}`).join('\n')}\n` +
     `Raw output (first 500 chars):\n${raw.slice(0, 500)}`
   );
+}
+
+/**
+ * Extract list items near a section header pattern.
+ * Looks for numbered/bulleted items after a header matching the pattern.
+ */
+function extractListItems(text: string, headerPattern: RegExp): string[] {
+  const items: string[] = [];
+  const lines = text.split('\n');
+  let capturing = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (headerPattern.test(trimmed) && (trimmed.includes(':') || trimmed.startsWith('#'))) {
+      capturing = true;
+      continue;
+    }
+    if (capturing) {
+      // Numbered or bulleted list item
+      const match = trimmed.match(/^[\d]+[.)]\s*(.+)|^[-*•]\s*(.+)/);
+      if (match) {
+        items.push((match[1] ?? match[2]).trim());
+      } else if (trimmed === '' || trimmed.startsWith('#')) {
+        capturing = false; // End of section
+      }
+    }
+  }
+
+  return items.slice(0, 10); // Cap at 10 items
 }
 
 /**

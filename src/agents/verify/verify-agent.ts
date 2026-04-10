@@ -791,17 +791,23 @@ CRITICAL: Score 80+ ONLY if you have traced through the logic with concrete inpu
     let inputTokens = 0;
     let outputTokens = 0;
 
+    // JSON enforcement — prepend/append to ensure LLMs respond with pure JSON
+    const jsonEnforcement = `\n\nCRITICAL: Respond with ONLY a valid JSON object. NO markdown, NO explanation, NO code fences, NO text before or after the JSON.
+Required keys: passed (bool), score (0-100), reason (string), issues (string[]), suggestions (string[]), verdict ("pass"|"re-code"|"re-plan"|"fail").
+Example: {"passed":true,"score":85,"reason":"All features correct","issues":[],"suggestions":[],"verdict":"pass"}`;
+
     try {
       const ex = await getExeca();
 
       if (this.llm === 'claude-cli') {
         const cliPath = await resolveCli('claude');
         if (!cliPath) throw new Error('Claude CLI not found');
+        const claudePrompt = verifyPrompt + jsonEnforcement;
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), 120_000);
         try {
           const result = await ex(cliPath, [
-            '-p', verifyPrompt,
+            '-p', claudePrompt,
             '--output-format', 'text',
             '--max-turns', '2',
             '--dangerously-skip-permissions',
@@ -813,13 +819,13 @@ CRITICAL: Score 80+ ONLY if you have traced through the logic with concrete inpu
       } else if (this.llm === 'gemini-cli') {
         const cliPath = await resolveCli('gemini');
         if (!cliPath) throw new Error('Gemini CLI not found');
-        const truncatedPrompt = verifyPrompt.length > 40000 ? verifyPrompt.slice(0, 40000) + '\n...[prompt truncated]' : verifyPrompt;
-        // Gemini CLI indexes the cwd — use /tmp to avoid hang on large projects
-        // AbortController enforces timeout even when reject: false
+        const geminiPrompt = (verifyPrompt.length > 40000
+          ? verifyPrompt.slice(0, 39500) + '\n...[prompt truncated]'
+          : verifyPrompt) + jsonEnforcement;
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), 120_000);
         try {
-          const result = await ex(cliPath, ['-p', truncatedPrompt], {
+          const result = await ex(cliPath, ['-p', geminiPrompt], {
             cwd: '/tmp', reject: false, timeout: 120_000,
             cancelSignal: controller.signal,
           } as any);
@@ -830,12 +836,15 @@ CRITICAL: Score 80+ ONLY if you have traced through the logic with concrete inpu
       } else if (this.llm === 'codex-cli') {
         const cliPath = await resolveCli('codex');
         if (!cliPath) throw new Error('Codex CLI not found');
+        // Codex has 12K char limit — prepend JSON instruction so it survives truncation
+        const codexJsonPrefix = `RESPOND WITH ONLY VALID JSON. No markdown, no explanation, no code fences.\nRequired keys: passed (bool), score (0-100), reason (string), issues (string[]), suggestions (string[]), verdict ("pass"|"re-code"|"re-plan"|"fail").\n\n`;
+        const codexPrompt = codexJsonPrefix + verifyPrompt.slice(0, 11000) + jsonEnforcement;
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), 120_000);
         try {
           const result = await ex(cliPath, [
             'exec', '--full-auto', '--sandbox', 'workspace-write', '--json',
-            verifyPrompt.slice(0, 12000),
+            codexPrompt,
           ], { cwd: input.projectDir, reject: false, timeout: 120_000, cancelSignal: controller.signal } as any);
           stdout = (result as any).stdout ?? '';
         } finally {
