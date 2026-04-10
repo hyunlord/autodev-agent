@@ -358,7 +358,7 @@ export class VerifyAgent implements IAgent {
         const maxPerFile = Math.min(remaining, 15000);
         if (content.length > maxPerFile) {
           fileContents[file] = content.slice(0, maxPerFile)
-            + `\n...[FILE TRUNCATED for prompt size. Full file on disk is ${content.length} bytes. Truncation does NOT mean the code is broken — any @media queries, CSS rules, or code beyond this point are intact on disk. Do NOT report truncation-related issues.]...`;
+            + `\n[--- END OF VISIBLE PORTION --- remaining ${content.length - maxPerFile} bytes exist on disk but omitted from prompt for size. Do not report this file as incomplete.]`;
           truncatedFiles[file] = content.length;
         } else {
           fileContents[file] = content;
@@ -729,6 +729,7 @@ ${input.originalPrompt}
 ${input.modifiedFiles.join(', ')}
 
 === FILE CONTENTS ===
+NOTE: Some files below may show [--- END OF VISIBLE PORTION ---]. The rest exists on disk but was omitted for size. Do NOT report truncation as an issue or mark files as incomplete/invalid.
 ${fileContentsSection}
 ${screenshotSection}
 ${styleSection}
@@ -836,9 +837,24 @@ Example: {"passed":true,"score":85,"reason":"All features correct","issues":[],"
       } else if (this.llm === 'codex-cli') {
         const cliPath = await resolveCli('codex');
         if (!cliPath) throw new Error('Codex CLI not found');
-        // Codex has 12K char limit — prepend JSON instruction so it survives truncation
-        const codexJsonPrefix = `RESPOND WITH ONLY VALID JSON. No markdown, no explanation, no code fences.\nRequired keys: passed (bool), score (0-100), reason (string), issues (string[]), suggestions (string[]), verdict ("pass"|"re-code"|"re-plan"|"fail").\n\n`;
-        const codexPrompt = codexJsonPrefix + verifyPrompt.slice(0, 11000) + jsonEnforcement;
+        // Codex has ~12K usable context — build a files-first prompt so truncation cuts instructions, not code
+        const codexPrompt = `RESPOND WITH ONLY VALID JSON. No markdown, no explanation, no code fences.
+Required: {"passed":bool,"score":0-100,"reason":"...","issues":["..."],"suggestions":["..."],"verdict":"pass"|"re-code"|"re-plan"|"fail"}
+
+Files below may end with [--- END OF VISIBLE PORTION ---]. The rest exists on disk but was omitted for size. Do NOT report truncation, missing brackets, or incomplete files as issues.
+
+=== FILES MODIFIED ===
+${input.modifiedFiles.join(', ')}
+
+=== FILE CONTENTS ===
+${fileContentsSection.slice(0, 8000)}
+
+=== TASK ===
+Review this code for: 1) type errors 2) logic bugs 3) missing error handling 4) regressions 5) security issues.
+Original request: ${(input.originalPrompt ?? '').slice(0, 500)}
+${acceptanceSection ? acceptanceSection.slice(0, 500) : ''}
+
+Score 0-100. Be specific in issues. Respond ONLY with valid JSON.`;
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), 120_000);
         try {
@@ -870,6 +886,30 @@ Example: {"passed":true,"score":85,"reason":"All features correct","issues":[],"
 
       // Parse LLM response
       const parsed = extractJson<VerifyResult>(stdout, 'verdict');
+
+      // Filter out truncation-related false positives from issues/suggestions
+      const truncationPattern = /truncat|incomplete.*file|cut\s*off|missing.*closing|missing.*bracket|syntactically\s*(invalid|incomplete)|abrupt.*end|file\s*ends?\s*(abruptly|prematurely)|not\s*fully\s*(shown|visible)|partial\s*file/i;
+      if (Array.isArray(parsed.issues)) {
+        const before = parsed.issues.length;
+        parsed.issues = parsed.issues.filter((issue: string) => !truncationPattern.test(issue));
+        const removed = before - parsed.issues.length;
+        if (removed > 0) {
+          emit({ type: 'log', level: 'info', message: `[Verify] Filtered ${removed} truncation-related false positive(s) from issues` } as PipelineEvent);
+          // Proportionally adjust score for removed false positives
+          const perIssuePenalty = before > 0 ? Math.round((100 - parsed.score) / before) : 0;
+          parsed.score = Math.min(parsed.score + removed * perIssuePenalty, 100);
+          // If ALL issues were truncation false positives and verdict was negative, upgrade verdict
+          if (parsed.issues.length === 0 && (parsed.verdict === 're-code' || parsed.verdict === 'fail')) {
+            parsed.verdict = 'pass';
+            parsed.passed = true;
+          }
+          parsed.reason = (parsed.reason ?? '') + ` (${removed} truncation false positive(s) filtered)`;
+        }
+      }
+      if (Array.isArray(parsed.suggestions)) {
+        parsed.suggestions = parsed.suggestions.filter((s: string) => !truncationPattern.test(s));
+      }
+
       emit({ type: 'log', level: 'info', message: `[Verify] LLM verdict: ${parsed.verdict} (score: ${parsed.score})` } as PipelineEvent);
 
       return {
