@@ -6,6 +6,9 @@ PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$PROJECT_DIR"
 
 echo "🔍 Verify mode: $MODE"
+if [ "$CI" = "true" ]; then
+  echo "🤖 CI mode — UI check와 Verify Agent 스킵 (브라우저/LLM CLI 없음)"
+fi
 echo ""
 
 # Score tracking
@@ -102,33 +105,38 @@ echo ""
 # ─── Step 4: UI Check (full/cross만, 15점) ────
 if [ "$MODE" = "full" ] || [ "$MODE" = "cross" ]; then
   echo "=== Step 4: UI Check ==="
-  pnpm dev > /dev/null 2>&1 &
-  DEV_PID=$!
-  sleep 6
-
-  UI_PASS=0
-  UI_TOTAL=0
-  for PAGE in "/" "/harness"; do
-    UI_TOTAL=$((UI_TOTAL + 1))
-    STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:3000${PAGE}" 2>/dev/null)
-    if [ "$STATUS" = "200" ]; then
-      echo "  ✅ ${PAGE} → ${STATUS}"
-      UI_PASS=$((UI_PASS + 1))
-    else
-      echo "  ❌ ${PAGE} → ${STATUS}"
-    fi
-  done
-
-  kill $DEV_PID 2>/dev/null
-  sleep 2
-  lsof -ti:3000 | xargs kill -9 2>/dev/null || true
-  sleep 1
-
-  if [ $UI_PASS -eq $UI_TOTAL ]; then
-    add_score "UI Pages" 15 15 "${UI_PASS}/${UI_TOTAL} OK"
+  if [ "$CI" = "true" ]; then
+    echo "  ⏭️  Skipping UI check in CI (no browser)"
+    add_score "UI Pages" 15 15 "skipped (CI)"
   else
-    PARTIAL=$((15 * UI_PASS / UI_TOTAL))
-    add_score "UI Pages" $PARTIAL 15 "${UI_PASS}/${UI_TOTAL} OK"
+    pnpm dev > /dev/null 2>&1 &
+    DEV_PID=$!
+    sleep 6
+
+    UI_PASS=0
+    UI_TOTAL=0
+    for PAGE in "/" "/harness"; do
+      UI_TOTAL=$((UI_TOTAL + 1))
+      STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:3000${PAGE}" 2>/dev/null)
+      if [ "$STATUS" = "200" ]; then
+        echo "  ✅ ${PAGE} → ${STATUS}"
+        UI_PASS=$((UI_PASS + 1))
+      else
+        echo "  ❌ ${PAGE} → ${STATUS}"
+      fi
+    done
+
+    kill $DEV_PID 2>/dev/null
+    sleep 2
+    lsof -ti:3000 | xargs kill -9 2>/dev/null || true
+    sleep 1
+
+    if [ $UI_PASS -eq $UI_TOTAL ]; then
+      add_score "UI Pages" 15 15 "${UI_PASS}/${UI_TOTAL} OK"
+    else
+      PARTIAL=$((15 * UI_PASS / UI_TOTAL))
+      add_score "UI Pages" $PARTIAL 15 "${UI_PASS}/${UI_TOTAL} OK"
+    fi
   fi
   echo ""
 fi
@@ -136,6 +144,11 @@ fi
 # ─── Step 5: Verify Agent Review (cross만, 15점) ──────
 if [ "$MODE" = "cross" ]; then
   echo "=== Step 5: Verify Agent Review (다른 LLM이 코드 리뷰) ==="
+
+  if [ "$CI" = "true" ]; then
+    echo "  ⏭️  Skipping Verify Agent in CI (no LLM CLI)"
+    add_score "Verify Agent" 10 15 "skipped (CI)"
+  else
 
   CHANGED=$(git diff HEAD~1 --name-only 2>/dev/null | head -20 || echo "")
 
@@ -169,6 +182,8 @@ if [ "$MODE" = "cross" ]; then
     add_score "Verify Agent" 15 15 "변경 없음"
     echo "  ✅ 변경된 파일 없음 (skip)"
   fi
+
+  fi  # end CI else
   echo ""
 fi
 

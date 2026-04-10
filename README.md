@@ -1,5 +1,7 @@
 # AutoDev Agent
 
+[![CI](https://github.com/hyunlord/autodev-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/hyunlord/autodev-agent/actions/workflows/ci.yml)
+
 Universal AI development orchestrator. Submit a goal in plain language → AutoDev plans, codes, and verifies automatically.
 
 ## Features
