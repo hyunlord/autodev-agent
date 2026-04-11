@@ -2,6 +2,7 @@ import { db } from '../lib/db/client';
 import { attempts } from '../lib/db/schema';
 import { nanoid } from 'nanoid';
 import { PluginRegistry } from '../lib/plugins/registry';
+import { selectAlternativeAgent } from '../lib/agent-selector';
 import { loadPrompt } from '../lib/harness/prompt-loader';
 import { RetryController } from './retry';
 import { executeVerification } from './pipeline-verify';
@@ -102,6 +103,7 @@ export async function executeCodingLoop(params: {
   let lastPassedChecks: Array<{ description: string }> = [];
   let lastVerdict = '';
   let lastIssues: string[] = [];
+  let consecutiveVerifyFails = 0; // J6: 연속 검증 실패 카운터
   let lastSuggestions: string[] = [];
 
   // ─── Parallel branch (H4): Plan에 subTasks가 있으면 병렬 실행 ───
@@ -516,6 +518,7 @@ ${currentPlan.codingPrompt}`;
     }
 
     if (verifyPhaseResult.allPassed) {
+      consecutiveVerifyFails = 0;
       return {
         success: true,
         lastModifiedFiles,
@@ -531,6 +534,31 @@ ${currentPlan.codingPrompt}`;
     // Verification failed — update state for retry
     lastFailedChecks = verifyPhaseResult.lastFailedChecks;
     lastPassedChecks = verifyPhaseResult.lastPassedChecks;
+    consecutiveVerifyFails++;
+
+    // J6: 연속 2회 검증 실패 시 에이전트 교체
+    if (consecutiveVerifyFails >= 2) {
+      const alt = await selectAlternativeAgent(agentId, [], _codeTaskCfg.costPreference);
+      if (alt) {
+        const fromAgent = agentId;
+        const failCount = consecutiveVerifyFails;
+        agent = alt.agent;
+        agentId = alt.agentId;
+        consecutiveVerifyFails = 0;
+        emit({
+          type: 'agent_switch',
+          fromAgent,
+          toAgent: agentId,
+          reason: `${failCount} consecutive verification failures`,
+          attemptNum: attempt,
+        });
+        emit({
+          type: 'log',
+          level: 'info',
+          message: `[J6] Agent switched: ${fromAgent} → ${agentId} (${failCount} consecutive verify failures)`,
+        });
+      }
+    }
 
     const failSummary = lastFailedChecks.map(c => c.description).join('; ');
     emit({ type: 'log', level: 'warn', message: `Attempt ${attempt} verification failed: ${failSummary}` });

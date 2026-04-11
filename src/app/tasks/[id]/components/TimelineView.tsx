@@ -207,9 +207,14 @@ export function TimelineView({
                     [cost] ${((event as any).costUsd ?? 0).toFixed(4)} — {(event as any).agentId}
                   </span>
                 )}
+                {event.type === 'agent_switch' && (
+                  <span className="text-orange-400">
+                    [switch] {(event as any).fromAgent} → {(event as any).toAgent} — {(event as any).reason}
+                  </span>
+                )}
                 {!['status_change', 'log', 'task_complete', 'attempt_start', 'attempt_complete',
                   'verification_result', 'screenshot', 'escalation', 'cycle_start', 'cycle_complete',
-                  'auto_cycle_complete', 'cost_update', 'interview_questions', 'plan_ready'].includes(event.type) && (
+                  'auto_cycle_complete', 'cost_update', 'interview_questions', 'plan_ready', 'agent_switch'].includes(event.type) && (
                   <span className="text-gray-600">[{event.type}] {JSON.stringify(event)}</span>
                 )}
               </div>

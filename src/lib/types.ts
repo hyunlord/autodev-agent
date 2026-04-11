@@ -18,4 +18,5 @@ export type PipelineEvent =
   | { type: 'cycle_complete'; cycleNum: number; success: boolean; summary: string }
   | { type: 'auto_cycle_complete'; totalCycles: number; summary: string }
   | { type: 'cost_update'; attemptNum: number; costUsd: number; totalCostUsd: number; inputTokens: number; outputTokens: number; agentId: string }
-  | { type: 'interview_questions'; questions: string[]; message: string };
+  | { type: 'interview_questions'; questions: string[]; message: string }
+  | { type: 'agent_switch'; fromAgent: string; toAgent: string; reason: string; attemptNum: number };

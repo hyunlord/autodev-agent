@@ -54,6 +54,64 @@ async function mergeWorktreeChanges(projectDir: string, branchName: string): Pro
   return modifiedFiles;
 }
 
+// ─── J5: DAG topological sort ────────────────────────────────
+
+/**
+ * Kahn's algorithm — SubTask[]를 DAG 레벨로 분할.
+ * 같은 레벨의 task는 동시 실행 가능 (Promise.all).
+ */
+export function topologicalLevels(subTasks: SubTask[]): SubTask[][] {
+  const taskMap = new Map(subTasks.map(t => [t.id, t]));
+  const inDegree = new Map<string, number>();
+  const dependents = new Map<string, string[]>();
+
+  for (const t of subTasks) {
+    inDegree.set(t.id, 0);
+    dependents.set(t.id, []);
+  }
+
+  for (const t of subTasks) {
+    for (const depId of t.dependsOn ?? []) {
+      if (taskMap.has(depId)) {
+        inDegree.set(t.id, (inDegree.get(t.id) ?? 0) + 1);
+        dependents.get(depId)!.push(t.id);
+      }
+    }
+  }
+
+  const levels: SubTask[][] = [];
+  let queue = subTasks.filter(t => (inDegree.get(t.id) ?? 0) === 0);
+
+  while (queue.length > 0) {
+    levels.push(queue);
+    const nextQueue: SubTask[] = [];
+    for (const t of queue) {
+      for (const childId of dependents.get(t.id) ?? []) {
+        const newDeg = (inDegree.get(childId) ?? 1) - 1;
+        inDegree.set(childId, newDeg);
+        if (newDeg === 0) {
+          nextQueue.push(taskMap.get(childId)!);
+        }
+      }
+    }
+    queue = nextQueue;
+  }
+
+  // Cycle detection: append orphaned tasks to final level
+  const placed = new Set(levels.flat().map(t => t.id));
+  const remaining = subTasks.filter(t => !placed.has(t.id));
+  if (remaining.length > 0) {
+    levels.push(remaining);
+  }
+
+  return levels;
+}
+
+/** DAG의 critical path 길이 (= 레벨 수) */
+export function criticalPathLength(subTasks: SubTask[]): number {
+  return topologicalLevels(subTasks).length;
+}
+
 // ─── J4: Diff Gate ───────────────────────────────────────────
 
 async function validateDiffGate(
@@ -106,9 +164,8 @@ export interface ParallelResult {
 }
 
 /**
- * 병렬로 여러 sub-task 실행.
- * 독립 sub-task는 Promise.all로 동시 실행, dependsOn이 있는 sub-task는
- * 의존 sub-task 완료 후 순차 실행.
+ * DAG 기반 병렬 sub-task 실행.
+ * topologicalLevels()로 레벨 분할 → 같은 레벨은 Promise.all 동시 실행.
  */
 export async function executeParallelCoding(params: {
   subTasks: SubTask[];
@@ -121,94 +178,72 @@ export async function executeParallelCoding(params: {
 }): Promise<ParallelResult[]> {
   const { subTasks, projectDir, systemPrompt, workspaceContext, emit, signal, costPreference } = params;
 
-  const independent = subTasks.filter((t) => !t.dependsOn || t.dependsOn.length === 0);
-  const dependent = subTasks.filter((t) => t.dependsOn && t.dependsOn.length > 0);
+  const levels = topologicalLevels(subTasks);
 
   emit({
     type: 'log',
     level: 'info',
-    message: `[Parallel] ${independent.length} independent + ${dependent.length} dependent sub-tasks`,
+    message: `[Parallel] DAG: ${levels.length} level(s), ${subTasks.length} sub-task(s), critical path: ${levels.length}`,
   } as PipelineEvent);
 
   const results: ParallelResult[] = [];
+  const completedIds = new Map<string, boolean>();
 
-  // Phase 1: 독립 sub-task 병렬 실행
-  if (independent.length > 0) {
+  for (let lvl = 0; lvl < levels.length; lvl++) {
+    const level = levels[lvl];
+
+    if (signal?.aborted) {
+      for (const t of level) {
+        results.push({
+          subTaskId: t.id, success: false, modifiedFiles: [], costUsd: 0,
+          inputTokens: 0, outputTokens: 0, text: 'Aborted', agentId: '', durationMs: 0,
+        });
+        completedIds.set(t.id, false);
+      }
+      continue;
+    }
+
+    // 의존성 실패한 task 필터
+    const runnable: SubTask[] = [];
+    for (const t of level) {
+      const deps = t.dependsOn ?? [];
+      const failedDeps = deps.filter(id => completedIds.has(id) && !completedIds.get(id));
+      const missingDeps = deps.filter(id => !completedIds.has(id));
+
+      if (failedDeps.length > 0 || missingDeps.length > 0) {
+        const reason = failedDeps.length > 0
+          ? `dependency failed: ${failedDeps.join(', ')}`
+          : `missing dependencies: ${missingDeps.join(', ')}`;
+        emit({ type: 'log', level: 'warn',
+          message: `[Parallel] Skipping ${t.id}: ${reason}` } as PipelineEvent);
+        results.push({
+          subTaskId: t.id, success: false, modifiedFiles: [], costUsd: 0,
+          inputTokens: 0, outputTokens: 0, text: `Skipped: ${reason}`, agentId: '', durationMs: 0,
+        });
+        completedIds.set(t.id, false);
+        continue;
+      }
+      runnable.push(t);
+    }
+
+    if (runnable.length === 0) continue;
+
     emit({
       type: 'log',
       level: 'info',
-      message: `[Parallel] Starting ${independent.length} sub-tasks in parallel...`,
+      message: `[Parallel] Level ${lvl + 1}/${levels.length}: ${runnable.length} task(s) in parallel`,
     } as PipelineEvent);
 
-    const parallelResults = await Promise.all(
-      independent.map((subTask) =>
-        executeSubTask(subTask, projectDir, systemPrompt, workspaceContext, emit, signal, costPreference),
+    const levelResults = await Promise.all(
+      runnable.map(t =>
+        executeSubTask(t, projectDir, systemPrompt, workspaceContext, emit, signal, costPreference),
       ),
     );
-    results.push(...parallelResults);
-  }
 
-  // Phase 2: 의존 sub-task 순차 실행
-  for (const subTask of dependent) {
-    if (signal?.aborted) {
-      emit({
-        type: 'log',
-        level: 'warn',
-        message: `[Parallel] Aborted before running ${subTask.id}`,
-      } as PipelineEvent);
-      results.push({
-        subTaskId: subTask.id,
-        success: false,
-        modifiedFiles: [],
-        costUsd: 0,
-        inputTokens: 0,
-        outputTokens: 0,
-        text: 'Aborted before execution',
-        agentId: '',
-        durationMs: 0,
-      });
-      continue;
+    for (const r of levelResults) {
+      results.push(r);
+      completedIds.set(r.subTaskId, r.success);
     }
-
-    const depResults = results.filter((r) => subTask.dependsOn?.includes(r.subTaskId));
-    const allDepsSuccess = depResults.length > 0 && depResults.every((r) => r.success);
-    const missingDeps = (subTask.dependsOn ?? []).filter(
-      (id) => !results.some((r) => r.subTaskId === id),
-    );
-
-    if (!allDepsSuccess || missingDeps.length > 0) {
-      const reason = missingDeps.length > 0
-        ? `missing dependencies: ${missingDeps.join(', ')}`
-        : `dependency failed`;
-      emit({
-        type: 'log',
-        level: 'warn',
-        message: `[Parallel] Skipping ${subTask.id}: ${reason}`,
-      } as PipelineEvent);
-      results.push({
-        subTaskId: subTask.id,
-        success: false,
-        modifiedFiles: [],
-        costUsd: 0,
-        inputTokens: 0,
-        outputTokens: 0,
-        text: `Skipped: ${reason}`,
-        agentId: '',
-        durationMs: 0,
-      });
-      continue;
-    }
-
-    const result = await executeSubTask(
-      subTask,
-      projectDir,
-      systemPrompt,
-      workspaceContext,
-      emit,
-      signal,
-      costPreference,
-    );
-    results.push(result);
   }
 
   return results;

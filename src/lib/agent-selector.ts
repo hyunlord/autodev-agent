@@ -74,3 +74,34 @@ export async function selectAgent(
 
   throw new Error('No coding agents available');
 }
+
+/**
+ * J6: 연속 실패 시 대체 에이전트 선택.
+ * failedAgentId와 excludeIds를 제외한 사용 가능한 에이전트 중 costPreference에 맞는 것을 반환.
+ */
+export async function selectAlternativeAgent(
+  failedAgentId: string,
+  excludeIds?: string[],
+  costPreference?: CostPreference,
+): Promise<{ agent: ICodingAgent; agentId: string } | null> {
+  const excluded = new Set([failedAgentId, ...(excludeIds ?? [])]);
+  const candidates: ICodingAgent[] = [];
+
+  for (const id of DEFAULT_AGENT_ORDER) {
+    if (excluded.has(id)) continue;
+    const agent = PluginRegistry.instance.getAgent(id);
+    if (agent && await agent.isAvailable()) {
+      candidates.push(agent);
+    }
+  }
+
+  if (candidates.length === 0) return null;
+
+  if (costPreference === 'cheap') {
+    candidates.sort((a, b) => (AGENT_COST_TIER[a.id] ?? 2) - (AGENT_COST_TIER[b.id] ?? 2));
+  } else if (costPreference === 'quality') {
+    candidates.sort((a, b) => (AGENT_COST_TIER[b.id] ?? 2) - (AGENT_COST_TIER[a.id] ?? 2));
+  }
+
+  return { agent: candidates[0], agentId: candidates[0].id };
+}
