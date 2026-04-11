@@ -223,3 +223,24 @@ echo "└────────────────────┴──�
 if [ "$GRADE" = "F" ]; then
   exit 1
 fi
+
+# ─── Save overall result for hooks (cross-result.json) ─────
+if [ "$MODE" = "cross" ]; then
+  RESULT_DIR="$HOME/.autodev"
+  mkdir -p "$RESULT_DIR"
+  COMMIT_HASH=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
+  TREE_HASH=$(git write-tree 2>/dev/null || echo "unknown")
+  python3 -c "
+import json, datetime
+json.dump({
+    'timestamp': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    'score': $TOTAL_SCORE,
+    'maxScore': $MAX_SCORE,
+    'percent': $PERCENT,
+    'grade': '$GRADE',
+    'mode': '$MODE',
+    'commitHash': '$COMMIT_HASH',
+    'treeHash': '$TREE_HASH',
+}, open('$RESULT_DIR/cross-result.json', 'w'), indent=2)
+" 2>/dev/null || true
+fi

@@ -15,6 +15,7 @@
     "verify:cross": "bash scripts/verify.sh cross",
     "verify:e2e": "bash scripts/e2e-test.sh",
     "verify:agent": "npx tsx scripts/verify-agent.ts",
+    "ship": "bash scripts/ship.sh",
     "hook:install": "bash scripts/install-hooks.sh install",
     "hook:uninstall": "bash scripts/install-hooks.sh uninstall",
     "db:generate": "drizzle-kit generate",

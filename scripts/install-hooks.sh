@@ -1,49 +1,82 @@
 #!/bin/bash
-# AutoDev Agent — pre-commit hook 설치/제거
+# AutoDev Agent — git hooks 설치/제거 (pre-commit + pre-push)
 #
 # 사용법:
-#   pnpm hook:install    — pre-commit hook 설치
-#   pnpm hook:uninstall  — pre-commit hook 제거
+#   pnpm hook:install    — 모든 hooks 설치
+#   pnpm hook:uninstall  — 모든 hooks 제거
 
 ACTION="${1:-install}"
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-HOOK_PATH="$PROJECT_DIR/.git/hooks/pre-commit"
-SOURCE_PATH="$PROJECT_DIR/scripts/pre-commit.sh"
+
+# HIGH #3: git worktree 호환 — .git/hooks 하드코딩 대신 git rev-parse 사용
+HOOKS_DIR=$(git -C "$PROJECT_DIR" rev-parse --git-path hooks 2>/dev/null)
+if [ -z "$HOOKS_DIR" ] || [ ! -d "$HOOKS_DIR" ]; then
+  # fallback
+  HOOKS_DIR="$PROJECT_DIR/.git/hooks"
+fi
+
+# hooks 디렉터리가 없으면 생성
+mkdir -p "$HOOKS_DIR"
+
+install_hook() {
+  local HOOK_NAME="$1"
+  local SOURCE="$PROJECT_DIR/scripts/${HOOK_NAME}.sh"
+  local TARGET="$HOOKS_DIR/$HOOK_NAME"
+
+  if [ ! -f "$SOURCE" ]; then
+    echo "⚠️  Source not found: $SOURCE (skipping $HOOK_NAME)"
+    return 1
+  fi
+
+  if [ -f "$TARGET" ]; then
+    echo "⚠️  $HOOK_NAME hook already exists. Backing up to ${HOOK_NAME}.bak"
+    cp "$TARGET" "$TARGET.bak"
+  fi
+
+  cp "$SOURCE" "$TARGET"
+  chmod +x "$TARGET"
+  echo "✅ $HOOK_NAME hook installed → $TARGET"
+  return 0
+}
+
+uninstall_hook() {
+  local HOOK_NAME="$1"
+  local TARGET="$HOOKS_DIR/$HOOK_NAME"
+
+  if [ -f "$TARGET" ]; then
+    rm "$TARGET"
+    echo "✅ $HOOK_NAME hook removed"
+    if [ -f "$TARGET.bak" ]; then
+      mv "$TARGET.bak" "$TARGET"
+      echo "   Previous $HOOK_NAME hook restored from backup"
+    fi
+  else
+    echo "No $HOOK_NAME hook to remove"
+  fi
+}
 
 case "$ACTION" in
   install)
-    if [ ! -f "$SOURCE_PATH" ]; then
-      echo "❌ Source not found: $SOURCE_PATH"
-      exit 1
-    fi
+    INSTALLED=0
+    install_hook "pre-commit" && INSTALLED=$((INSTALLED + 1))
+    install_hook "pre-push"   && INSTALLED=$((INSTALLED + 1))
 
-    if [ -f "$HOOK_PATH" ]; then
-      echo "⚠️  pre-commit hook already exists. Backing up to pre-commit.bak"
-      cp "$HOOK_PATH" "$HOOK_PATH.bak"
-    fi
-
-    cp "$SOURCE_PATH" "$HOOK_PATH"
-    chmod +x "$HOOK_PATH"
-
-    echo "✅ pre-commit hook installed"
     echo ""
-    echo "   Build + TypeScript check will run on every commit."
-    echo "   Skip with:               git commit --no-verify"
-    echo "   Enable Verify Agent:     AUTODEV_PRECOMMIT_VERIFY=1 git commit"
-    echo "   Block on Verify failure: AUTODEV_PRECOMMIT_VERIFY_STRICT=1 git commit"
+    echo "━━━ $INSTALLED hook(s) installed ━━━"
+    echo ""
+    echo "What's enforced:"
+    echo "  pre-commit  → Build + TS check + verify:cross PASS 필수"
+    echo "  pre-push    → verify:cross verdict + HEAD commit 재확인"
+    echo ""
+    echo "Recommended workflow:"
+    echo "  pnpm ship \"commit message\"  — verify:cross → commit → push 한 번에"
+    echo ""
+    echo "Emergency skip:  git commit --no-verify / git push --no-verify"
     ;;
 
   uninstall)
-    if [ -f "$HOOK_PATH" ]; then
-      rm "$HOOK_PATH"
-      echo "✅ pre-commit hook removed"
-      if [ -f "$HOOK_PATH.bak" ]; then
-        mv "$HOOK_PATH.bak" "$HOOK_PATH"
-        echo "   Previous hook restored from backup"
-      fi
-    else
-      echo "No pre-commit hook to remove"
-    fi
+    uninstall_hook "pre-commit"
+    uninstall_hook "pre-push"
     ;;
 
   *)
