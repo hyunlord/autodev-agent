@@ -1,12 +1,15 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import { MermaidDiagram } from './MermaidDiagram';
 import { VlmCard } from './VlmCard';
 import { planToMermaid } from '@/lib/utils/plan-to-mermaid';
 import type { PlanData, ScreenshotData, VerificationResult } from './types';
 
 const DagView = dynamic(() => import('./DagView'), { ssr: false });
+const MermaidDiagram = dynamic(() => import('./MermaidDiagram'), {
+  ssr: false,
+  loading: () => <div className="text-gray-600 text-sm p-4">Loading diagram...</div>,
+});
 
 interface Props {
   planData: PlanData | null;

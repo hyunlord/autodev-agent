@@ -6,7 +6,7 @@ interface Props {
   chart: string;
 }
 
-export function MermaidDiagram({ chart }: Props) {
+export default function MermaidDiagram({ chart }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [rendered, setRendered] = useState(false);
 

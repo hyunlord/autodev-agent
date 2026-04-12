@@ -11,7 +11,19 @@ export async function GET(req: Request) {
   const offset = parseInt(url.searchParams.get('offset') ?? '0', 10);
   const projectDir = url.searchParams.get('projectDir');
 
-  const result = await db.select().from(tasks)
+  const result = await db.select({
+    id: tasks.id,
+    prompt: tasks.prompt,
+    status: tasks.status,
+    agentId: tasks.agentId,
+    projectDir: tasks.projectDir,
+    executionMode: tasks.executionMode,
+    cycleCount: tasks.cycleCount,
+    maxCycles: tasks.maxCycles,
+    parentTaskId: tasks.parentTaskId,
+    createdAt: tasks.createdAt,
+    updatedAt: tasks.updatedAt,
+  }).from(tasks)
     .where(projectDir ? eq(tasks.projectDir, projectDir) : undefined)
     .orderBy(desc(tasks.createdAt))
     .limit(limit)

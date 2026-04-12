@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, real } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, real, index } from 'drizzle-orm/sqlite-core';
 
 export const tasks = sqliteTable('tasks', {
   id:          text('id').primaryKey(),
@@ -26,7 +26,11 @@ export const tasks = sqliteTable('tasks', {
   parentTaskId: text('parent_task_id'),
   createdAt:   text('created_at').notNull(),
   updatedAt:   text('updated_at').notNull(),
-});
+}, (table) => [
+  index('idx_tasks_status').on(table.status),
+  index('idx_tasks_created_at').on(table.createdAt),
+  index('idx_tasks_project_dir').on(table.projectDir),
+]);
 
 export const attempts = sqliteTable('attempts', {
   id:          text('id').primaryKey(),
@@ -44,7 +48,9 @@ export const attempts = sqliteTable('attempts', {
   durationMs:  integer('duration_ms'),
   promptVersions: text('prompt_versions'),  // JSON: { planner: "a3b2c1d4", coder: "e5f6g7h8", ... }
   createdAt:   text('created_at').notNull(),
-});
+}, (table) => [
+  index('idx_attempts_task_id').on(table.taskId),
+]);
 
 export const verifications = sqliteTable('verifications', {
   id:             text('id').primaryKey(),
@@ -67,4 +73,7 @@ export const events = sqliteTable('events', {
   type:      text('type').notNull(),
   data:      text('data', { mode: 'json' }),
   createdAt: text('created_at').notNull(),
-});
+}, (table) => [
+  index('idx_events_task_id').on(table.taskId),
+  index('idx_events_created_at').on(table.createdAt),
+]);

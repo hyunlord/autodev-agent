@@ -3,9 +3,14 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import dynamic from 'next/dynamic';
 import { CostBreakdown } from './CostBreakdown';
-import { MermaidDiagram } from './MermaidDiagram';
 import { planToMermaid } from '@/lib/utils/plan-to-mermaid';
+
+const MermaidDiagram = dynamic(() => import('./MermaidDiagram'), {
+  ssr: false,
+  loading: () => <div className="text-gray-600 text-sm p-4">Loading diagram...</div>,
+});
 import type { TaskDetail, PlanData, LiveUsage, CycleInfo } from './types';
 
 interface Props {

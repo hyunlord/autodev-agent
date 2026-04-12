@@ -6,6 +6,6 @@ export { Sidebar } from './Sidebar';
 export { StageNode } from './StageNode';
 export { VlmCard } from './VlmCard';
 export { CostBreakdown } from './CostBreakdown';
-export { MermaidDiagram } from './MermaidDiagram';
+export { default as MermaidDiagram } from './MermaidDiagram';
 export { DiffViewer } from './DiffViewer';
 export * from './types';

@@ -4,10 +4,20 @@ import { homedir } from 'os';
 import { loadPrompt, loadMcpConfig, type PromptRole } from '@/lib/harness/prompt-loader';
 import { NextResponse } from 'next/server';
 
+// In-memory cache with 5s TTL for harness config
+let harnessCache: { data: unknown; key: string; expiry: number } | null = null;
+const HARNESS_CACHE_TTL = 5000;
+
 // GET — load all harness files
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const projectDir = url.searchParams.get('projectDir') ?? undefined;
+  const cacheKey = projectDir ?? '__global__';
+  const now = Date.now();
+
+  if (harnessCache && harnessCache.key === cacheKey && now < harnessCache.expiry) {
+    return NextResponse.json(harnessCache.data);
+  }
 
   const roles: PromptRole[] = ['planner', 'coder', 'verifier', 'evaluator'];
 
@@ -22,12 +32,16 @@ export async function GET(req: Request) {
   });
 
   const mcpConfig = loadMcpConfig(projectDir);
+  const data = { agents, mcpConfig };
 
-  return NextResponse.json({ agents, mcpConfig });
+  harnessCache = { data, key: cacheKey, expiry: now + HARNESS_CACHE_TTL };
+
+  return NextResponse.json(data);
 }
 
-// POST — save a harness file
+// POST — save a harness file (invalidates cache)
 export async function POST(req: Request) {
+  harnessCache = null;
   const body = await req.json();
   const { type, role, content, scope } = body;
 
@@ -67,8 +81,9 @@ export async function POST(req: Request) {
   return NextResponse.json({ error: 'Unknown type' }, { status: 400 });
 }
 
-// DELETE — reset a harness file (delete override, fall back to default)
+// DELETE — reset a harness file (delete override, fall back to default; invalidates cache)
 export async function DELETE(req: Request) {
+  harnessCache = null;
   const url = new URL(req.url);
   const role = url.searchParams.get('role');
   const scope = url.searchParams.get('scope') ?? 'global';
