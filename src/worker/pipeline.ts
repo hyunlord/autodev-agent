@@ -17,6 +17,7 @@ import { ProgressDetector } from '../lib/safety/progress-detector';
 import { HookEngine } from '../lib/hooks/hook-engine';
 import { collectInstructions, mergeInstructions } from '../lib/harness/instruction-loader';
 import { type EmitFn, type SingleCycleResult, checkAbort } from './pipeline-types';
+import { Blackboard } from '../lib/blackboard';
 
 export async function runPipeline(taskId: string, rawEmit: EmitFn, signal?: AbortSignal): Promise<void> {
   // Wrap emit to persist all events to DB for later retrieval
@@ -217,7 +218,11 @@ Use this context to continue the work. The current task builds upon the previous
       }
     }
 
-    // ─── 3. Determine execution mode ─────────────────────
+    // ─── 3. Shared Blackboard (J7) ────────────────────────
+    const blackboard = new Blackboard();
+    emit({ type: 'log', level: 'info', message: '[Blackboard] Initialized for pipeline' });
+
+    // ─── 4. Determine execution mode ─────────────────────
     const executionMode = (task as any).executionMode ?? 'single';
     const maxCycles = (task as any).maxCycles ?? 10;
 
@@ -287,6 +292,55 @@ Use this context to continue the work. The current task builds upon the previous
 
       emit({ type: 'interview_questions', questions, message: 'Please answer these questions to help plan your task.' });
       emit({ type: 'log', level: 'info', message: `Generated ${questions.length} interview questions. Waiting for answers...` });
+      return;
+    } else if (executionMode === 'arena') {
+      // ─── Arena mode: multiple agents compete ────────────
+      emit({ type: 'log', level: 'info', message: '[Pipeline] Arena mode — multiple agents competing' });
+      const { executePlanning } = await import('./pipeline-planning');
+      const hookEngine = new HookEngine();
+      await hookEngine.load(projectDir);
+      const planningResult = await executePlanning({
+        taskId, projectDir, projectConfig, workspaceContext, systemPrompt,
+        task, taskConfig, hookEngine, hookContextAccumulator: '', emit,
+      });
+      const plan = planningResult.planResult.plan;
+
+      blackboard.write('plan.summary', plan.summary, 'planning', 'public');
+      blackboard.write('plan.estimatedFiles', plan.estimatedFiles, 'planning', 'public');
+
+      const { executeArena } = await import('./pipeline-arena');
+      const arenaResult = await executeArena({
+        plan, projectDir, systemPrompt, workspaceContext, emit, signal,
+      });
+
+      if (arenaResult) {
+        const { winner, totalCost } = arenaResult;
+        blackboard.write('arena.winner', winner.agentId, 'arena', 'public');
+        blackboard.write('arena.totalCost', totalCost, 'arena', 'public');
+        emit({ type: 'log', level: 'info', message: `[Blackboard] ${blackboard.size} entries at arena end` });
+        updateTaskStatus(taskId, 'completed', {
+          summary: `Arena winner: ${winner.agentId}`,
+          modifiedFiles: winner.modifiedFiles,
+          costUsd: totalCost,
+          arenaResults: arenaResult.allResults.map(r => ({ agentId: r.agentId, success: r.success, costUsd: r.costUsd })),
+        });
+        emit({ type: 'task_complete', success: true,
+          summary: `Arena winner: ${winner.agentId} (cost: $${totalCost.toFixed(4)})` });
+      } else {
+        emit({ type: 'log', level: 'warn', message: '[Pipeline] Arena failed, falling back to single mode' });
+        // Fallback to single mode
+        const result = await runSingleCycle(
+          taskId, task, projectDir, projectConfig, workspaceContext,
+          systemPrompt, taskConfig, config, emit,
+          { projectHistory, codingMcpServers, codingMcpPrompt, verifyMcpPrompt, signal, mcpManager },
+        );
+        if (result.success) {
+          updateTaskStatus(taskId, 'completed', { summary: result.summary, modifiedFiles: result.modifiedFiles, costUsd: result.costUsd });
+          emit({ type: 'task_complete', success: true, summary: result.summary });
+        } else {
+          await escalate(taskId, task.prompt, result.summary, result.attemptRecords, result.failedChecks, result.modifiedFiles, result.costUsd, result.totalDurationMs, result.stopReason ?? 'arena_fallback_failed', emit, projectDir, hookEngine);
+        }
+      }
       return;
     } else {
       // Single mode: run once, handle completion/escalation
@@ -428,6 +482,11 @@ async function runSingleCycle(
   hookContextAccumulator = planningResult.hookContextAccumulator;
   const plan = planResult.plan;
   recordEvent(taskId, 'plan_complete', { summary: plan.summary, files: plan.estimatedFiles });
+
+  // ─── Blackboard: write planning results ────────────────
+  // Blackboard is pipeline-scoped; accessed via closure in runPipeline
+  // For now, we emit the data so downstream stages can reconstruct
+  emit({ type: 'log', level: 'info', message: `[Blackboard] Plan: ${plan.estimatedFiles.length} files, category: ${plan.taskCategory ?? 'unknown'}` });
 
   // ─── Agent Selection (from LLM recommendation) ────────
   const taskCategory = plan.taskCategory ?? 'unknown';

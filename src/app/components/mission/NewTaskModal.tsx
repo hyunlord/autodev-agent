@@ -26,7 +26,7 @@ export default function NewTaskModal({ onClose, onCreated, initialProjectDir, ch
   const [showPromptSettings, setShowPromptSettings] = useState(false);
   const [promptPreset, setPromptPreset] = useState('default');
   const [systemPrompt, setSystemPrompt] = useState('');
-  const [executionMode, setExecutionMode] = useState<'single' | 'auto-cycle' | 'interview'>('single');
+  const [executionMode, setExecutionMode] = useState<'single' | 'auto-cycle' | 'interview' | 'arena'>('single');
   const [maxCycles, setMaxCycles] = useState(10);
   const [costPref, setCostPref] = useState<'cheap' | 'balanced' | 'quality'>('balanced');
   const [harnessPreview, setHarnessPreview] = useState<Array<{ role: string; source: string }> | null>(null);
@@ -302,6 +302,10 @@ export default function NewTaskModal({ onClose, onCreated, initialProjectDir, ch
             <button type="button" onClick={() => setExecutionMode('interview')}
               className={`px-3 py-1 text-xs rounded-lg transition-colors ${executionMode === 'interview' ? 'bg-teal-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}>
               Interview
+            </button>
+            <button type="button" onClick={() => setExecutionMode('arena')}
+              className={`px-3 py-1 text-xs rounded-lg transition-colors ${executionMode === 'arena' ? 'bg-rose-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}>
+              Arena
             </button>
           </div>
           {executionMode === 'auto-cycle' && (

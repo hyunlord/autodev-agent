@@ -2,7 +2,7 @@ export type TaskStatus = 'pending' | 'planning' | 'plan_review' | 'coding' | 've
 
 export type PlanningMode = 'claude-cli' | 'gemini-cli' | 'codex-cli' | 'api' | 'manual' | 'debate' | 'auto';
 
-export type ExecutionMode = 'single' | 'auto-cycle' | 'interview';
+export type ExecutionMode = 'single' | 'auto-cycle' | 'interview' | 'arena';
 
 export type PipelineEvent =
   | { type: 'status_change'; status: TaskStatus; message: string }
