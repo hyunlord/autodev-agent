@@ -1,6 +1,6 @@
 import type { IAgent, AgentInput, AgentOutput, VerifyInput, VerifyResult } from '../interfaces';
 import { createPlaywrightTool } from './tools/playwright-verify';
-import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync, copyFileSync } from 'fs';
+import { existsSync, statSync, readFileSync, readdirSync, writeFileSync, mkdirSync, copyFileSync } from 'fs';
 import { join } from 'path';
 import { resolveCli } from '../../lib/cli-resolver';
 import { getExeca } from '../../lib/execa';
@@ -352,7 +352,7 @@ export class VerifyAgent implements IAgent {
     for (const file of input.modifiedFiles) {
       if (totalContentSize >= maxTotalContent) break;
       const fullPath = join(input.projectDir, file);
-      if (existsSync(fullPath)) {
+      if (existsSync(fullPath) && !statSync(fullPath).isDirectory()) {
         const content = readFileSync(fullPath, 'utf-8');
         const remaining = maxTotalContent - totalContentSize;
         const maxPerFile = Math.min(remaining, 15000);

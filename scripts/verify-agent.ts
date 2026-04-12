@@ -9,7 +9,7 @@
 
 import { VerifyAgent } from '../src/agents/verify/verify-agent';
 import { execSync } from 'child_process';
-import { existsSync, writeFileSync, mkdirSync } from 'fs';
+import { existsSync, statSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import type { PipelineEvent } from '../src/lib/types';
 
@@ -85,7 +85,10 @@ Be critical — your job is to find problems, not confirm the code works.`;
     originalPrompt: prompt,
     // TODO: 삭제된 파일도 리뷰 대상에 포함 (현재는 existsSync로 필터)
     // TODO: review 지시를 prompt 필드로 이동 (현재는 originalPrompt에 있음)
-    modifiedFiles: changedFiles.filter(f => existsSync(join(projectDir, f))),
+    modifiedFiles: changedFiles.filter(f => {
+      const fullPath = join(projectDir, f);
+      return existsSync(fullPath) && statSync(fullPath).isFile();
+    }),
     projectDir,
     tools: [],
     skipMechanical: true,
