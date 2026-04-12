@@ -1,9 +1,12 @@
 'use client';
 
+import dynamic from 'next/dynamic';
 import { MermaidDiagram } from './MermaidDiagram';
 import { VlmCard } from './VlmCard';
 import { planToMermaid } from '@/lib/utils/plan-to-mermaid';
 import type { PlanData, ScreenshotData, VerificationResult } from './types';
+
+const DagView = dynamic(() => import('./DagView'), { ssr: false });
 
 interface Props {
   planData: PlanData | null;
@@ -25,6 +28,14 @@ export function ArtifactView({ planData, screenshots, verificationResults, escal
 
   return (
     <div className="space-y-6">
+      {/* DAG view (sub-task dependencies) */}
+      {planData?.subTasks && planData.subTasks.length > 0 && (
+        <section>
+          <h3 className="text-xs text-gray-500 uppercase tracking-wider mb-2">Task Dependency Graph</h3>
+          <DagView subTasks={planData.subTasks} />
+        </section>
+      )}
+
       {/* Plan diagram */}
       {planData && (
         <section>

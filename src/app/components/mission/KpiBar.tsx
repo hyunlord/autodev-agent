@@ -22,7 +22,7 @@ function KpiCard({ label, value, sub }: { label: string; value: string | number;
 
 export default function KpiBar({ todayTotal, completedToday, successRate, totalCost, avgCost, avgScore, scoredTasks }: KpiBarProps) {
   return (
-    <div className="grid grid-cols-4 gap-3 px-5 py-4 border-t border-gray-800">
+    <div data-tour="kpi-bar" className="grid grid-cols-4 gap-3 px-5 py-4 border-t border-gray-800">
       <KpiCard
         label="Today's tasks"
         value={todayTotal}

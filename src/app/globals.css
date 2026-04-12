@@ -1,1 +1,58 @@
 @import "tailwindcss";
+
+/* L8: Focus indicator */
+*:focus-visible {
+  outline: 2px solid #6366f1;
+  outline-offset: 2px;
+}
+
+/* L8: Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* L8: High contrast */
+@media (prefers-contrast: more) {
+  :root {
+    --border-color: rgba(255, 255, 255, 0.3);
+  }
+}
+
+/* L8: Screen reader only */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+/* L9: driver.js dark theme */
+.autodev-tour-popover {
+  background: #1f2937 !important;
+  color: #e5e7eb !important;
+  border: 1px solid #374151 !important;
+}
+.autodev-tour-popover .driver-popover-title {
+  color: #f3f4f6 !important;
+  font-size: 14px !important;
+}
+.autodev-tour-popover .driver-popover-description {
+  color: #9ca3af !important;
+  font-size: 13px !important;
+}
+.autodev-tour-popover button {
+  background: #4f46e5 !important;
+  color: white !important;
+  border: none !important;
+  border-radius: 6px !important;
+}

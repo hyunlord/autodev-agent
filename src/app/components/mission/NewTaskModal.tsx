@@ -92,6 +92,9 @@ export default function NewTaskModal({ onClose, onCreated, initialProjectDir, ch
     <div className="fixed inset-0 z-50 flex items-start justify-center pt-[10vh]">
       <div className="absolute inset-0 bg-black/60" onClick={onClose} />
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Create new task"
         className="relative w-full max-w-2xl max-h-[80vh] overflow-y-auto bg-gray-900 rounded-xl border border-gray-700 shadow-2xl p-6"
         onClick={(e) => e.stopPropagation()}
       >

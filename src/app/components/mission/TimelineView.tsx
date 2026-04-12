@@ -55,6 +55,7 @@ export default function TimelineView({ tasks, events }: { tasks: Task[]; events:
       </div>
 
       {/* Task rows */}
+      <div aria-live="polite" aria-label="Pipeline events">
       {tasks.length === 0 ? (
         <p className="text-center text-gray-600 py-12">No tasks yet</p>
       ) : (
@@ -67,6 +68,7 @@ export default function TimelineView({ tasks, events }: { tasks: Task[]; events:
           />
         ))
       )}
+      </div>
 
       {/* Legend */}
       <div className="flex items-center gap-4 mt-4 pt-3 border-t border-gray-800">

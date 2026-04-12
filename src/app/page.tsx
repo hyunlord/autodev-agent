@@ -128,7 +128,7 @@ export default function MissionControl() {
 
       <div className="flex-1 p-5 overflow-x-auto">
         {view === 'kanban' && <KanbanView tasks={tasks} />}
-        {view === 'grid' && <GridView tasks={tasks} />}
+        {view === 'grid' && <GridView tasks={tasks} onNewTask={() => setShowNewTask(true)} />}
         {view === 'timeline' && <TimelineView tasks={tasks} events={taskEvents} />}
       </div>
 

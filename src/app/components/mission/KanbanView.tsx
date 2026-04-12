@@ -27,7 +27,7 @@ export default function KanbanView({ tasks }: { tasks: Task[] }) {
       {KANBAN_COLUMNS.map((col) => {
         const colTasks = tasks.filter((t) => col.statuses.includes(t.status));
         return (
-          <div key={col.id}>
+          <div key={col.id} role="region" aria-label={`${col.label} tasks: ${colTasks.length}`}>
             <div className="flex items-center gap-2 mb-3">
               <span className={`w-2 h-2 rounded-full ${col.dotColor} ${col.pulse ? 'animate-pulse' : ''}`} />
               <span className={`text-xs font-medium ${col.textColor}`}>{col.label}</span>

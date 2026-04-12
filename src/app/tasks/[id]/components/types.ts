@@ -28,6 +28,15 @@ export interface PipelineEvent {
   [key: string]: any;
 }
 
+export interface SubTaskNode {
+  id: string;
+  description: string;
+  files: string[];
+  agent?: string;
+  dependsOn?: string[];
+  status?: 'pending' | 'running' | 'done' | 'failed';
+}
+
 export interface PlanData {
   summary: string;
   codingPrompt: string;
@@ -38,6 +47,7 @@ export interface PlanData {
   agentName?: string;
   agentId?: string;
   autoSelected?: boolean;
+  subTasks?: SubTaskNode[];
 }
 
 export interface LiveUsage {

@@ -87,10 +87,10 @@ export default function KanbanCard({ task, column }: KanbanCardProps) {
 
   return (
     <Link href={`/tasks/${task.id}`}>
-      <div className={`p-3 bg-gray-900 rounded-lg border ${getBorderColor(column)} hover:border-gray-600 transition-colors cursor-pointer ${column === 'done' ? 'opacity-70' : ''}`}>
+      <div role="article" aria-label={`Task: ${task.prompt.slice(0, 50)}`} className={`p-3 bg-gray-900 rounded-lg border ${getBorderColor(column)} hover:border-gray-600 transition-colors cursor-pointer ${column === 'done' ? 'opacity-70' : ''}`}>
         <div className="flex items-start justify-between gap-2 mb-1.5">
           <p className="text-sm text-gray-200 line-clamp-2 leading-tight">{task.prompt}</p>
-          <span className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium ${badge.className}`}>
+          <span aria-label={`Status: ${badge.label}`} role="status" className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium ${badge.className}`}>
             {badge.label}
           </span>
         </div>
