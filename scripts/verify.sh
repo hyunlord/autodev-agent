@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+# set -e 제거 — 명시적 에러 핸들링 사용 (BUILD_OUTPUT 캡처 시 set -e가 리포팅 분기 우회)
 
 MODE="${1:-quick}"  # quick, full, or cross
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
@@ -153,17 +153,21 @@ if [ "$MODE" = "cross" ]; then
   CHANGED=$(git diff HEAD~1 --name-only 2>/dev/null | head -20 || echo "")
 
   if [ -n "$CHANGED" ]; then
+    # 이전 실행의 verdict.json 삭제 — stale fallback 방지
+    rm -f "$HOME/.autodev/verdict.json"
+
     # Run Verify Agent via Node.js script
     AGENT_OUTPUT=$(npx tsx scripts/verify-agent.ts 2>&1 || echo "")
 
-    # Extract JSON result from output
-    AGENT_JSON=$(echo "$AGENT_OUTPUT" | grep "VERIFY_AGENT_RESULT=" | sed 's/VERIFY_AGENT_RESULT=//')
+    # Extract JSON result from output — python3으로 안정적 파싱 (regex 대체)
+    AGENT_JSON=$(echo "$AGENT_OUTPUT" | grep "VERIFY_AGENT_RESULT=" | sed 's/.*VERIFY_AGENT_RESULT=//')
 
     if [ -n "$AGENT_JSON" ]; then
-      AGENT_SCORE=$(echo "$AGENT_JSON" | grep -o '"score":[0-9]*' | grep -o '[0-9]*' | head -1)
-      AGENT_VERDICT=$(echo "$AGENT_JSON" | grep -o '"verdict":"[^"]*"' | cut -d'"' -f4)
+      # python3 JSON 파싱 (regex보다 안정적)
+      AGENT_SCORE=$(python3 -c "import json,sys; d=json.loads(sys.argv[1]); print(d.get('score',0))" "$AGENT_JSON" 2>/dev/null || echo "")
+      AGENT_VERDICT=$(python3 -c "import json,sys; d=json.loads(sys.argv[1]); print(d.get('verdict','unknown'))" "$AGENT_JSON" 2>/dev/null || echo "")
 
-      if [ -n "$AGENT_SCORE" ] && [ "$AGENT_SCORE" -le 15 ]; then
+      if [ -n "$AGENT_SCORE" ] && [ "$AGENT_SCORE" -le 15 ] 2>/dev/null; then
         add_score "Verify Agent" "$AGENT_SCORE" 15 "$AGENT_VERDICT"
         echo "  Score: ${AGENT_SCORE}/15 (${AGENT_VERDICT})"
       else
@@ -174,9 +178,29 @@ if [ "$MODE" = "cross" ]; then
       # Show issues if any
       echo "$AGENT_OUTPUT" | grep "Issues:" -A 20 | head -15
     else
-      add_score "Verify Agent" 0 15 "Agent 실행 실패"
-      echo "  ❌ Verify Agent 실행 실패"
-      echo "  Output: $(echo "$AGENT_OUTPUT" | tail -5)"
+      # VERIFY_AGENT_RESULT 미발견 — verdict.json 폴백 (process.exit stdout flush 이슈 대비)
+      VERDICT_FILE="$HOME/.autodev/verdict.json"
+      CURRENT_HEAD=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
+      if [ -f "$VERDICT_FILE" ]; then
+        # commitHash 검증 — 현재 실행에서 생성된 verdict인지 확인
+        VF_COMMIT=$(python3 -c "import json; print(json.load(open('$VERDICT_FILE')).get('commitHash',''))" 2>/dev/null || echo "")
+        if [ -n "$VF_COMMIT" ] && [ "$VF_COMMIT" != "unknown" ] && [ "$VF_COMMIT" != "$CURRENT_HEAD" ]; then
+          add_score "Verify Agent" 0 15 "stale verdict.json (다른 커밋)"
+          echo "  ❌ verdict.json fallback 실패: commitHash 불일치"
+          echo "  Output: $(echo "$AGENT_OUTPUT" | tail -5)"
+        else
+          VF_SCORE=$(python3 -c "import json; d=json.load(open('$VERDICT_FILE')); print(min(round(d.get('score',0)*15/100), 15))" 2>/dev/null || echo "0")
+          VF_VERDICT=$(python3 -c "import json; d=json.load(open('$VERDICT_FILE')); v=d.get('verdict','unknown'); print('ok' if v=='pass' else 'fail' if v=='fail' else 'warn')" 2>/dev/null || echo "unknown")
+
+          add_score "Verify Agent" "$VF_SCORE" 15 "$VF_VERDICT"
+          echo "  Score: ${VF_SCORE}/15 (${VF_VERDICT}) — verdict.json fallback"
+          echo "$AGENT_OUTPUT" | grep "Issues:" -A 20 | head -15
+        fi
+      else
+        add_score "Verify Agent" 0 15 "Agent 실행 실패"
+        echo "  ❌ Verify Agent 실행 실패"
+        echo "  Output: $(echo "$AGENT_OUTPUT" | tail -5)"
+      fi
     fi
   else
     add_score "Verify Agent" 15 15 "변경 없음"

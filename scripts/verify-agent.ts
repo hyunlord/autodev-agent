@@ -58,7 +58,16 @@ async function main() {
   if (!available) {
     console.log('⚠ Verify Agent not available (need gemini-cli, codex-cli, or claude-cli)');
     console.log('  Skipping LLM review.');
-    console.log(JSON.stringify({ score: 10, issues: ['Verify Agent unavailable'], verdict: 'warn' }));
+    const warnResult = { score: 10, issues: ['Verify Agent unavailable'], verdict: 'warn' };
+    console.log(JSON.stringify(warnResult));
+    // verdict.json도 저장 (fallback 경로 일관성)
+    try {
+      const verdictDir = join(process.env.HOME ?? '/tmp', '.autodev');
+      mkdirSync(verdictDir, { recursive: true });
+      let commitHash = 'unknown';
+      try { commitHash = execSync('git rev-parse HEAD', { encoding: 'utf-8', cwd: projectDir }).trim(); } catch { /* */ }
+      writeFileSync(join(verdictDir, 'verdict.json'), JSON.stringify({ timestamp: new Date().toISOString(), verdict: 'warn', score: 10, issues: warnResult.issues, commitHash }, null, 2), 'utf-8');
+    } catch { /* verdict 저장 실패는 무시 */ }
     process.exit(0);
   }
 
@@ -162,13 +171,23 @@ Be critical — your job is to find problems, not confirm the code works.`;
     // verdict 저장 실패는 무시 (핵심 기능 아님)
   }
 
-  // Exit with error if not pass
+  // Exit with error if not pass — process.exitCode로 설정 (process.exit()는 stdout flush 안 함)
   if (vr.verdict === 'fail' || vr.verdict === 're-code' || vr.verdict === 're-plan') {
-    process.exit(1);
+    process.exitCode = 1;
   }
 }
 
 main().catch(err => {
   console.error('Verify Agent error:', err);
-  console.log(JSON.stringify({ score: 10, issues: [`Error: ${err}`], verdict: 'warn' }));
+  const errResult = { score: 10, issues: [`Error: ${err}`], verdict: 'warn' };
+  console.log(JSON.stringify(errResult));
+  // verdict.json도 저장 (fallback 경로 일관성)
+  try {
+    const verdictDir = join(process.env.HOME ?? '/tmp', '.autodev');
+    mkdirSync(verdictDir, { recursive: true });
+    let commitHash = 'unknown';
+    try { commitHash = execSync('git rev-parse HEAD', { encoding: 'utf-8' }).trim(); } catch { /* */ }
+    writeFileSync(join(verdictDir, 'verdict.json'), JSON.stringify({ timestamp: new Date().toISOString(), verdict: 'warn', score: 10, issues: errResult.issues, commitHash }, null, 2), 'utf-8');
+  } catch { /* verdict 저장 실패는 무시 */ }
+  process.exitCode = 1;
 });
