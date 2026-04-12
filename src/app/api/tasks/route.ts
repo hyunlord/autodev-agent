@@ -7,9 +7,9 @@ import { NextResponse } from 'next/server';
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
-  const limit = parseInt(url.searchParams.get('limit') ?? '20', 10);
-  const offset = parseInt(url.searchParams.get('offset') ?? '0', 10);
-  const projectDir = url.searchParams.get('projectDir');
+  const limit = Math.max(1, Math.min(100, parseInt(url.searchParams.get('limit') ?? '20', 10) || 20));
+  const offset = Math.max(0, parseInt(url.searchParams.get('offset') ?? '0', 10) || 0);
+  const projectDir = url.searchParams.get('projectDir') || null;
 
   const result = await db.select({
     id: tasks.id,
@@ -33,13 +33,24 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const body = await req.json();
-  const { prompt, projectDir } = body;
-  const parentTaskId: string | null = body.parentTaskId ?? null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let body: any;
+  try {
+    body = await req.json();
+    if (!body || typeof body !== 'object') throw new Error();
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+  }
 
+  const { prompt } = body;
   if (!prompt || typeof prompt !== 'string') {
     return NextResponse.json({ error: 'prompt is required' }, { status: 400 });
   }
+
+  const projectDir = typeof body.projectDir === 'string' && body.projectDir.trim()
+    ? body.projectDir.trim()
+    : null;
+  const parentTaskId: string | null = typeof body.parentTaskId === 'string' ? body.parentTaskId : null;
 
   const now = new Date().toISOString();
   const task = {
@@ -48,7 +59,7 @@ export async function POST(req: Request) {
     status: 'pending' as const,
     planningMode: body.planningMode ?? 'auto',
     agentId: body.agentId ?? 'claude-code',
-    projectDir: projectDir ?? null,
+    projectDir,
     projectType: null,
     plan: null,
     systemPrompt: body.systemPrompt ?? null,
@@ -67,9 +78,17 @@ export async function POST(req: Request) {
     updatedAt: now,
   };
 
-  db.insert(tasks).values(task).run();
+  try {
+    db.insert(tasks).values(task).run();
+  } catch (err) {
+    return NextResponse.json({ error: 'Failed to create task' }, { status: 500 });
+  }
 
-  WorkerManager.instance.dispatch(task.id);
+  try {
+    WorkerManager.instance.dispatch(task.id);
+  } catch {
+    // Task created but dispatch failed — worker will pick it up on next poll
+  }
 
   return NextResponse.json(task, { status: 201 });
 }
