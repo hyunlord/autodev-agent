@@ -917,16 +917,30 @@ Example: {"passed":true,"score":85,"reason":"All features correct","issues":[],"
         const codexA11y = a11yViolations != null ? `\nA11y: ${a11yViolations} violation(s).` : '';
         const codexContext = `${codexAcceptance}${codexPriorIssues}${codexSast}${codexA11y}`;
 
+        // Build Codex-specific file section: complete files within 5KB budget (no mid-file slicing)
+        const codexBudget = 5000;
+        let codexUsed = 0;
+        const codexFileParts: string[] = [];
+        for (const [path, content] of Object.entries(fileContents)) {
+          const part = `### ${path}\n\`\`\`\n${content}\n\`\`\`\n`;
+          if (codexUsed + part.length > codexBudget) break;
+          codexFileParts.push(part);
+          codexUsed += part.length;
+        }
+        const codexFileSection = codexFileParts.length > 0
+          ? codexFileParts.join('\n')
+          : `### ${Object.keys(fileContents)[0] ?? 'unknown'}\n\`\`\`\n${Object.values(fileContents)[0]?.slice(0, 4000) ?? ''}\n\`\`\``;
+
         const codexPrompt = `RESPOND IN UNDER 50 WORDS PER FIELD. Output ONLY valid JSON, nothing else.
 {"passed":bool,"score":0-100,"reason":"...","issues":["..."],"suggestions":["..."],"verdict":"pass"|"re-code"|"re-plan"|"fail"}
 
 Truncated files (marked [--- END OF VISIBLE PORTION ---]) are NOT incomplete — do NOT flag them.
 
-=== FILES ===
+=== FILES (${input.modifiedFiles.length} total, showing ${codexFileParts.length}) ===
 ${input.modifiedFiles.join(', ')}
 
 === CODE ===
-${fileContentsSection.slice(0, 5000)}
+${codexFileSection}
 
 === CONTEXT ===
 ${codexContext}
@@ -1012,15 +1026,15 @@ Score 0-100. Be specific in issues. Respond ONLY with valid JSON.`;
         return fallbackAgent.runLlmJudgment(input, evidence, emit);
       }
 
-      // All LLMs exhausted: mechanical-only score (generous — build+TS already passed to reach here)
+      // All LLMs exhausted: warn with moderate score (no real review, but mechanical checks passed to reach here)
       return {
         verifyResult: {
-          passed: true,
-          score: 70,
-          reason: `LLM verification unavailable (${err}). Mechanical checks (build/TS/API) passed — score reflects mechanical-only confidence.`,
-          issues: ['LLM verification unavailable — review manually if critical'],
+          passed: false,
+          score: 50,
+          reason: `LLM verification unavailable (${err}). No code review performed — mechanical checks only.`,
+          issues: ['LLM verification unavailable — manual review recommended'],
           suggestions: [],
-          verdict: 'pass',
+          verdict: 'warn' as any,
           evidence: {},
         },
         costUsd: 0,
