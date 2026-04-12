@@ -5,6 +5,7 @@ import { getExeca } from '../lib/execa';
 import type { SubTask } from './planning';
 import type { EmitFn } from './pipeline-types';
 import type { PipelineEvent } from '../lib/types';
+import type { HookEngine } from '../lib/hooks/hook-engine';
 
 // ─── J1: Git Worktree helpers ────────────────────────────────
 
@@ -175,8 +176,10 @@ export async function executeParallelCoding(params: {
   emit: EmitFn;
   signal?: AbortSignal;
   costPreference?: CostPreference;
+  hookEngine?: HookEngine;
+  taskId?: string;
 }): Promise<ParallelResult[]> {
-  const { subTasks, projectDir, systemPrompt, workspaceContext, emit, signal, costPreference } = params;
+  const { subTasks, projectDir, systemPrompt, workspaceContext, emit, signal, costPreference, hookEngine, taskId } = params;
 
   const levels = topologicalLevels(subTasks);
 
@@ -236,7 +239,7 @@ export async function executeParallelCoding(params: {
 
     const levelResults = await Promise.all(
       runnable.map(t =>
-        executeSubTask(t, projectDir, systemPrompt, workspaceContext, emit, signal, costPreference),
+        executeSubTask(t, projectDir, systemPrompt, workspaceContext, emit, signal, costPreference, hookEngine, taskId),
       ),
     );
 
@@ -257,6 +260,8 @@ async function executeSubTask(
   emit: EmitFn,
   signal?: AbortSignal,
   costPreference?: CostPreference,
+  hookEngine?: HookEngine,
+  taskId?: string,
 ): Promise<ParallelResult> {
   const startTime = Date.now();
 
@@ -294,6 +299,13 @@ async function executeSubTask(
         message: `[Parallel:${subTask.id}] Worktree failed, using shared dir` } as PipelineEvent);
       workDir = projectDir;
     }
+  }
+
+  // K9: SubTaskStart hook
+  if (hookEngine && taskId) {
+    hookEngine.execute({
+      event: 'SubTaskStart', taskId, projectDir, subTaskId: subTask.id,
+    }, emit).catch(() => {});
   }
 
   emit({
@@ -354,6 +366,14 @@ ${workspaceContext}`;
       }
     }
 
+    // K9: SubTaskComplete hook
+    if (hookEngine && taskId) {
+      hookEngine.execute({
+        event: 'SubTaskComplete', taskId, projectDir, subTaskId: subTask.id,
+        success: result.success,
+      }, emit).catch(() => {});
+    }
+
     return {
       subTaskId: subTask.id,
       success: result.success,
@@ -372,6 +392,13 @@ ${workspaceContext}`;
       level: 'warn',
       message: `[Parallel:${subTask.id}] Error: ${errMsg}`,
     } as PipelineEvent);
+    // K9: SubTaskComplete hook (error path)
+    if (hookEngine && taskId) {
+      hookEngine.execute({
+        event: 'SubTaskComplete', taskId, projectDir, subTaskId: subTask.id,
+        success: false,
+      }, emit).catch(() => {});
+    }
     return {
       subTaskId: subTask.id,
       success: false,

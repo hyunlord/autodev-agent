@@ -3,6 +3,7 @@ import type { PipelineEvent } from '../types';
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export type HookEvent =
+  // 기존 12개
   | 'TaskStart'
   | 'PrePlan'
   | 'PostPlan'
@@ -14,7 +15,17 @@ export type HookEvent =
   | 'OnRetry'
   | 'OnReplan'
   | 'TaskComplete'
-  | 'TaskFail';
+  | 'TaskFail'
+  // K9: 신규 9개
+  | 'PreToolUse'
+  | 'PostToolUse'
+  | 'SessionStart'
+  | 'SessionEnd'
+  | 'AgentSwitch'
+  | 'SubTaskStart'
+  | 'SubTaskComplete'
+  | 'PreCompact'
+  | 'OnEscalation';
 
 export interface HookDefinition {
   name: string;

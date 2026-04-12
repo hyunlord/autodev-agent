@@ -15,6 +15,7 @@ import { loadConfig, type AutoDevConfig } from '../lib/config';
 import type { TaskStatus } from '../lib/types';
 import { ProgressDetector } from '../lib/safety/progress-detector';
 import { HookEngine } from '../lib/hooks/hook-engine';
+import { collectInstructions, mergeInstructions } from '../lib/harness/instruction-loader';
 import { type EmitFn, type SingleCycleResult, checkAbort } from './pipeline-types';
 
 export async function runPipeline(taskId: string, rawEmit: EmitFn, signal?: AbortSignal): Promise<void> {
@@ -55,6 +56,9 @@ export async function runPipeline(taskId: string, rawEmit: EmitFn, signal?: Abor
   // ─── Hook Engine ──────────────────────────────────────
   const hookEngine = new HookEngine();
   await hookEngine.load(projectDir);
+
+  // K9: SessionStart hook (before TaskStart)
+  hookEngine.execute({ event: 'SessionStart', taskId, projectDir }, emit).catch(() => {});
 
   const systemPrompt = (task as any).systemPrompt ?? null;
 
@@ -203,6 +207,16 @@ Use this context to continue the work. The current task builds upon the previous
       }
     }
 
+    // ─── K8: Hierarchical instruction loading ─────────────
+    {
+      const instructions = collectInstructions(projectDir);
+      const instructionContext = mergeInstructions(instructions);
+      if (instructionContext) {
+        workspaceContext += instructionContext;
+        emit({ type: 'log', level: 'info', message: `Hierarchical instructions: ${instructions.length} file(s) loaded` });
+      }
+    }
+
     // ─── 3. Determine execution mode ─────────────────────
     const executionMode = (task as any).executionMode ?? 'single';
     const maxCycles = (task as any).maxCycles ?? 10;
@@ -244,7 +258,7 @@ Use this context to continue the work. The current task builds upon the previous
           updateTaskStatus(taskId, 'failed', { error: 'Plan rejected by user' });
           emit({ type: 'task_complete', success: false, summary: 'Plan rejected by user' });
         } else {
-          await escalate(taskId, task.prompt, result.summary, result.attemptRecords, result.failedChecks, result.modifiedFiles, result.costUsd, result.totalDurationMs, result.stopReason ?? 'max_attempts', emit, projectDir);
+          await escalate(taskId, task.prompt, result.summary, result.attemptRecords, result.failedChecks, result.modifiedFiles, result.costUsd, result.totalDurationMs, result.stopReason ?? 'max_attempts', emit, projectDir, hookEngine);
         }
         return;
       }
@@ -332,6 +346,8 @@ Use this context to continue the work. The current task builds upon the previous
           { event: 'TaskComplete', taskId, projectDir, summary: result.summary, costUsd: result.costUsd, modifiedFiles: result.modifiedFiles },
           emit,
         ).catch(() => { /* non-critical */ });
+        // K9: SessionEnd after TaskComplete
+        hookEngine.execute({ event: 'SessionEnd', taskId, projectDir }, emit).catch(() => {});
       } else if (result.stopReason === 'plan_rejected') {
         updateTaskStatus(taskId, 'failed', { error: 'Plan rejected by user' });
         emit({ type: 'task_complete', success: false, summary: 'Plan rejected by user' });
@@ -340,13 +356,15 @@ Use this context to continue the work. The current task builds upon the previous
           taskId, task.prompt, result.summary, result.attemptRecords,
           result.failedChecks, result.modifiedFiles, result.costUsd,
           result.totalDurationMs, result.stopReason ?? 'max_attempts',
-          emit, projectDir,
+          emit, projectDir, hookEngine,
         );
         // ─── TaskFail hook (async notification) ──────────
         hookEngine.execute(
           { event: 'TaskFail', taskId, projectDir, error: result.summary, attempts: result.attemptCount },
           emit,
         ).catch(() => { /* non-critical */ });
+        // K9: SessionEnd after TaskFail
+        hookEngine.execute({ event: 'SessionEnd', taskId, projectDir }, emit).catch(() => {});
       }
     }
 
@@ -361,6 +379,8 @@ Use this context to continue the work. The current task builds upon the previous
       { event: 'TaskFail', taskId, projectDir, error: errorMessage, attempts: 0 },
       emit,
     ).catch(() => { /* non-critical */ });
+    // K9: SessionEnd after pipeline crash
+    hookEngine.execute({ event: 'SessionEnd', taskId, projectDir }, emit).catch(() => {});
   } finally {
     await mcpManager.shutdown();
   }
@@ -978,6 +998,7 @@ async function escalate(
   stopReason: string,
   emit: EmitFn,
   projectDir: string,
+  hookEngine?: HookEngine,
 ): Promise<void> {
   const report = generateEscalationReport({
     taskId,
@@ -1005,6 +1026,14 @@ async function escalate(
   emit({ type: 'log', level: 'error', message: `Escalating: ${stopReason} after ${attemptRecords.length} attempt(s)` });
   emit({ type: 'escalation', report });
   emit({ type: 'task_complete', success: false, summary: `Escalated (${stopReason}): ${summary}. ${attemptRecords.length} attempt(s), $${totalCostUsd.toFixed(4)} spent.` });
+
+  // K9: OnEscalation hook
+  if (hookEngine) {
+    hookEngine.execute(
+      { event: 'OnEscalation', taskId, projectDir, escalationReason: stopReason },
+      emit,
+    ).catch(() => {});
+  }
 
   // Roll back auto-created workspaces to clean state
   if (projectDir.includes('.autodev/workspaces/') || projectDir.includes('.autodev\\workspaces\\')) {

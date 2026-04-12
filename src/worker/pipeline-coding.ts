@@ -129,6 +129,8 @@ export async function executeCodingLoop(params: {
       emit,
       signal,
       costPreference: _codeTaskCfg.costPreference,
+      hookEngine,
+      taskId,
     });
 
     // 결과 합산
@@ -557,6 +559,12 @@ ${currentPlan.codingPrompt}`;
           level: 'info',
           message: `[J6] Agent switched: ${fromAgent} → ${agentId} (${failCount} consecutive verify failures)`,
         });
+        // K9: AgentSwitch hook
+        hookEngine.execute({
+          event: 'AgentSwitch', taskId, projectDir,
+          fromAgent, toAgent: agentId,
+          reason: `${failCount} consecutive verification failures`,
+        }, emit).catch(() => {});
       }
     }
 
