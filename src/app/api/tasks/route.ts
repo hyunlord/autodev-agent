@@ -20,6 +20,7 @@ export async function GET(req: Request) {
     executionMode: tasks.executionMode,
     cycleCount: tasks.cycleCount,
     maxCycles: tasks.maxCycles,
+    result: tasks.result,
     parentTaskId: tasks.parentTaskId,
     createdAt: tasks.createdAt,
     updatedAt: tasks.updatedAt,
