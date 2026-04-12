@@ -1,0 +1,31 @@
+# Development files
+.git/
+.github/
+.next/
+node_modules/
+*.db
+*.db-wal
+*.db-shm
+.env
+.env.local
+.mcp.json
+.autodev/worktrees/
+.autodev/baselines/
+.autodev/screenshots/
+.autodev/debug/
+.autodev/arena/
+.autodev/workspaces/
+.playwright-mcp/
+tsconfig.tsbuildinfo
+.DS_Store
+.claudeignore
+.omc/
+
+# Test/dev scripts
+scripts/pre-commit.sh
+scripts/pre-push.sh
+scripts/install-hooks.sh
+scripts/e2e-test.sh
+
+# Prompts (development only)
+prompts/

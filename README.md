@@ -16,6 +16,12 @@ Universal AI development orchestrator. Submit a goal in plain language → AutoD
 
 ## Quick Start
 
+### Option 1: npx (no install)
+```bash
+npx autodev-agent start
+```
+
+### Option 2: Clone & run
 ```bash
 git clone https://github.com/hyunlord/autodev-agent.git
 cd autodev-agent
