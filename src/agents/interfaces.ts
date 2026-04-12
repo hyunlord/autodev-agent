@@ -46,12 +46,25 @@ export interface AgentOutput {
 }
 
 // ─── Verify Agent Specific ────────────────────────────────────
+export interface AcceptanceCriteria {
+  requiredFiles?: string[];
+  security?: { semgrepScan?: boolean };
+  pbt?: boolean;
+  debateVerify?: boolean;
+  [key: string]: unknown;
+}
+
 export interface VerifyInput extends AgentInput {
   originalPrompt: string;
   modifiedFiles: string[];
   projectDir: string;
   tools: VerifyTool[];
   skipMechanical?: boolean;
+  depth?: 'fast' | 'standard' | 'deep';
+  plan?: {
+    acceptanceCriteria?: AcceptanceCriteria;
+    [key: string]: unknown;
+  };
 }
 
 export interface VerifyResult {

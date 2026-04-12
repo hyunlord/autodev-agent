@@ -1,7 +1,7 @@
 import type { IAgent, AgentInput, AgentOutput, VerifyInput, VerifyResult } from '../interfaces';
 import { createPlaywrightTool } from './tools/playwright-verify';
 import { existsSync, statSync, readFileSync, readdirSync, writeFileSync, mkdirSync, copyFileSync } from 'fs';
-import { join } from 'path';
+import { join, resolve } from 'path';
 import { resolveCli } from '../../lib/cli-resolver';
 import { getExeca } from '../../lib/execa';
 import { extractJson } from '../../lib/utils/json-extractor';
@@ -70,7 +70,7 @@ export class VerifyAgent implements IAgent {
     const verifyInput = input as unknown as VerifyInput;
     const startTime = Date.now();
     const emit = input.onProgress ?? (() => {});
-    const depth: VerificationDepth = (verifyInput as any).depth ?? 'deep';
+    const depth: VerificationDepth = verifyInput.depth ?? 'deep';
 
     emit({ type: 'log', level: 'info', message: `[Verify Agent] Using ${this.llm} (depth: ${depth})` } as PipelineEvent);
 
@@ -117,35 +117,47 @@ export class VerifyAgent implements IAgent {
       const baselineDir = join(verifyInput.projectDir, '.autodev', 'baselines');
       const baselinePath = join(baselineDir, 'screenshot.png');
 
-      if (existsSync(baselinePath)) {
-        const comparison = this.compareScreenshots(
-          evidence.screenshotPath as string, baselinePath, emit,
-        );
-        evidence.visualRegression = comparison;
-        if (!comparison.match) {
-          emit({ type: 'log', level: 'warn',
-            message: `[VisualRegression] Detected ${comparison.diffPercentage.toFixed(1)}% change from baseline`,
-          } as PipelineEvent);
+      try {
+        if (existsSync(baselinePath)) {
+          const comparison = this.compareScreenshots(
+            evidence.screenshotPath as string, baselinePath, emit,
+          );
+          evidence.visualRegression = comparison;
+          if (!comparison.match) {
+            emit({ type: 'log', level: 'warn',
+              message: `[VisualRegression] Detected ${comparison.diffPercentage.toFixed(1)}% change from baseline`,
+            } as PipelineEvent);
+          }
+        } else {
+          // 첫 실행 → baseline 저장
+          mkdirSync(baselineDir, { recursive: true });
+          copyFileSync(evidence.screenshotPath as string, baselinePath);
+          emit({ type: 'log', level: 'info', message: '[VisualRegression] Baseline screenshot saved' } as PipelineEvent);
         }
-      } else {
-        // 첫 실행 → baseline 저장
-        mkdirSync(baselineDir, { recursive: true });
-        copyFileSync(evidence.screenshotPath as string, baselinePath);
-        emit({ type: 'log', level: 'info', message: '[VisualRegression] Baseline screenshot saved' } as PipelineEvent);
+      } catch (err) {
+        emit({ type: 'log', level: 'warn',
+          message: `[VisualRegression] Baseline comparison failed: ${err instanceof Error ? err.message : String(err)}`,
+        } as PipelineEvent);
       }
     }
 
     // ─── Stage 2.8: Acceptance criteria check ──────────
-    const plan = (verifyInput as any).plan;
+    const plan = verifyInput.plan;
     const ac = plan?.acceptanceCriteria;
     if (ac) {
       emit({ type: 'log', level: 'info', message: '[Verify] Checking acceptance criteria...' } as PipelineEvent);
       const acFails: string[] = [];
 
-      // 필수 파일 체크
+      // 필수 파일 체크 (path traversal 방지)
       if (ac.requiredFiles) {
+        const absProjectDir = resolve(verifyInput.projectDir);
         for (const f of ac.requiredFiles as string[]) {
-          if (!existsSync(join(verifyInput.projectDir, f))) {
+          const absPath = resolve(absProjectDir, f);
+          if (!absPath.startsWith(absProjectDir + '/') && absPath !== absProjectDir) {
+            acFails.push(`Required file path escapes project directory: ${f}`);
+            continue;
+          }
+          if (!existsSync(absPath)) {
             acFails.push(`Required file missing: ${f}`);
           }
         }
@@ -154,7 +166,7 @@ export class VerifyAgent implements IAgent {
       if (acFails.length > 0) {
         emit({ type: 'log', level: 'warn', message: `[Verify] ${acFails.length} acceptance criteria failed` } as PipelineEvent);
       } else {
-        emit({ type: 'log', level: 'info', message: '[Verify] Acceptance criteria: all passed' } as PipelineEvent);
+        emit({ type: 'log', level: 'info', message: '[Verify] Acceptance criteria (requiredFiles): all passed' } as PipelineEvent);
       }
       evidence.acceptanceFails = acFails;
       evidence.hasAcceptanceCriteria = true;
@@ -166,6 +178,9 @@ export class VerifyAgent implements IAgent {
       const hasFails = (evidence.acceptanceFails as string[] | undefined)?.length;
       const vrMismatch = (evidence.visualRegression as { match: boolean } | undefined)?.match === false;
       const passed = !hasFails && !vrMismatch;
+      const failReasons: string[] = [];
+      if (hasFails) failReasons.push('acceptance criteria');
+      if (vrMismatch) failReasons.push('visual regression');
       return {
         success: true,
         result: {
@@ -173,14 +188,17 @@ export class VerifyAgent implements IAgent {
           score: passed ? 80 : 50,
           reason: passed
             ? 'Standard verification: mechanical + evidence passed'
-            : `Standard verification failed: ${hasFails ? 'acceptance criteria' : 'visual regression'}`,
+            : `Standard verification failed: ${failReasons.join(' + ')}`,
           issues: [
             ...((evidence.acceptanceFails as string[]) ?? []),
             ...(vrMismatch ? ['Visual regression detected'] : []),
           ],
           suggestions: [],
           verdict: passed ? 'pass' : 're-code',
-          evidence: {},
+          evidence: {
+            screenshots: evidence.screenshotPath ? [evidence.screenshotPath as string] : undefined,
+            consoleErrors: evidence.consoleErrors as string[] | undefined,
+          },
         } satisfies VerifyResult,
         costUsd: 0,
         tokenUsage: { input: 0, output: 0 },
@@ -232,7 +250,7 @@ export class VerifyAgent implements IAgent {
 
     // ─── I7: Stage 3.5: Property-Based Testing (deep + enabled) ──
     const pbtEnabled = process.env.AUTODEV_PBT_ENABLED === '1'
-      || (verifyInput as any).plan?.acceptanceCriteria?.pbt === true;
+      || verifyInput.plan?.acceptanceCriteria?.pbt === true;
     if (pbtEnabled && verifyInput.modifiedFiles.length > 0) {
       emit({ type: 'log', level: 'info', message: '[Verify] Stage 3.5: Property-Based Testing...' } as PipelineEvent);
       try {
@@ -255,7 +273,7 @@ export class VerifyAgent implements IAgent {
 
     // ─── I8: Debate Verification (deep + enabled) ──────
     const useDebateVerify = process.env.AUTODEV_DEBATE_VERIFY === '1'
-      || (verifyInput as any).plan?.acceptanceCriteria?.debateVerify === true;
+      || verifyInput.plan?.acceptanceCriteria?.debateVerify === true;
     const llmResult = useDebateVerify
       ? await this.runDebateVerification(verifyInput, evidence, emit)
       : await this.runLlmJudgment(verifyInput, evidence, emit);
