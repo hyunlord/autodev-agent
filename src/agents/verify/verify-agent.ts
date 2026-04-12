@@ -400,14 +400,14 @@ export class VerifyAgent implements IAgent {
     const fileContents: Record<string, string> = {};
     const truncatedFiles: Record<string, number> = {};
     let totalContentSize = 0;
-    const maxTotalContent = 60000;
+    const maxTotalContent = 40000;
     for (const file of input.modifiedFiles) {
       if (totalContentSize >= maxTotalContent) break;
       const fullPath = join(input.projectDir, file);
       if (existsSync(fullPath) && !statSync(fullPath).isDirectory()) {
         const content = readFileSync(fullPath, 'utf-8');
         const remaining = maxTotalContent - totalContentSize;
-        const maxPerFile = Math.min(remaining, 15000);
+        const maxPerFile = Math.min(remaining, 10000);
         if (content.length > maxPerFile) {
           fileContents[file] = content.slice(0, maxPerFile)
             + `\n[--- END OF VISIBLE PORTION --- remaining ${content.length - maxPerFile} bytes exist on disk but omitted from prompt for size. Do not report this file as incomplete.]`;
@@ -863,14 +863,14 @@ Example: {"passed":true,"score":85,"reason":"All features correct","issues":[],"
         if (!cliPath) throw new Error('Claude CLI not found');
         const claudePrompt = verifyPrompt + jsonEnforcement;
         const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 120_000);
+        const timer = setTimeout(() => controller.abort(), 180_000);
         try {
           const result = await ex(cliPath, [
             '-p', claudePrompt,
             '--output-format', 'text',
             '--max-turns', '2',
             '--dangerously-skip-permissions',
-          ], { cwd: input.projectDir, reject: false, timeout: 120_000, cancelSignal: controller.signal } as any);
+          ], { cwd: input.projectDir, reject: false, timeout: 180_000, cancelSignal: controller.signal } as any);
           stdout = (result as any).stdout ?? '';
         } finally {
           clearTimeout(timer);
@@ -882,10 +882,10 @@ Example: {"passed":true,"score":85,"reason":"All features correct","issues":[],"
           ? verifyPrompt.slice(0, 39500) + '\n...[prompt truncated]'
           : verifyPrompt) + jsonEnforcement;
         const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 120_000);
+        const timer = setTimeout(() => controller.abort(), 180_000);
         try {
           const result = await ex(cliPath, ['-p', geminiPrompt], {
-            cwd: '/tmp', reject: false, timeout: 120_000,
+            cwd: '/tmp', reject: false, timeout: 180_000,
             cancelSignal: controller.signal,
           } as any);
           stdout = (result as any).stdout ?? '';
@@ -926,12 +926,12 @@ Original request: ${(input.originalPrompt ?? '').slice(0, 500)}
 
 Score 0-100. Be specific in issues. Respond ONLY with valid JSON.`;
         const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 120_000);
+        const timer = setTimeout(() => controller.abort(), 180_000);
         try {
           const result = await ex(cliPath, [
             'exec', '--full-auto', '--sandbox', 'workspace-write', '--json',
             codexPrompt,
-          ], { cwd: input.projectDir, reject: false, timeout: 120_000, cancelSignal: controller.signal } as any);
+          ], { cwd: input.projectDir, reject: false, timeout: 180_000, cancelSignal: controller.signal } as any);
           stdout = (result as any).stdout ?? '';
         } finally {
           clearTimeout(timer);
@@ -1211,12 +1211,12 @@ RESPOND WITH ONLY JSON (no markdown, no explanation):
       }
 
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 120_000);
+      const timer = setTimeout(() => controller.abort(), 180_000);
       let stdout: string;
       try {
         const result = await execa(challengerCliPath, cliArgs, {
           cwd: challengerLlmId === 'gemini-cli' ? '/tmp' : input.projectDir,
-          reject: false, timeout: 120_000, cancelSignal: controller.signal,
+          reject: false, timeout: 180_000, cancelSignal: controller.signal,
         } as any);
         stdout = ((result as any).stdout ?? '') as string;
       } finally {

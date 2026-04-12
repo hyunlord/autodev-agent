@@ -107,7 +107,7 @@ Be critical — your job is to find problems, not confirm the code works.`;
       files: changedFiles,
     },
     config: {
-      timeoutMs: 120_000,
+      timeoutMs: 180_000,
     },
     onProgress: (event: PipelineEvent) => {
       if (event.type === 'log') {
