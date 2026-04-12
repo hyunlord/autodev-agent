@@ -755,10 +755,15 @@ async function runSingleCycle(
       }
     }
 
+    // ─── J1: Worktree isolation for coding ───────────────────────
+    const { createCodingWorktree, mergeWorktree, cleanupWorktree } = await import('./pipeline-worktree');
+    const worktreeCtx = await createCodingWorktree(projectDir, taskId, emit);
+    const codingDir = worktreeCtx ? worktreeCtx.worktreePath : projectDir;
+
     // ─── Coding + Verification loop (delegated to pipeline-coding.ts) ───
     const { executeCodingLoop } = await import('./pipeline-coding');
     const codingResult = await executeCodingLoop({
-      taskId, projectDir, projectConfig, task, currentPlan,
+      taskId, projectDir: codingDir, projectConfig, task, currentPlan,
       workspaceContext, systemPrompt, agentId, agent, verifyAgent,
       useVerifyAgent,
       codingMcpServers: options?.codingMcpServers ?? [],
@@ -769,6 +774,14 @@ async function runSingleCycle(
       mcpManager: options?.mcpManager,
       emit, updateTaskStatus, startTime,
     });
+
+    // J1: Merge or cleanup worktree
+    if (worktreeCtx) {
+      if (codingResult.success) {
+        await mergeWorktree(worktreeCtx, emit);
+      }
+      await cleanupWorktree(worktreeCtx, emit);
+    }
 
     // Sync state back from coding loop
     totalCostUsd = codingResult.totalCostUsd;

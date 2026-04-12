@@ -16,6 +16,8 @@ import {
 import { verifyScreenshotViaCli } from '../lib/plugins/vlm/cli-vlm';
 import { captureDesktopApp } from '../lib/plugins/verifiers/desktop-screenshot';
 import { runCliOutputCheck } from '../lib/plugins/verifiers/cli-output';
+import { organizeIntoGates, getSortedTiers, getTierName, tierPassed } from './pipeline-progressive-gates';
+import { findBaseline, captureBaseline, compareScreenshots } from '../lib/plugins/verifiers/visual-regression';
 
 export interface VerificationResult {
   allPassed: boolean;
@@ -55,8 +57,22 @@ export async function runVerification(
 
   emit({ type: 'log', level: 'info', message: `Verifier prompt: ${verifierPrompt.source}${verifierPrompt.filePath ? ` (${verifierPrompt.filePath})` : ' (built-in)'}` });
 
+  // ─── I2: Progressive Gates — organize steps by tier ─────────
+  const gates = organizeIntoGates(spec.steps);
+  const sortedTiers = getSortedTiers(gates);
+  if (sortedTiers.length > 1) {
+    emit({ type: 'log', level: 'info',
+      message: `[Verify] Progressive gates: ${sortedTiers.map(t => `T${t}(${getTierName(t)})`).join(' → ')}` });
+  }
+
   try {
-    for (const step of spec.steps) {
+    for (const tier of sortedTiers) {
+      const tierSteps = gates.get(tier) ?? [];
+      if (sortedTiers.length > 1) {
+        emit({ type: 'log', level: 'info', message: `[Verify] ── Gate ${tier}: ${getTierName(tier)} (${tierSteps.length} checks) ──` });
+      }
+
+    for (const step of tierSteps) {
       emit({ type: 'log', level: 'info', message: `[Verify] Running: ${step.description}` });
       const startTime = Date.now();
 
@@ -362,6 +378,59 @@ export async function runVerification(
             break;
           }
 
+          case 'visual_regression': {
+            // I5: Visual regression check
+            const port = projectConfig?.defaultPort ?? 3000;
+            if (!webCtx && projectConfig && projectConfig.devCmd) {
+              try {
+                webCtx = await startWebApp({
+                  projectDir, devCmd: projectConfig.devCmd, port, screenshotDir,
+                  installCmd: projectConfig.installCmd ?? undefined,
+                });
+              } catch { /* skip if dev server fails */ }
+            }
+            if (webCtx) {
+              const route = step.url ?? '/';
+              const ssName = `vr-${step.id}`;
+              const ss = await navigateAndScreenshot(webCtx, route, ssName);
+              const baseline = findBaseline(screenshotDir, ssName);
+
+              if (baseline) {
+                const vrResult = await compareScreenshots(baseline, ss.screenshotPath, screenshotDir, step.threshold ?? 0.05);
+                results.push({
+                  checkId: step.id, type: step.type,
+                  status: vrResult.passed ? 'pass' : 'fail',
+                  description: step.description,
+                  expected: `Visual diff ≤ ${((step.threshold ?? 0.05) * 100).toFixed(0)}%`,
+                  actual: vrResult.description,
+                  screenshotPath: vrResult.diffPath ?? ss.screenshotPath,
+                  durationMs: vrResult.durationMs,
+                });
+                emit({ type: 'verification_result', checkId: step.id, status: vrResult.passed ? 'pass' : 'fail', detail: vrResult.description });
+              } else {
+                // No baseline — save current as baseline, pass
+                captureBaseline(screenshotDir, ss.screenshotPath, ssName);
+                results.push({
+                  checkId: step.id, type: step.type, status: 'pass',
+                  description: step.description,
+                  actual: 'Baseline captured (first run)',
+                  screenshotPath: ss.screenshotPath,
+                  durationMs: Date.now() - startTime,
+                });
+                emit({ type: 'verification_result', checkId: step.id, status: 'pass', detail: 'Baseline captured' });
+              }
+            } else {
+              results.push({
+                checkId: step.id, type: step.type, status: 'skip',
+                description: step.description,
+                actual: 'Skipped: no web context for visual regression',
+                durationMs: Date.now() - startTime,
+              });
+              emit({ type: 'verification_result', checkId: step.id, status: 'skip', detail: 'No web context' });
+            }
+            break;
+          }
+
           default: {
             results.push({
               checkId: step.id,
@@ -384,7 +453,33 @@ export async function runVerification(
         });
         emit({ type: 'verification_result', checkId: step.id, status: 'fail', detail: `Error: ${stepError instanceof Error ? stepError.message : String(stepError)}` });
       }
+    } // end step loop
+
+    // I2: Progressive gate — if this tier has failures, skip remaining tiers
+    if (sortedTiers.length > 1) {
+      const tierResults = results.filter(r =>
+        tierSteps.some(s => s.id === r.checkId),
+      );
+      if (!tierPassed(tierResults)) {
+        const failCount = tierResults.filter(r => r.status === 'fail').length;
+        emit({ type: 'log', level: 'warn',
+          message: `[Verify] Gate ${tier} (${getTierName(tier)}) failed (${failCount} checks). Skipping higher tiers.` });
+        // Mark remaining tiers as skipped
+        for (const remainingTier of sortedTiers.filter(t => t > tier)) {
+          for (const s of gates.get(remainingTier) ?? []) {
+            results.push({
+              checkId: s.id, type: s.type, status: 'skip',
+              description: s.description,
+              actual: `Skipped: Gate ${tier} (${getTierName(tier)}) failed`,
+              durationMs: 0,
+            });
+          }
+        }
+        break; // exit tier loop
+      }
+      emit({ type: 'log', level: 'info', message: `[Verify] Gate ${tier} passed ✓` });
     }
+    } // end tier loop
 
     if (webCtx) {
       consoleErrors = [...webCtx.consoleErrors];

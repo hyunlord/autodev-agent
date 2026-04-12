@@ -17,7 +17,7 @@ export const tasks = sqliteTable('tasks', {
   planningSystemPrompt: text('planning_system_prompt'),
   codingSystemPrompt:   text('coding_system_prompt'),
   executionMode: text('execution_mode', {
-    enum: ['single', 'auto-cycle', 'interview'],
+    enum: ['single', 'auto-cycle', 'interview', 'arena'],
   }).notNull().default('single'),
   cycleCount:  integer('cycle_count').notNull().default(0),
   maxCycles:   integer('max_cycles').notNull().default(10),

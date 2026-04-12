@@ -464,6 +464,35 @@ ${currentPlan.codingPrompt}`;
     emit({ type: 'log', level: 'info', message: `Code generated (attempt ${attempt}). Files: ${lastModifiedFiles.join(', ') || 'none detected'}` });
     emit({ type: 'attempt_complete', attemptNum: attempt, success: true });
 
+    // ─── J4: Diff Gate — reject oversized or forbidden diffs ────
+    {
+      const { runDiffGate } = await import('./pipeline-diff-gate');
+      const gateResult = await runDiffGate(projectDir, emit);
+      if (!gateResult.passed) {
+        const gateError = `Diff gate blocked: ${gateResult.violations.join('; ')}`;
+        retryCtrl.recordAttempt({
+          attemptNum: attempt,
+          errorMessage: gateError,
+          tokensUsed: 0,
+          durationMs: 0,
+        });
+        lastFailedChecks = gateResult.violations.map((v, i) => ({
+          id: `diff-gate-${i}`,
+          description: v,
+        }));
+        const { allowed, reason } = retryCtrl.canRetry();
+        if (!allowed) {
+          return {
+            success: false, lastModifiedFiles, totalCostUsd,
+            attemptCount: attempt, retryAttempts: retryCtrl.attempts,
+            lastFailedChecks, stopReason: reason,
+            hookContextAccumulator, agentId,
+          };
+        }
+        continue;
+      }
+    }
+
     // ─── PostCode hook ──────────────────────────────────
     {
       const postCodeHooks = await hookEngine.execute(
