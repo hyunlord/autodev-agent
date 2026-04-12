@@ -10,6 +10,15 @@ import type { PipelineEvent } from '../../lib/types';
 // ─── I2: Progressive Verification Depth ──────────────────────
 export type VerificationDepth = 'fast' | 'standard' | 'deep';
 
+// ─── I7: Property-Based Testing Result ──────────────────────
+interface PBTResult {
+  propertiesTested: number;
+  examples: number;
+  failures: number;
+  failingProperties: string[];
+  generatedTestFile: string | null;
+}
+
 export class VerifyAgent implements IAgent {
   readonly id: string;
   readonly name: string;
@@ -221,10 +230,35 @@ export class VerifyAgent implements IAgent {
       }
     }
 
+    // ─── I7: Stage 3.5: Property-Based Testing (deep + enabled) ──
+    const pbtEnabled = process.env.AUTODEV_PBT_ENABLED === '1'
+      || (verifyInput as any).plan?.acceptanceCriteria?.pbt === true;
+    if (pbtEnabled && verifyInput.modifiedFiles.length > 0) {
+      emit({ type: 'log', level: 'info', message: '[Verify] Stage 3.5: Property-Based Testing...' } as PipelineEvent);
+      try {
+        const pbtResult = await this.generateAndRunPBT(verifyInput, evidence, emit);
+        evidence.pbtResult = pbtResult;
+        if (pbtResult.failures > 0) {
+          emit({ type: 'log', level: 'warn',
+            message: `[Verify] PBT: ${pbtResult.failures} property violation(s) found` } as PipelineEvent);
+        } else if (pbtResult.propertiesTested > 0) {
+          emit({ type: 'log', level: 'info',
+            message: `[Verify] PBT: ${pbtResult.propertiesTested} properties passed (${pbtResult.examples} examples)` } as PipelineEvent);
+        }
+      } catch (err) {
+        emit({ type: 'log', level: 'info', message: `[Verify] PBT skipped: ${err}` } as PipelineEvent);
+      }
+    }
+
     // ─── Stage 3: LLM judgment ────────────────────────
     emit({ type: 'log', level: 'info', message: '[Verify] Stage 3: LLM judgment...' } as PipelineEvent);
 
-    const llmResult = await this.runLlmJudgment(verifyInput, evidence, emit);
+    // ─── I8: Debate Verification (deep + enabled) ──────
+    const useDebateVerify = process.env.AUTODEV_DEBATE_VERIFY === '1'
+      || (verifyInput as any).plan?.acceptanceCriteria?.debateVerify === true;
+    const llmResult = useDebateVerify
+      ? await this.runDebateVerification(verifyInput, evidence, emit)
+      : await this.runLlmJudgment(verifyInput, evidence, emit);
 
     // ─── I5: Update baseline on pass ──────────────────
     if (llmResult.verifyResult.verdict === 'pass' && evidence.screenshotPath) {
@@ -630,6 +664,12 @@ Use these values to assess design quality:
       ? `\n## Accessibility (axe-core)\nViolations: ${a11yViolations}${a11yDetails.length > 0 ? '\n' + a11yDetails.map(d => `- ${d}`).join('\n') : ''}`
       : '';
 
+    // ─── I7: PBT evidence section ───────────────────────
+    const pbtResult = evidence.pbtResult as PBTResult | undefined;
+    const pbtSection = pbtResult && pbtResult.propertiesTested > 0
+      ? `\n## Property-Based Testing\nProperties tested: ${pbtResult.propertiesTested} (${pbtResult.examples} examples)\nFailures: ${pbtResult.failures}${pbtResult.failingProperties.length > 0 ? '\nFailing properties:\n' + pbtResult.failingProperties.map(f => `- ${f}`).join('\n') : ''}`
+      : '';
+
     const acFails = evidence.acceptanceFails as string[] | undefined;
     const acceptanceSection = acFails && acFails.length > 0
       ? `\n## Acceptance Criteria FAILURES\n${acFails.map(f => `- FAIL: ${f}`).join('\n')}\nThese are hard requirements. If any fail, verdict MUST be "re-code" or "fail".`
@@ -736,7 +776,7 @@ ${styleSection}
 ${visualSection}
 ${acceptanceSection}
 ${sastSection}
-${a11ySection}
+${a11ySection}${pbtSection}
 
 === ALL FILES IN PROJECT ===
 ${allFiles.join(', ')}
@@ -958,6 +998,262 @@ Score 0-100. Be specific in issues. Respond ONLY with valid JSON.`;
         tokenUsage: { input: 0, output: 0 },
       };
     }
+  }
+
+  // ─── I7: Property-Based Testing — generate + run ───────────
+  private async generateAndRunPBT(
+    input: VerifyInput,
+    evidence: Record<string, unknown>,
+    emit: (e: PipelineEvent) => void,
+  ): Promise<PBTResult> {
+    const execa = await getExeca();
+    const fileContents = (evidence.fileContents ?? {}) as Record<string, string>;
+
+    // 1. Build prompt for invariant extraction
+    const codeSnippets = Object.entries(fileContents)
+      .map(([path, content]) => `### ${path}\n\`\`\`\n${content.slice(0, 3000)}\n\`\`\``)
+      .join('\n\n');
+
+    const pbtPrompt = `Analyze this code and generate a Node.js test file using fast-check for property-based testing.
+
+${codeSnippets}
+
+Generate ONLY a valid JavaScript file that:
+1. Imports fast-check: const fc = require('fast-check');
+2. Defines 3-5 properties (invariants) that should always hold
+3. Runs each property with fc.assert(fc.property(...))
+4. Catches failures and reports them
+5. At the end, outputs a JSON summary to stdout: { "tested": N, "passed": N, "failed": N, "failures": [...] }
+
+Example invariants:
+- For a counter: count is always >= 0 after any sequence of operations
+- For a calculator: result of add(a, b) === a + b for all numbers
+- For a list: length after push is always previous length + 1
+- For a parser: parse(serialize(x)) === x for all valid inputs
+
+RESPOND WITH ONLY THE TEST FILE CONTENT. NO MARKDOWN. NO EXPLANATION.
+If the code has no testable pure functions or invariants, output: {"tested":0,"passed":0,"failed":0,"failures":[]}`;
+
+    // 2. Call LLM CLI to generate test code
+    const cliName = this.llm.replace('-cli', '');
+    const cliPath = await resolveCli(cliName);
+    if (!cliPath) {
+      return { propertiesTested: 0, examples: 0, failures: 0, failingProperties: [], generatedTestFile: null };
+    }
+
+    let testCode: string;
+    try {
+      let cliArgs: string[];
+      if (this.llm === 'codex-cli') {
+        cliArgs = ['exec', '--full-auto', '--sandbox', 'workspace-write', '--json', pbtPrompt];
+      } else {
+        cliArgs = ['-p', pbtPrompt, '--output-format', 'text'];
+      }
+      if (this.llm === 'claude-cli') {
+        cliArgs.push('--max-turns', '2', '--dangerously-skip-permissions');
+      }
+
+      const pbtCliResult = await execa(cliPath, cliArgs, {
+        cwd: input.projectDir, timeout: 60_000, reject: false,
+        cancelSignal: AbortSignal.timeout(60_000),
+      } as any);
+      testCode = (((pbtCliResult as any).stdout ?? '') as string).trim();
+    } catch {
+      return { propertiesTested: 0, examples: 0, failures: 0, failingProperties: [], generatedTestFile: null };
+    }
+
+    if (!testCode) {
+      return { propertiesTested: 0, examples: 0, failures: 0, failingProperties: [], generatedTestFile: null };
+    }
+
+    // JSON-only response (no testable code)
+    try {
+      const directResult = JSON.parse(testCode) as { tested?: number };
+      if (directResult.tested === 0) {
+        return { propertiesTested: 0, examples: 0, failures: 0, failingProperties: [], generatedTestFile: null };
+      }
+    } catch { /* not JSON, proceed */ }
+
+    // Strip markdown fences if LLM wrapped them
+    testCode = testCode.replace(/^```(?:javascript|js)?\n?/m, '').replace(/\n?```$/m, '');
+
+    // 3. Write test file
+    const autodevDir = join(input.projectDir, '.autodev');
+    mkdirSync(autodevDir, { recursive: true });
+    const testFilePath = join(autodevDir, 'pbt-test.js');
+    writeFileSync(testFilePath, testCode, 'utf-8');
+
+    emit({ type: 'log', level: 'info', message: `[PBT] Generated test → .autodev/pbt-test.js` } as PipelineEvent);
+
+    // 4. Ensure fast-check is available
+    try {
+      await execa('node', ['-e', 'require("fast-check")'], { cwd: input.projectDir, timeout: 5_000 } as any);
+    } catch {
+      try {
+        emit({ type: 'log', level: 'info', message: '[PBT] Installing fast-check...' } as PipelineEvent);
+        await execa('npm', ['install', '--no-save', 'fast-check'], { cwd: input.projectDir, timeout: 30_000 } as any);
+      } catch {
+        return { propertiesTested: 0, examples: 0, failures: 0, failingProperties: [], generatedTestFile: testFilePath };
+      }
+    }
+
+    // 5. Run the test
+    try {
+      const result = await execa('node', [testFilePath], {
+        cwd: input.projectDir, timeout: 30_000, reject: false,
+      } as any);
+      const testOutput = ((result as any).stdout ?? '') as string;
+
+      // Extract JSON result from output
+      const jsonMatch = testOutput.match(/\{[\s\S]*"tested"[\s\S]*?\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]) as { tested?: number; passed?: number; failed?: number; failures?: string[] };
+        return {
+          propertiesTested: parsed.tested ?? 0,
+          examples: (parsed.tested ?? 0) * 100, // fast-check default 100 examples/property
+          failures: parsed.failed ?? 0,
+          failingProperties: parsed.failures ?? [],
+          generatedTestFile: testFilePath,
+        };
+      }
+    } catch { /* test execution failed */ }
+
+    return { propertiesTested: 0, examples: 0, failures: 0, failingProperties: [], generatedTestFile: testFilePath };
+  }
+
+  // ─── I8: Debate Verification — Primary + Challenger ───────
+  private async runDebateVerification(
+    input: VerifyInput,
+    evidence: Record<string, unknown>,
+    emit: (e: PipelineEvent) => void,
+  ): Promise<{ verifyResult: VerifyResult; costUsd: number; tokenUsage: { input: number; output: number } }> {
+
+    // Round 1: Primary Verify
+    emit({ type: 'log', level: 'info', message: '[Verify Debate] Round 1: Primary review...' } as PipelineEvent);
+    const primaryResult = await this.runLlmJudgment(input, evidence, emit);
+
+    // Clear verdict → skip challenger (cost saving)
+    if (primaryResult.verifyResult.score >= 90 || primaryResult.verifyResult.score <= 30) {
+      emit({ type: 'log', level: 'info',
+        message: `[Verify Debate] Score ${primaryResult.verifyResult.score} — clear verdict, skipping challenger` } as PipelineEvent);
+      return primaryResult;
+    }
+
+    // Round 2: Challenger — different LLM challenges primary result
+    const challengerCandidates = this.fallbackLlms.filter(id => id !== this.llm);
+    if (challengerCandidates.length === 0) {
+      emit({ type: 'log', level: 'info', message: '[Verify Debate] No challenger LLM available, using primary result' } as PipelineEvent);
+      return primaryResult;
+    }
+
+    const challengerLlmId = challengerCandidates[0];
+    const challengerCliName = challengerLlmId.replace('-cli', '');
+    const challengerCliPath = await resolveCli(challengerCliName);
+    if (!challengerCliPath) {
+      emit({ type: 'log', level: 'info', message: `[Verify Debate] Challenger CLI not found: ${challengerLlmId}` } as PipelineEvent);
+      return primaryResult;
+    }
+
+    emit({ type: 'log', level: 'info', message: `[Verify Debate] Round 2: Challenger (${challengerLlmId})...` } as PipelineEvent);
+
+    const challengerPrompt = `You are a Challenger reviewing another AI's code review.
+
+PRIMARY REVIEW RESULT:
+- Verdict: ${primaryResult.verifyResult.verdict}
+- Score: ${primaryResult.verifyResult.score}/100
+- Issues: ${JSON.stringify(primaryResult.verifyResult.issues)}
+- Suggestions: ${JSON.stringify(primaryResult.verifyResult.suggestions)}
+
+YOUR JOB:
+1. Do you AGREE or DISAGREE with the verdict?
+2. Are there issues the primary reviewer MISSED?
+3. Are any of the reported issues FALSE POSITIVES (hallucinations)?
+4. What score would YOU give? (0-100)
+
+RESPOND WITH ONLY JSON (no markdown, no explanation):
+{
+  "agrees": true,
+  "reasoning": "why you agree/disagree",
+  "missedIssues": ["issue1"],
+  "falsePositives": ["issue that primary incorrectly flagged"],
+  "yourScore": 85
+}`;
+
+    let challengerResult: { agrees: boolean; missedIssues: string[]; falsePositives: string[]; yourScore: number };
+    try {
+      const execa = await getExeca();
+      let cliArgs: string[];
+      if (challengerLlmId === 'codex-cli') {
+        cliArgs = ['exec', '--full-auto', '--sandbox', 'workspace-write', '--json', challengerPrompt];
+      } else {
+        cliArgs = ['-p', challengerPrompt, '--output-format', 'text'];
+      }
+      if (challengerLlmId === 'claude-cli') {
+        cliArgs.push('--max-turns', '2', '--dangerously-skip-permissions');
+      }
+
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 120_000);
+      let stdout: string;
+      try {
+        const result = await execa(challengerCliPath, cliArgs, {
+          cwd: challengerLlmId === 'gemini-cli' ? '/tmp' : input.projectDir,
+          reject: false, timeout: 120_000, cancelSignal: controller.signal,
+        } as any);
+        stdout = ((result as any).stdout ?? '') as string;
+      } finally {
+        clearTimeout(timer);
+      }
+
+      const jsonStr = extractJson<Record<string, unknown>>(stdout, 'agrees');
+      challengerResult = {
+        agrees: (jsonStr as any).agrees ?? true,
+        missedIssues: ((jsonStr as any).missedIssues ?? []) as string[],
+        falsePositives: ((jsonStr as any).falsePositives ?? []) as string[],
+        yourScore: (jsonStr as any).yourScore ?? primaryResult.verifyResult.score,
+      };
+    } catch {
+      emit({ type: 'log', level: 'info', message: '[Verify Debate] Challenger failed, using primary result' } as PipelineEvent);
+      return primaryResult;
+    }
+
+    // Round 3: Combine results
+    emit({ type: 'log', level: 'info',
+      message: `[Verify Debate] Challenger ${challengerResult.agrees ? 'AGREES' : 'DISAGREES'} (score: ${challengerResult.yourScore})` } as PipelineEvent);
+
+    // Final score: weighted average (Primary 60%, Challenger 40%)
+    const finalScore = Math.round(
+      primaryResult.verifyResult.score * 0.6 + challengerResult.yourScore * 0.4,
+    );
+
+    // Merge issues: primary - false positives + missed
+    const finalIssues = [
+      ...primaryResult.verifyResult.issues.filter(i =>
+        !challengerResult.falsePositives.some(fp => i.toLowerCase().includes(fp.toLowerCase())),
+      ),
+      ...challengerResult.missedIssues,
+    ];
+
+    const finalVerdict: VerifyResult['verdict'] = finalScore >= 70 ? 'pass' : finalScore >= 40 ? 're-code' : 'fail';
+
+    emit({ type: 'log', level: 'info',
+      message: `[Verify Debate] Final: ${finalVerdict} ${finalScore}/100 (${finalIssues.length} issues)` } as PipelineEvent);
+
+    return {
+      verifyResult: {
+        ...primaryResult.verifyResult,
+        score: finalScore,
+        verdict: finalVerdict,
+        issues: finalIssues,
+        passed: finalVerdict === 'pass',
+        reason: `Debate: Primary=${primaryResult.verifyResult.score}, Challenger=${challengerResult.yourScore} → ${finalScore} (${challengerResult.agrees ? 'agreed' : 'disagreed'})`,
+      },
+      costUsd: primaryResult.costUsd * 2,
+      tokenUsage: {
+        input: primaryResult.tokenUsage.input * 2,
+        output: primaryResult.tokenUsage.output * 2,
+      },
+    };
   }
 
   // ─── VLM: Visual analysis via OpenRouter / Anthropic Vision ───
