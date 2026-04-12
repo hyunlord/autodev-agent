@@ -84,6 +84,7 @@ export class RetryController {
     if (lower.includes('not installed') || lower.includes('not found') || lower.includes('command not found')) return 'unfixable';
     if (lower.includes('out of memory') || lower.includes('oom')) return 'unfixable';
     if (lower.includes('disk full') || lower.includes('enospc')) return 'unfixable';
+    if (lower.includes('credit balance') || lower.includes('insufficient_quota') || lower.includes('billing')) return 'strategy_change';
     if (lower.includes('429') || lower.includes('rate limit')) return 'transient';
     if (lower.includes('500') || lower.includes('502') || lower.includes('503')) return 'transient';
     if (lower.includes('timeout') || lower.includes('etimedout')) return 'transient';

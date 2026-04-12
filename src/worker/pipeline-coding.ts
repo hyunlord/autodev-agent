@@ -420,6 +420,31 @@ ${currentPlan.codingPrompt}`;
       const errorMsg = `Coding failed: ${codeResult.text.slice(0, 500)}`;
       emit({ type: 'attempt_complete', attemptNum: attempt, success: false, error: errorMsg });
 
+      // ─── Credit exhaustion fallback (like planning phase) ───
+      const isCreditError = /credit balance is too low|insufficient_quota|billing/i.test(errorMsg);
+      if (isCreditError) {
+        const alt = await selectAlternativeAgent(agentId, [], _codeTaskCfg.costPreference);
+        if (alt) {
+          const fromAgent = agentId;
+          agent = alt.agent;
+          agentId = alt.agentId;
+          emit({
+            type: 'agent_switch',
+            fromAgent,
+            toAgent: agentId,
+            reason: 'credit_exhaustion',
+            attemptNum: attempt,
+          });
+          emit({
+            type: 'log',
+            level: 'warn',
+            message: `[Credit Fallback] ${fromAgent} credit exhausted, switching to ${agentId}`,
+          });
+          // Don't record attempt — retry immediately with new agent
+          continue;
+        }
+      }
+
       retryCtrl.recordAttempt({
         attemptNum: attempt,
         errorMessage: errorMsg,
@@ -447,14 +472,11 @@ ${currentPlan.codingPrompt}`;
       lastFailedChecks = [{ id: 'coding', description: 'Coding agent returned error', actual: errorMsg }];
       const errorTier = retryCtrl.classifyError(errorMsg);
       if (errorTier === 'strategy_change') {
-        const allAgents = PluginRegistry.instance.listAgents();
-        for (const alt of allAgents) {
-          if (alt.id !== agentId && await alt.isAvailable()) {
-            emit({ type: 'log', level: 'info', message: `Strategy change: switching from ${agent.name} to ${alt.name}` });
-            agent = alt;
-            agentId = alt.id;
-            break;
-          }
+        const alt2 = await selectAlternativeAgent(agentId, [], _codeTaskCfg.costPreference);
+        if (alt2) {
+          emit({ type: 'log', level: 'info', message: `Strategy change: switching from ${agent.name} to ${alt2.agent.name}` });
+          agent = alt2.agent;
+          agentId = alt2.agentId;
         }
       }
       continue;
