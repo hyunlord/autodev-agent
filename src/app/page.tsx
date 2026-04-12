@@ -49,11 +49,12 @@ export default function MissionControl() {
   const [initialProjectDir, setInitialProjectDir] = useState<string | undefined>();
   const [chainTask, setChainTask] = useState<{ id: string; prompt: string } | null>(null);
 
-  // Handle URL params (projectDir, chain)
+  // Handle URL params (projectDir, chain, newTask)
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const dirFromUrl = urlParams.get('projectDir');
     if (dirFromUrl) setInitialProjectDir(dirFromUrl);
+    if (urlParams.get('newTask')) setShowNewTask(true);
     const chainId = urlParams.get('chain');
     if (chainId) {
       fetch(`/api/tasks/${chainId}`)

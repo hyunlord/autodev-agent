@@ -14,6 +14,8 @@ export default function OnboardingTour() {
 
   useEffect(() => {
     if (hasSeenTour) return;
+    // Only run tour on the dashboard (Mission Control)
+    if (window.location.pathname !== '/') return;
 
     const timeout = setTimeout(() => {
       const driverObj = driver({

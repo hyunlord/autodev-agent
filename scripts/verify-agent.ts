@@ -41,6 +41,26 @@ async function main() {
     } catch { /* no previous commit */ }
   }
 
+  // Filter out non-reviewable files (lock files, binaries, generated)
+  const SKIP_PATTERNS = [
+    /pnpm-lock\.yaml$/,
+    /package-lock\.json$/,
+    /yarn\.lock$/,
+    /\.lock$/,
+    /\.min\.(js|css)$/,
+    /\.map$/,
+    /\.woff2?$/,
+    /\.png$/, /\.jpg$/, /\.jpeg$/, /\.gif$/, /\.ico$/, /\.svg$/,
+  ];
+  changedFiles = changedFiles.filter(f => !SKIP_PATTERNS.some(p => p.test(f)));
+
+  // Prioritize src/ files first, then config files
+  changedFiles.sort((a, b) => {
+    const aIsSrc = a.startsWith('src/') ? 0 : 1;
+    const bIsSrc = b.startsWith('src/') ? 0 : 1;
+    return aIsSrc - bIsSrc;
+  });
+
   if (changedFiles.length === 0) {
     console.log('✅ No changed files');
     process.exit(0);
