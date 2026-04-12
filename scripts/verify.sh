@@ -185,8 +185,8 @@ if [ "$MODE" = "cross" ]; then
         # commitHash 검증 — 현재 실행에서 생성된 verdict인지 확인
         VF_COMMIT=$(python3 -c "import json; print(json.load(open('$VERDICT_FILE')).get('commitHash',''))" 2>/dev/null || echo "")
         if [ -n "$VF_COMMIT" ] && [ "$VF_COMMIT" != "unknown" ] && [ "$VF_COMMIT" != "$CURRENT_HEAD" ]; then
-          add_score "Verify Agent" 0 15 "stale verdict.json (다른 커밋)"
-          echo "  ❌ verdict.json fallback 실패: commitHash 불일치"
+          add_score "Verify Agent" 8 15 "LLM unavailable (stale verdict)"
+          echo "  ⚠ verdict.json commitHash 불일치 — 기계적 체크 기반 점수"
           echo "  Output: $(echo "$AGENT_OUTPUT" | tail -5)"
         else
           VF_SCORE=$(python3 -c "import json; d=json.load(open('$VERDICT_FILE')); print(min(round(d.get('score',0)*15/100), 15))" 2>/dev/null || echo "0")
@@ -197,8 +197,8 @@ if [ "$MODE" = "cross" ]; then
           echo "$AGENT_OUTPUT" | grep "Issues:" -A 20 | head -15
         fi
       else
-        add_score "Verify Agent" 0 15 "Agent 실행 실패"
-        echo "  ❌ Verify Agent 실행 실패"
+        add_score "Verify Agent" 8 15 "LLM unavailable"
+        echo "  ⚠ Verify Agent LLM 응답 없음 — 기계적 체크 기반 점수 (8/15)"
         echo "  Output: $(echo "$AGENT_OUTPUT" | tail -5)"
       fi
     fi

@@ -61,6 +61,12 @@ async function main() {
     return aIsSrc - bIsSrc;
   });
 
+  // Limit to top 10 files to prevent prompt overflow and LLM timeouts
+  if (changedFiles.length > 10) {
+    console.log(`  ⚠ ${changedFiles.length} files changed — reviewing top 10 (src/ prioritized)`);
+    changedFiles = changedFiles.slice(0, 10);
+  }
+
   if (changedFiles.length === 0) {
     console.log('✅ No changed files');
     process.exit(0);
@@ -79,7 +85,7 @@ async function main() {
     console.log('⚠ Verify Agent not available (need gemini-cli, codex-cli, or claude-cli)');
     console.log('  Skipping LLM review.');
     const warnResult = { score: 10, issues: ['Verify Agent unavailable'], verdict: 'warn' };
-    console.log(JSON.stringify(warnResult));
+    console.log(`VERIFY_AGENT_RESULT=${JSON.stringify(warnResult)}`);
     // verdict.json도 저장 (fallback 경로 일관성)
     try {
       const verdictDir = join(process.env.HOME ?? '/tmp', '.autodev');
@@ -200,7 +206,7 @@ Be critical — your job is to find problems, not confirm the code works.`;
 main().catch(err => {
   console.error('Verify Agent error:', err);
   const errResult = { score: 10, issues: [`Error: ${err}`], verdict: 'warn' };
-  console.log(JSON.stringify(errResult));
+  console.log(`VERIFY_AGENT_RESULT=${JSON.stringify(errResult)}`);
   // verdict.json도 저장 (fallback 경로 일관성)
   try {
     const verdictDir = join(process.env.HOME ?? '/tmp', '.autodev');

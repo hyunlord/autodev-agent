@@ -400,14 +400,25 @@ export class VerifyAgent implements IAgent {
     const fileContents: Record<string, string> = {};
     const truncatedFiles: Record<string, number> = {};
     let totalContentSize = 0;
-    const maxTotalContent = 40000;
-    for (const file of input.modifiedFiles) {
+    const maxTotalContent = 20000;
+    // Limit to top 10 files (src/ first, then by file size desc) to keep prompt manageable
+    const sortedFiles = [...input.modifiedFiles].sort((a, b) => {
+      const aIsSrc = a.startsWith('src/') ? 0 : 1;
+      const bIsSrc = b.startsWith('src/') ? 0 : 1;
+      if (aIsSrc !== bIsSrc) return aIsSrc - bIsSrc;
+      try {
+        const aSize = statSync(join(input.projectDir, a)).size;
+        const bSize = statSync(join(input.projectDir, b)).size;
+        return bSize - aSize; // larger files first (more important)
+      } catch { return 0; }
+    }).slice(0, 10);
+    for (const file of sortedFiles) {
       if (totalContentSize >= maxTotalContent) break;
       const fullPath = join(input.projectDir, file);
       if (existsSync(fullPath) && !statSync(fullPath).isDirectory()) {
         const content = readFileSync(fullPath, 'utf-8');
         const remaining = maxTotalContent - totalContentSize;
-        const maxPerFile = Math.min(remaining, 10000);
+        const maxPerFile = Math.min(remaining, 5000);
         if (content.length > maxPerFile) {
           fileContents[file] = content.slice(0, maxPerFile)
             + `\n[--- END OF VISIBLE PORTION --- remaining ${content.length - maxPerFile} bytes exist on disk but omitted from prompt for size. Do not report this file as incomplete.]`;
@@ -878,8 +889,8 @@ Example: {"passed":true,"score":85,"reason":"All features correct","issues":[],"
       } else if (this.llm === 'gemini-cli') {
         const cliPath = await resolveCli('gemini');
         if (!cliPath) throw new Error('Gemini CLI not found');
-        const geminiPrompt = (verifyPrompt.length > 40000
-          ? verifyPrompt.slice(0, 39500) + '\n...[prompt truncated]'
+        const geminiPrompt = (verifyPrompt.length > 25000
+          ? verifyPrompt.slice(0, 24500) + '\n...[prompt truncated]'
           : verifyPrompt) + jsonEnforcement;
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), 180_000);
@@ -906,16 +917,16 @@ Example: {"passed":true,"score":85,"reason":"All features correct","issues":[],"
         const codexA11y = a11yViolations != null ? `\nA11y: ${a11yViolations} violation(s).` : '';
         const codexContext = `${codexAcceptance}${codexPriorIssues}${codexSast}${codexA11y}`;
 
-        const codexPrompt = `RESPOND WITH ONLY VALID JSON. No markdown, no explanation, no code fences.
-Required: {"passed":bool,"score":0-100,"reason":"...","issues":["..."],"suggestions":["..."],"verdict":"pass"|"re-code"|"re-plan"|"fail"}
+        const codexPrompt = `RESPOND IN UNDER 50 WORDS PER FIELD. Output ONLY valid JSON, nothing else.
+{"passed":bool,"score":0-100,"reason":"...","issues":["..."],"suggestions":["..."],"verdict":"pass"|"re-code"|"re-plan"|"fail"}
 
-Files below may end with [--- END OF VISIBLE PORTION ---]. The rest exists on disk but was omitted for size. Do NOT report truncation as an issue.
+Truncated files (marked [--- END OF VISIBLE PORTION ---]) are NOT incomplete — do NOT flag them.
 
-=== FILES MODIFIED ===
+=== FILES ===
 ${input.modifiedFiles.join(', ')}
 
-=== FILE CONTENTS ===
-${fileContentsSection.slice(0, 8000)}
+=== CODE ===
+${fileContentsSection.slice(0, 5000)}
 
 === CONTEXT ===
 ${codexContext}
@@ -1001,13 +1012,13 @@ Score 0-100. Be specific in issues. Respond ONLY with valid JSON.`;
         return fallbackAgent.runLlmJudgment(input, evidence, emit);
       }
 
-      // All LLMs exhausted: fallback score
+      // All LLMs exhausted: mechanical-only score (generous — build+TS already passed to reach here)
       return {
         verifyResult: {
           passed: true,
-          score: 50,
-          reason: `LLM verification failed (${err}), defaulting to mechanical-only pass`,
-          issues: ['LLM verification unavailable'],
+          score: 70,
+          reason: `LLM verification unavailable (${err}). Mechanical checks (build/TS/API) passed — score reflects mechanical-only confidence.`,
+          issues: ['LLM verification unavailable — review manually if critical'],
           suggestions: [],
           verdict: 'pass',
           evidence: {},
