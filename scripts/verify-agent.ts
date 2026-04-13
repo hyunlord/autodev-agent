@@ -76,8 +76,10 @@ async function main() {
   changedFiles.forEach(f => console.log(`  ${f}`));
   console.log('');
 
-  // 2. Select Verify Agent (different from Claude Code)
-  const { primary: verifyAgent, fallbacks } = await VerifyAgent.selectDifferentFrom('claude-code');
+  // 2. Select Verify Agent (different from coding agent)
+  const excludeIdx = process.argv.indexOf('--exclude-agent');
+  const excludeAgent = excludeIdx !== -1 && process.argv[excludeIdx + 1] ? process.argv[excludeIdx + 1] : 'claude-code';
+  const { primary: verifyAgent, fallbacks } = await VerifyAgent.selectDifferentFrom(excludeAgent);
   verifyAgent.fallbackLlms = fallbacks;
   const available = await verifyAgent.isAvailable();
 

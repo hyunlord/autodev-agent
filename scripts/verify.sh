@@ -11,6 +11,54 @@ if [ "$CI" = "true" ]; then
 fi
 echo ""
 
+# ─── Helper: wait for dev server (replaces fixed sleep) ─────
+wait_for_server() {
+  local max_wait=30
+  local waited=0
+  while [ $waited -lt $max_wait ]; do
+    if curl -s -o /dev/null -w "%{http_code}" "http://localhost:3000/api/status" 2>/dev/null | grep -q "200"; then
+      return 0
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+  return 1
+}
+
+# ─── Helper: graceful server cleanup ────────────────────────
+cleanup_server() {
+  local pid="$1"
+  kill "$pid" 2>/dev/null
+  sleep 2
+  # Only force-kill our own dev process if still running
+  if kill -0 "$pid" 2>/dev/null; then
+    kill -9 "$pid" 2>/dev/null
+  fi
+  sleep 1
+}
+
+# ─── Helper: JSON parsing via Node.js (no python3 dependency) ─
+json_get() {
+  local json="$1"
+  local key="$2"
+  local default="${3:-}"
+  node -e "try{const d=JSON.parse(process.argv[1]);console.log(d['$key']??'$default')}catch{console.log('$default')}" "$json" 2>/dev/null
+}
+
+json_get_file() {
+  local file="$1"
+  local key="$2"
+  local default="${3:-}"
+  node -e "try{const d=require('$file');console.log(d['$key']??'$default')}catch{console.log('$default')}" 2>/dev/null
+}
+
+json_get_nested() {
+  local file="$1"
+  local expr="$2"
+  local default="${3:-0}"
+  node -e "try{const d=require('$file');console.log($expr)}catch{console.log('$default')}" 2>/dev/null
+}
+
 # Score tracking
 TOTAL_SCORE=0
 MAX_SCORE=0
@@ -71,7 +119,7 @@ echo ""
 echo "=== Step 3: API Health ==="
 pnpm dev > /dev/null 2>&1 &
 DEV_PID=$!
-sleep 6
+wait_for_server
 
 API_PASS=0
 API_TOTAL=0
@@ -87,10 +135,7 @@ for EP in "/api/status" "/api/projects" "/api/tasks" "/api/mcp" "/api/harness" "
 done
 
 # Cleanup
-kill $DEV_PID 2>/dev/null
-sleep 2
-lsof -ti:3000 | xargs kill -9 2>/dev/null || true
-sleep 1
+cleanup_server $DEV_PID
 
 if [ $API_PASS -eq $API_TOTAL ]; then
   add_score "API Health" 10 10 "${API_PASS}/${API_TOTAL} OK"
@@ -111,7 +156,7 @@ if [ "$MODE" = "full" ] || [ "$MODE" = "cross" ]; then
   else
     pnpm dev > /dev/null 2>&1 &
     DEV_PID=$!
-    sleep 6
+    wait_for_server
 
     UI_PASS=0
     UI_TOTAL=0
@@ -126,10 +171,7 @@ if [ "$MODE" = "full" ] || [ "$MODE" = "cross" ]; then
       fi
     done
 
-    kill $DEV_PID 2>/dev/null
-    sleep 2
-    lsof -ti:3000 | xargs kill -9 2>/dev/null || true
-    sleep 1
+    cleanup_server $DEV_PID
 
     if [ $UI_PASS -eq $UI_TOTAL ]; then
       add_score "UI Pages" 10 10 "${UI_PASS}/${UI_TOTAL} OK"
@@ -150,22 +192,24 @@ if [ "$MODE" = "cross" ]; then
     add_score "Verify Agent" 30 50 "skipped (CI)"
   else
 
-  CHANGED=$(git diff HEAD~1 --name-only 2>/dev/null | head -20 || echo "")
+  # Detect changes: staged + last commit + working tree (not just HEAD~1)
+  CHANGED=$({ git diff --cached --name-only 2>/dev/null; git diff --name-only 2>/dev/null; git diff HEAD~1 --name-only 2>/dev/null; } | sort -u | head -20)
 
   if [ -n "$CHANGED" ]; then
     # 이전 실행의 verdict.json 삭제 — stale fallback 방지
     rm -f "$HOME/.autodev/verdict.json"
 
-    # Run Verify Agent via Node.js script
-    AGENT_OUTPUT=$(npx tsx scripts/verify-agent.ts 2>&1 || echo "")
+    # Run Verify Agent via Node.js script (pass coding agent for dynamic exclusion)
+    CODING_AGENT="${CODING_AGENT:-claude-code}"
+    AGENT_OUTPUT=$(npx tsx scripts/verify-agent.ts --exclude-agent "$CODING_AGENT" 2>&1 || echo "")
 
-    # Extract JSON result from output — python3으로 안정적 파싱 (regex 대체)
+    # Extract JSON result from output
     AGENT_JSON=$(echo "$AGENT_OUTPUT" | grep "VERIFY_AGENT_RESULT=" | sed 's/.*VERIFY_AGENT_RESULT=//')
 
     if [ -n "$AGENT_JSON" ]; then
-      # python3 JSON 파싱 (regex보다 안정적)
-      AGENT_SCORE=$(python3 -c "import json,sys; d=json.loads(sys.argv[1]); print(d.get('score',0))" "$AGENT_JSON" 2>/dev/null || echo "")
-      AGENT_VERDICT=$(python3 -c "import json,sys; d=json.loads(sys.argv[1]); print(d.get('verdict','unknown'))" "$AGENT_JSON" 2>/dev/null || echo "")
+      # Node.js JSON 파싱 (python3 의존성 제거)
+      AGENT_SCORE=$(json_get "$AGENT_JSON" "score" "")
+      AGENT_VERDICT=$(json_get "$AGENT_JSON" "verdict" "unknown")
 
       if [ -n "$AGENT_SCORE" ] && [ "$AGENT_SCORE" -le 50 ] 2>/dev/null; then
         add_score "Verify Agent" "$AGENT_SCORE" 50 "$AGENT_VERDICT"
@@ -183,14 +227,14 @@ if [ "$MODE" = "cross" ]; then
       CURRENT_HEAD=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
       if [ -f "$VERDICT_FILE" ]; then
         # commitHash 검증 — 현재 실행에서 생성된 verdict인지 확인
-        VF_COMMIT=$(python3 -c "import json; print(json.load(open('$VERDICT_FILE')).get('commitHash',''))" 2>/dev/null || echo "")
+        VF_COMMIT=$(json_get_file "$VERDICT_FILE" "commitHash" "")
         if [ -n "$VF_COMMIT" ] && [ "$VF_COMMIT" != "unknown" ] && [ "$VF_COMMIT" != "$CURRENT_HEAD" ]; then
           add_score "Verify Agent" 20 50 "LLM unavailable (stale verdict)"
           echo "  ⚠ verdict.json commitHash 불일치 — 기계적 체크 기반 점수"
           echo "  Output: $(echo "$AGENT_OUTPUT" | tail -5)"
         else
-          VF_SCORE=$(python3 -c "import json; d=json.load(open('$VERDICT_FILE')); print(min(round(d.get('score',0)*50/100), 50))" 2>/dev/null || echo "0")
-          VF_VERDICT=$(python3 -c "import json; d=json.load(open('$VERDICT_FILE')); v=d.get('verdict','unknown'); print('ok' if v=='pass' else 'fail' if v=='fail' else 'warn')" 2>/dev/null || echo "unknown")
+          VF_SCORE=$(json_get_nested "$VERDICT_FILE" "Math.min(Math.round(d.score*50/100),50)" "0")
+          VF_VERDICT=$(json_get_nested "$VERDICT_FILE" "d.verdict==='pass'?'ok':d.verdict==='fail'?'fail':'warn'" "unknown")
 
           add_score "Verify Agent" "$VF_SCORE" 50 "$VF_VERDICT"
           echo "  Score: ${VF_SCORE}/50 (${VF_VERDICT}) — verdict.json fallback"
@@ -254,17 +298,17 @@ if [ "$MODE" = "cross" ]; then
   mkdir -p "$RESULT_DIR"
   COMMIT_HASH=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
   TREE_HASH=$(git write-tree 2>/dev/null || echo "unknown")
-  python3 -c "
-import json, datetime
-json.dump({
-    'timestamp': datetime.datetime.now(datetime.timezone.utc).isoformat(),
-    'score': $TOTAL_SCORE,
-    'maxScore': $MAX_SCORE,
-    'percent': $PERCENT,
-    'grade': '$GRADE',
-    'mode': '$MODE',
-    'commitHash': '$COMMIT_HASH',
-    'treeHash': '$TREE_HASH',
-}, open('$RESULT_DIR/cross-result.json', 'w'), indent=2)
+  node -e "
+const fs = require('fs');
+fs.writeFileSync('$RESULT_DIR/cross-result.json', JSON.stringify({
+  timestamp: new Date().toISOString(),
+  score: $TOTAL_SCORE,
+  maxScore: $MAX_SCORE,
+  percent: $PERCENT,
+  grade: '$GRADE',
+  mode: '$MODE',
+  commitHash: '$COMMIT_HASH',
+  treeHash: '$TREE_HASH',
+}, null, 2));
 " 2>/dev/null || true
 fi
