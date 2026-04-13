@@ -11,6 +11,31 @@ import type { PipelineEvent } from '../lib/types';
 
 // ─── Initialize ────────────────────────────────────────────────
 
+// Guard against IPC channel close during HMR — prevents unhandled 'error' crash
+process.on('error', (err: Error & { code?: string }) => {
+  if (err.code === 'ERR_IPC_CHANNEL_CLOSED') {
+    console.warn('[Worker] IPC channel closed (HMR?) — ignoring');
+    return;
+  }
+  console.error('[Worker] Unhandled process error:', err);
+});
+
+// Prevent worker crash on unhandled promise rejections or uncaught exceptions
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[Worker] Unhandled rejection:', reason);
+  // Don't exit — let active pipelines report their own errors
+});
+
+process.on('uncaughtException', (err: Error & { code?: string }) => {
+  // IPC errors during HMR are expected — ignore silently
+  if (err.code === 'ERR_IPC_CHANNEL_CLOSED' || err.code === 'ERR_IPC_DISCONNECTED') {
+    console.warn('[Worker] IPC error in exception handler — ignoring');
+    return;
+  }
+  console.error('[Worker] Uncaught exception:', err);
+  // Don't exit — graceful degradation over crash
+});
+
 console.log('[Worker] Starting...');
 
 // Run DB migrations on worker start
@@ -57,7 +82,11 @@ function startPipeline(taskId: string): void {
   console.log(`[Worker] Starting pipeline for task ${taskId} (active: ${activeTasks.size}/${MAX_CONCURRENT_PIPELINES})`);
 
   const emit = (event: PipelineEvent) => {
-    process.send?.({ taskId, event });
+    try {
+      process.send?.({ taskId, event });
+    } catch {
+      // IPC channel may close during HMR — swallow to prevent crash
+    }
   };
 
   runPipeline(taskId, emit, abortController.signal)
