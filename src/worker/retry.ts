@@ -81,17 +81,19 @@ export class RetryController {
     const lower = errorMessage.toLowerCase();
     if (lower.includes('permission denied') || lower.includes('eacces')) return 'unfixable';
     if (lower.includes('authentication') || lower.includes('401') || lower.includes('403')) return 'unfixable';
-    if (lower.includes('not installed') || lower.includes('not found') || lower.includes('command not found')) return 'unfixable';
     if (lower.includes('out of memory') || lower.includes('oom')) return 'unfixable';
     if (lower.includes('disk full') || lower.includes('enospc')) return 'unfixable';
     if (lower.includes('credit balance') || lower.includes('insufficient_quota') || lower.includes('billing')) return 'strategy_change';
+    // fixable import/module errors must be checked before generic 'not found' (unfixable)
+    if (lower.includes('module not found') || lower.includes('cannot find module') || lower.includes('import')) return 'fixable';
+    if (lower.includes('not installed') || lower.includes('command not found')) return 'unfixable';
+    if (lower.includes('not found')) return 'unfixable';
     if (lower.includes('429') || lower.includes('rate limit')) return 'transient';
     if (lower.includes('500') || lower.includes('502') || lower.includes('503')) return 'transient';
     if (lower.includes('timeout') || lower.includes('etimedout')) return 'transient';
     if (lower.includes('econnreset') || lower.includes('econnrefused')) return 'transient';
     if (lower.includes('syntax error') || lower.includes('syntaxerror')) return 'fixable';
     if (lower.includes('type error') || lower.includes('typeerror')) return 'fixable';
-    if (lower.includes('import') || lower.includes('module not found') || lower.includes('cannot find module')) return 'fixable';
     if (lower.includes('lint') || lower.includes('eslint')) return 'fixable';
     if (lower.includes('test fail') || lower.includes('assertion')) return 'fixable';
     if (lower.includes('build fail') || lower.includes('compilation')) return 'fixable';
