@@ -906,7 +906,7 @@ Example: {"passed":true,"score":85,"reason":"All features correct","issues":[],"
       } else if (this.llm === 'codex-cli') {
         const cliPath = await resolveCli('codex');
         if (!cliPath) throw new Error('Codex CLI not found');
-        // Codex has ~12K usable context — files-first prompt with key context (total ≤11K)
+        // Codex prompt-only mode (no --full-auto → no shell commands) — 20K usable context
         const codexAcceptance = acFails && acFails.length > 0
           ? `\nAcceptance FAIL (${acFails.length} item(s) — HARD requirements, verdict MUST be "re-code" if any fail): ${acFails.join('; ').slice(0, 400)}`
           : evidence.hasAcceptanceCriteria ? '\nAcceptance: ALL PASSED' : '';
@@ -917,8 +917,8 @@ Example: {"passed":true,"score":85,"reason":"All features correct","issues":[],"
         const codexA11y = a11yViolations != null ? `\nA11y: ${a11yViolations} violation(s).` : '';
         const codexContext = `${codexAcceptance}${codexPriorIssues}${codexSast}${codexA11y}`;
 
-        // Build Codex-specific file section: complete files within 5KB budget (no mid-file slicing)
-        const codexBudget = 5000;
+        // Build Codex-specific file section: complete files within 10KB budget (no mid-file slicing)
+        const codexBudget = 10000;
         let codexUsed = 0;
         const codexFileParts: string[] = [];
         for (const [path, content] of Object.entries(fileContents)) {
@@ -929,7 +929,7 @@ Example: {"passed":true,"score":85,"reason":"All features correct","issues":[],"
         }
         const codexFileSection = codexFileParts.length > 0
           ? codexFileParts.join('\n')
-          : `### ${Object.keys(fileContents)[0] ?? 'unknown'}\n\`\`\`\n${Object.values(fileContents)[0]?.slice(0, 4000) ?? ''}\n\`\`\``;
+          : `### ${Object.keys(fileContents)[0] ?? 'unknown'}\n\`\`\`\n${Object.values(fileContents)[0]?.slice(0, 8000) ?? ''}\n\`\`\``;
 
         const codexPrompt = `RESPOND IN UNDER 50 WORDS PER FIELD. Output ONLY valid JSON, nothing else.
 {"passed":bool,"score":0-100,"reason":"...","issues":["..."],"suggestions":["..."],"verdict":"pass"|"re-code"|"re-plan"|"fail"}
@@ -950,13 +950,15 @@ Review this code for: 1) type errors 2) logic bugs 3) missing error handling 4) 
 Original request: ${(input.originalPrompt ?? '').slice(0, 500)}
 
 Score 0-100. Be specific in issues. Respond ONLY with valid JSON.`;
+        // No --full-auto → Codex can't run shell commands, must respond with JSON directly
+        // Reduced timeout from 180s to 60s since no command execution overhead
         const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 180_000);
+        const timer = setTimeout(() => controller.abort(), 60_000);
         try {
           const result = await ex(cliPath, [
-            'exec', '--full-auto', '--sandbox', 'workspace-write', '--json',
+            'exec', '--json',
             codexPrompt,
-          ], { cwd: input.projectDir, reject: false, timeout: 180_000, cancelSignal: controller.signal } as any);
+          ], { cwd: input.projectDir, reject: false, timeout: 60_000, cancelSignal: controller.signal } as any);
           stdout = (result as any).stdout ?? '';
         } finally {
           clearTimeout(timer);
@@ -978,6 +980,32 @@ Score 0-100. Be specific in issues. Respond ONLY with valid JSON.`;
       if (!inputTokens) inputTokens = Math.ceil(verifyPrompt.length / 4);
       if (!outputTokens) outputTokens = Math.ceil(stdout.length / 4);
       const costUsd = (inputTokens / 1_000_000) * 3.0 + (outputTokens / 1_000_000) * 15.0;
+
+      // ─── Codex JSONL: detect exploration runaway and extract findings ──
+      if (this.llm === 'codex-cli' && stdout.length > 10000) {
+        const findings = this.extractFindingsFromCodexJsonl(stdout, emit);
+        if (findings) {
+          if (findings.issues.length > 0) {
+            emit({ type: 'log', level: 'info', message: `[Verify] Codex exploration: synthesized ${findings.issues.length} issue(s) from ${findings.commandCount} commands` } as PipelineEvent);
+            const synthScore = Math.max(30, 70 - findings.issues.length * 10);
+            return {
+              verifyResult: {
+                passed: false,
+                score: synthScore,
+                reason: `Synthesized from Codex agent messages (${findings.commandCount} cmds). No formal JSON verdict.`,
+                issues: findings.issues,
+                suggestions: [],
+                verdict: 're-code' as const,
+                evidence: {},
+              },
+              costUsd,
+              tokenUsage: { input: inputTokens, output: outputTokens },
+            };
+          }
+          // No extractable findings — throw to trigger Gemini fallback
+          throw new Error(`Codex exploration: ${findings.commandCount} commands, no verdict or findings`);
+        }
+      }
 
       // Parse LLM response
       const parsed = extractJson<VerifyResult>(stdout, 'verdict');
@@ -1004,6 +1032,19 @@ Score 0-100. Be specific in issues. Respond ONLY with valid JSON.`;
       }
       if (Array.isArray(parsed.suggestions)) {
         parsed.suggestions = parsed.suggestions.filter((s: string) => !truncationPattern.test(s));
+      }
+
+      // ─── Detect Codex hallucinations (e.g. "no code provided" despite code in prompt) ──
+      if (this.llm === 'codex-cli' && this.fallbackLlms.length > 0) {
+        const noCodePattern = /no (?:source|code|files|patch|diff)/i;
+        const isHallucination = parsed.score === 0 && (
+          noCodePattern.test(parsed.reason ?? '') ||
+          (Array.isArray(parsed.issues) && parsed.issues.some((i: string) => noCodePattern.test(i)))
+        );
+        if (isHallucination) {
+          emit({ type: 'log', level: 'warn', message: `[Verify] Codex hallucination (score=0, "no code") — retrying with ${this.fallbackLlms[0]}` } as PipelineEvent);
+          throw new Error('Codex hallucination: claimed no code despite prompt containing file contents');
+        }
       }
 
       emit({ type: 'log', level: 'info', message: `[Verify] LLM verdict: ${parsed.verdict} (score: ${parsed.score})` } as PipelineEvent);
@@ -1041,6 +1082,64 @@ Score 0-100. Be specific in issues. Respond ONLY with valid JSON.`;
         tokenUsage: { input: 0, output: 0 },
       };
     }
+  }
+
+  // ─── Extract findings from Codex JSONL exploration output ───────────
+  // Returns null if output contains a proper JSON verdict (extractJson handles it).
+  // Returns findings if Codex ran commands but never produced a JSON verdict.
+  private extractFindingsFromCodexJsonl(
+    stdout: string,
+    emit: (e: PipelineEvent) => void,
+  ): { issues: string[]; suggestions: string[]; commandCount: number; messageCount: number } | null {
+    const lines = stdout.split('\n');
+    const messages: string[] = [];
+    let commandCount = 0;
+    let hasJsonVerdict = false;
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith('{')) continue;
+      try {
+        const obj = JSON.parse(trimmed);
+        if (obj.type === 'item.completed') {
+          const item = obj.item;
+          if (item?.type === 'agent_message') {
+            const text = item.text ?? '';
+            messages.push(text);
+            try {
+              const inner = JSON.parse(text);
+              if (inner.verdict) hasJsonVerdict = true;
+            } catch { /* not JSON — that's expected for narrative messages */ }
+          } else if (item?.type === 'command_execution') {
+            commandCount++;
+          }
+        }
+      } catch { continue; }
+    }
+
+    // If there's a proper JSON verdict, let extractJson handle it normally
+    if (hasJsonVerdict) return null;
+    // If no commands were run, this isn't an exploration runaway
+    if (commandCount === 0) return null;
+
+    // Extract issues from agent message texts via keyword matching
+    const issues: string[] = [];
+    const issuePatterns = /\b(defect|bug|error|vulnerability|regression|missing|broken|incorrect|unsafe|invalid|fails?|risk|drops?)\b/i;
+
+    for (const msg of messages) {
+      const sentences = msg.split(/[.!]\s+/);
+      for (const sentence of sentences) {
+        if (issuePatterns.test(sentence) && sentence.length > 20 && sentence.length < 300) {
+          issues.push(sentence.trim());
+        }
+      }
+    }
+
+    emit({ type: 'log', level: 'info',
+      message: `[Verify] Codex JSONL: ${commandCount} cmds, ${messages.length} msgs, ${issues.length} extractable issue(s)`,
+    } as PipelineEvent);
+
+    return { issues: issues.slice(0, 10), suggestions: [], commandCount, messageCount: messages.length };
   }
 
   // ─── I7: Property-Based Testing — generate + run ───────────
