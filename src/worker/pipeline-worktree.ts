@@ -93,20 +93,29 @@ export async function mergeWorktree(
       { cwd: ctx.worktreePath, reject: false, timeout: 10_000 },
     ) as { stdout: string };
 
-    const hasChanges = diffStat.trim().length > 0 || untrackedRaw.trim().length > 0;
-    if (!hasChanges) {
+    const hasUncommitted = diffStat.trim().length > 0 || untrackedRaw.trim().length > 0;
+
+    // Commit uncommitted changes if any
+    if (hasUncommitted) {
+      await execa('git', ['add', '-A'], {
+        cwd: ctx.worktreePath, reject: false, timeout: 10_000,
+      });
+      await execa('git', ['commit', '-m', 'autodev: coding result'], {
+        cwd: ctx.worktreePath, reject: false, timeout: 10_000,
+      });
+    }
+
+    // Also check if worktree branch has commits ahead of original (e.g. from sub-task merges)
+    const { stdout: aheadCount } = await execa(
+      'git', ['rev-list', '--count', `HEAD...${ctx.branchName}`],
+      { cwd: ctx.originalDir, reject: false, timeout: 10_000 },
+    ) as { stdout: string };
+
+    if (!hasUncommitted && parseInt(aheadCount.trim() || '0') === 0) {
       emit({ type: 'log', level: 'info',
         message: '[Worktree] No changes to merge' } as PipelineEvent);
       return true;
     }
-
-    // Commit all changes in worktree
-    await execa('git', ['add', '-A'], {
-      cwd: ctx.worktreePath, reject: false, timeout: 10_000,
-    });
-    await execa('git', ['commit', '-m', 'autodev: coding result'], {
-      cwd: ctx.worktreePath, reject: false, timeout: 10_000,
-    });
 
     // Merge worktree branch into original
     const { exitCode } = await execa(

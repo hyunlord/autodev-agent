@@ -227,8 +227,8 @@ export class VerifyAgent implements IAgent {
       }
     }
 
-    // ─── Stage 2.9b: A11y scan (via MCP browser_evaluate) ──
-    if (evidence.screenshotPath) {
+    // ─── Stage 2.9b: A11y scan (via MCP browser_evaluate or direct Playwright fallback) ──
+    if (evidence.screenshotPath && evidence.a11yViolations == null) {
       const mcpEvaluate = verifyInput.tools?.find(t => t.name.includes('browser_evaluate'));
       if (mcpEvaluate) {
         try {
@@ -572,6 +572,13 @@ export class VerifyAgent implements IAgent {
             const directData = ssResult.data as Record<string, unknown> | undefined;
             if (directData?.['screenshotPath']) {
               evidence.screenshotPath = directData['screenshotPath'] as string;
+            }
+            // A11y: direct Playwright에서 axe-core 결과 추출
+            if (directData?.['a11yViolations'] != null) {
+              evidence.a11yViolations = directData['a11yViolations'] as number;
+              evidence.a11yDetails = (directData['a11yDetails'] ?? []) as string[];
+              emit({ type: 'log', level: (evidence.a11yViolations as number) > 0 ? 'warn' : 'info',
+                message: `[Verify] A11y (direct Playwright): ${evidence.a11yViolations} violation(s)` } as PipelineEvent);
             }
             emit({ type: 'log', level: 'info', message: '[Verify] Screenshot captured (direct Playwright)' } as PipelineEvent);
           }

@@ -19,6 +19,9 @@ import type { VerificationDepth } from '../agents/verify/verify-agent';
  * - 재시도 3+: deep (+ SAST/A11y/LLM 판정)
  */
 export function selectVerificationDepth(attempt: number): VerificationDepth {
+  // Allow env override for testing
+  const envDepth = process.env.AUTODEV_VERIFY_DEPTH;
+  if (envDepth === 'deep' || envDepth === 'standard' || envDepth === 'fast') return envDepth;
   if (attempt <= 1) return 'fast';
   if (attempt <= 2) return 'standard';
   return 'deep';

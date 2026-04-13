@@ -41,8 +41,22 @@ async function removeWorktree(projectDir: string, worktreePath: string, branchNa
   } catch { /* cleanup best effort */ }
 }
 
-async function mergeWorktreeChanges(projectDir: string, branchName: string): Promise<string[]> {
+async function mergeWorktreeChanges(projectDir: string, worktreePath: string, branchName: string): Promise<string[]> {
   const execa = await getExeca();
+
+  // Check for uncommitted changes (staged, unstaged, untracked) in the worktree
+  const statusResult = await execa('git', ['status', '--porcelain'], {
+    cwd: worktreePath, reject: false, timeout: 10_000,
+  } as any);
+  const statusOut = (statusResult as any).stdout ?? '';
+  if (statusOut.trim().length > 0) {
+    // Commit all changes in the worktree so they appear on the branch
+    await execa('git', ['add', '-A'], { cwd: worktreePath, reject: false, timeout: 10_000 } as any);
+    await execa('git', ['commit', '-m', `autodev: subtask ${branchName}`], {
+      cwd: worktreePath, reject: false, timeout: 10_000,
+    } as any);
+  }
+
   const { stdout: diffOutput } = await execa('git', ['diff', '--name-only', 'HEAD', branchName], {
     cwd: projectDir, timeout: 10_000,
   });
@@ -355,7 +369,7 @@ ${workspaceContext}`;
 
       // Merge worktree changes back to main branch
       try {
-        const mergedFiles = await mergeWorktreeChanges(projectDir, branchName);
+        const mergedFiles = await mergeWorktreeChanges(projectDir, workDir, branchName);
         emit({ type: 'log', level: 'info',
           message: `[Parallel:${subTask.id}] Merged ${mergedFiles.length} files from worktree`,
         } as PipelineEvent);

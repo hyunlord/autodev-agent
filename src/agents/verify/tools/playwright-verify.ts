@@ -38,6 +38,28 @@ export function createPlaywrightTool(projectDir: string, screenshotDir: string):
           data.screenshotPath = ssPath;
           data.pageText = await page.textContent('body').catch(() => '');
           data.title = await page.title().catch(() => '');
+
+          // A11y: run axe-core while browser is still open
+          try {
+            const a11yResult = await page.evaluate(async () => {
+              const script = document.createElement('script');
+              script.src = 'https://cdnjs.cloudflare.com/ajax/libs/axe-core/4.9.1/axe.min.js';
+              document.head.appendChild(script);
+              await new Promise<void>((resolve, reject) => {
+                script.onload = () => resolve();
+                script.onerror = () => reject(new Error('axe-core load failed'));
+              });
+              const res = await (window as any).axe.run();
+              return {
+                violations: res.violations.length,
+                details: res.violations.slice(0, 5).map((v: any) => v.description),
+              };
+            });
+            data.a11yViolations = a11yResult.violations;
+            data.a11yDetails = a11yResult.details;
+          } catch {
+            // axe-core not available (e.g. no network) — skip silently
+          }
         }
 
         if (params.action === 'click' && params.selector) {
