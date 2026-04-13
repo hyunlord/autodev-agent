@@ -3,7 +3,7 @@
 
 MODE="${1:-quick}"  # quick, full, or cross
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-cd "$PROJECT_DIR"
+cd "$PROJECT_DIR" || { echo "❌ Failed to cd to $PROJECT_DIR"; exit 1; }
 
 # Configurable port (respects PORT env var, default 3000)
 DEV_PORT="${PORT:-3000}"
@@ -12,6 +12,12 @@ DEV_BASE="http://localhost:${DEV_PORT}"
 # Track dev server PID for cleanup
 DEV_PID=""
 trap '[ -n "$DEV_PID" ] && cleanup_server "$DEV_PID"' EXIT
+
+# Ensure port is free before starting (cleanup stale processes from previous runs)
+if lsof -ti:"$DEV_PORT" >/dev/null 2>&1; then
+  lsof -ti:"$DEV_PORT" | xargs kill 2>/dev/null
+  sleep 1
+fi
 
 echo "🔍 Verify mode: $MODE"
 if [ "$CI" = "true" ]; then
@@ -24,6 +30,10 @@ wait_for_server() {
   local max_wait=30
   local waited=0
   while [ $waited -lt $max_wait ]; do
+    # Early exit if dev server process has crashed
+    if [ -n "$DEV_PID" ] && ! kill -0 "$DEV_PID" 2>/dev/null; then
+      return 1
+    fi
     if curl -s -o /dev/null -w "%{http_code}" "${DEV_BASE}/api/status" 2>/dev/null | grep -q "200"; then
       return 0
     fi
@@ -117,7 +127,7 @@ echo ""
 
 # ─── Step 2: TypeScript Errors (10점) ─────────
 echo "=== Step 2: TypeScript ==="
-TS_ERRORS=$(echo "$BUILD_OUTPUT" | grep -c "Type error" || true)
+TS_ERRORS=$(echo "$BUILD_OUTPUT" | grep -ciE "(type error|typescript error|TS[0-9]{4})" || true)
 if [ "$TS_ERRORS" -eq 0 ]; then
   add_score "TypeScript" 10 10 "에러 0건"
   echo "  ✅ TypeScript 에러 없음"

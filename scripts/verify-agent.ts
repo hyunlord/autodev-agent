@@ -11,7 +11,7 @@ import { VerifyAgent } from '../src/agents/verify/verify-agent';
 import { execSync } from 'child_process';
 import { existsSync, statSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
-import type { PipelineEvent } from '../src/lib/types';
+import type { PipelineEvent } from '../src/lib/types'; // used in onProgress callback
 
 async function main() {
   const projectDir = process.cwd();
@@ -29,7 +29,9 @@ async function main() {
         const raw = line.slice(3).trim();
         // Handle git renames: "old -> new" → use new path
         const arrowIdx = raw.indexOf(' -> ');
-        return arrowIdx !== -1 ? raw.slice(arrowIdx + 4) : raw;
+        const path = arrowIdx !== -1 ? raw.slice(arrowIdx + 4) : raw;
+        // Strip quotes from filenames with spaces (git porcelain format)
+        return path.replace(/^"|"$/g, '');
       })
       .filter(f => !f.startsWith('.git/'));
   } catch {
@@ -99,7 +101,7 @@ async function main() {
       mkdirSync(verdictDir, { recursive: true });
       let commitHash = 'unknown';
       try { commitHash = execSync('git rev-parse HEAD', { encoding: 'utf-8', cwd: projectDir }).trim(); } catch { /* */ }
-      writeFileSync(join(verdictDir, 'verdict.json'), JSON.stringify({ timestamp: new Date().toISOString(), verdict: 'warn', score: 50, issues: warnResult.issues, commitHash }, null, 2), 'utf-8');
+      writeFileSync(join(verdictDir, 'verdict.json'), JSON.stringify({ timestamp: new Date().toISOString(), verdict: 'warn', score: warnResult.score, issues: warnResult.issues, commitHash }, null, 2), 'utf-8');
     } catch { /* verdict 저장 실패는 무시 */ }
     process.exit(0);
   }
