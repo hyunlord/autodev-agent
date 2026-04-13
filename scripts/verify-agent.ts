@@ -25,7 +25,12 @@ async function main() {
     const statusOutput = execSync('git status --porcelain', { cwd: projectDir, encoding: 'utf-8' });
     changedFiles = statusOutput.trim().split('\n')
       .filter(Boolean)
-      .map(line => line.slice(3).trim())  // Remove status prefix (e.g. "M ", "?? ", "A ")
+      .map(line => {
+        const raw = line.slice(3).trim();
+        // Handle git renames: "old -> new" → use new path
+        const arrowIdx = raw.indexOf(' -> ');
+        return arrowIdx !== -1 ? raw.slice(arrowIdx + 4) : raw;
+      })
       .filter(f => !f.startsWith('.git/'));
   } catch {
     console.log('⚠ No git status available');
@@ -88,7 +93,7 @@ async function main() {
     console.log('  Skipping LLM review.');
     const warnResult = { score: 25, issues: ['Verify Agent unavailable'], verdict: 'warn' };
     console.log(`VERIFY_AGENT_RESULT=${JSON.stringify(warnResult)}`);
-    // verdict.json도 저장 (fallback 경로 일관성)
+    // verdict.json도 저장 (fallback 경로 일관성) — score를 VERIFY_AGENT_RESULT와 일치시킴
     try {
       const verdictDir = join(process.env.HOME ?? '/tmp', '.autodev');
       mkdirSync(verdictDir, { recursive: true });
@@ -209,13 +214,13 @@ main().catch(err => {
   console.error('Verify Agent error:', err);
   const errResult = { score: 25, issues: [`Error: ${err}`], verdict: 'warn' };
   console.log(`VERIFY_AGENT_RESULT=${JSON.stringify(errResult)}`);
-  // verdict.json도 저장 (fallback 경로 일관성)
+  // verdict.json도 저장 (fallback 경로 일관성) — score를 VERIFY_AGENT_RESULT와 일치시킴
   try {
     const verdictDir = join(process.env.HOME ?? '/tmp', '.autodev');
     mkdirSync(verdictDir, { recursive: true });
     let commitHash = 'unknown';
     try { commitHash = execSync('git rev-parse HEAD', { encoding: 'utf-8' }).trim(); } catch { /* */ }
-    writeFileSync(join(verdictDir, 'verdict.json'), JSON.stringify({ timestamp: new Date().toISOString(), verdict: 'warn', score: 50, issues: errResult.issues, commitHash }, null, 2), 'utf-8');
+    writeFileSync(join(verdictDir, 'verdict.json'), JSON.stringify({ timestamp: new Date().toISOString(), verdict: 'warn', score: 25, issues: errResult.issues, commitHash }, null, 2), 'utf-8');
   } catch { /* verdict 저장 실패는 무시 */ }
   process.exitCode = 1;
 });

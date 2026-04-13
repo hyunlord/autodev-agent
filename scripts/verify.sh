@@ -5,6 +5,14 @@ MODE="${1:-quick}"  # quick, full, or cross
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$PROJECT_DIR"
 
+# Configurable port (respects PORT env var, default 3000)
+DEV_PORT="${PORT:-3000}"
+DEV_BASE="http://localhost:${DEV_PORT}"
+
+# Track dev server PID for cleanup
+DEV_PID=""
+trap '[ -n "$DEV_PID" ] && cleanup_server "$DEV_PID"' EXIT
+
 echo "🔍 Verify mode: $MODE"
 if [ "$CI" = "true" ]; then
   echo "🤖 CI mode — UI check와 Verify Agent 스킵 (브라우저/LLM CLI 없음)"
@@ -16,7 +24,7 @@ wait_for_server() {
   local max_wait=30
   local waited=0
   while [ $waited -lt $max_wait ]; do
-    if curl -s -o /dev/null -w "%{http_code}" "http://localhost:3000/api/status" 2>/dev/null | grep -q "200"; then
+    if curl -s -o /dev/null -w "%{http_code}" "${DEV_BASE}/api/status" 2>/dev/null | grep -q "200"; then
       return 0
     fi
     sleep 1
@@ -42,21 +50,22 @@ json_get() {
   local json="$1"
   local key="$2"
   local default="${3:-}"
-  node -e "try{const d=JSON.parse(process.argv[1]);console.log(d['$key']??'$default')}catch{console.log('$default')}" "$json" 2>/dev/null
+  node -e "try{const d=JSON.parse(process.argv[1]);console.log(d[process.argv[2]]??process.argv[3])}catch{console.log(process.argv[3])}" "$json" "$key" "$default" 2>/dev/null
 }
 
 json_get_file() {
   local file="$1"
   local key="$2"
   local default="${3:-}"
-  node -e "try{const d=require('$file');console.log(d['$key']??'$default')}catch{console.log('$default')}" 2>/dev/null
+  node -e "try{const d=JSON.parse(require('fs').readFileSync(process.argv[1],'utf-8'));console.log(d[process.argv[2]]??process.argv[3])}catch{console.log(process.argv[3])}" "$file" "$key" "$default" 2>/dev/null
 }
 
 json_get_nested() {
   local file="$1"
   local expr="$2"
   local default="${3:-0}"
-  node -e "try{const d=require('$file');console.log($expr)}catch{console.log('$default')}" 2>/dev/null
+  # Note: $expr is always a hardcoded JS expression from within this script, not external input
+  node -e "try{const d=JSON.parse(require('fs').readFileSync(process.argv[1],'utf-8'));console.log($expr)}catch{console.log(process.argv[2])}" "$file" "$default" 2>/dev/null
 }
 
 # Score tracking
@@ -90,7 +99,10 @@ if [ $BUILD_EXIT -eq 0 ]; then
   add_score "Build" 20 20 "exit 0"
 else
   add_score "Build" 0 20 "FAILED"
-  # Build fail = instant F
+  # Show error-relevant lines for easier diagnosis
+  echo ""
+  echo "Build errors:"
+  echo "$BUILD_OUTPUT" | grep -i "error" | head -10
   echo ""
   echo "┌────────────────────┬───────┬──────────┐"
   echo "│       항목         │ 점수  │   상태   │"
@@ -117,15 +129,18 @@ echo ""
 
 # ─── Step 3: API Health (10점) ────────────────
 echo "=== Step 3: API Health ==="
-pnpm dev > /dev/null 2>&1 &
+PORT=$DEV_PORT pnpm dev > /dev/null 2>&1 &
 DEV_PID=$!
-wait_for_server
+if ! wait_for_server; then
+  echo "  ❌ Dev server failed to start within 30s"
+  add_score "API Health" 0 10 "서버 시작 실패"
+else
 
 API_PASS=0
 API_TOTAL=0
 for EP in "/api/status" "/api/projects" "/api/tasks" "/api/mcp" "/api/harness" "/api/pipeline" "/api/usage"; do
   API_TOTAL=$((API_TOTAL + 1))
-  STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:3000${EP}" 2>/dev/null || echo "000")
+  STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${DEV_BASE}${EP}" 2>/dev/null || echo "000")
   if [ "$STATUS" = "200" ]; then
     echo "  ✅ $EP → $STATUS"
     API_PASS=$((API_PASS + 1))
@@ -133,9 +148,6 @@ for EP in "/api/status" "/api/projects" "/api/tasks" "/api/mcp" "/api/harness" "
     echo "  ❌ $EP → $STATUS"
   fi
 done
-
-# Cleanup
-cleanup_server $DEV_PID
 
 if [ $API_PASS -eq $API_TOTAL ]; then
   add_score "API Health" 10 10 "${API_PASS}/${API_TOTAL} OK"
@@ -145,24 +157,23 @@ elif [ $API_PASS -gt 0 ]; then
 else
   add_score "API Health" 0 10 "전부 실패"
 fi
+
+fi  # end wait_for_server else
 echo ""
 
 # ─── Step 4: UI Check (full/cross만, 10점) ────
+# Reuse dev server from Step 3 (same DEV_PID) to avoid redundant start/stop
 if [ "$MODE" = "full" ] || [ "$MODE" = "cross" ]; then
   echo "=== Step 4: UI Check ==="
   if [ "$CI" = "true" ]; then
     echo "  ⏭️  Skipping UI check in CI (no browser)"
     add_score "UI Pages" 10 10 "skipped (CI)"
   else
-    pnpm dev > /dev/null 2>&1 &
-    DEV_PID=$!
-    wait_for_server
-
     UI_PASS=0
     UI_TOTAL=0
     for PAGE in "/" "/harness"; do
       UI_TOTAL=$((UI_TOTAL + 1))
-      STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:3000${PAGE}" 2>/dev/null)
+      STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${DEV_BASE}${PAGE}" 2>/dev/null)
       if [ "$STATUS" = "200" ]; then
         echo "  ✅ ${PAGE} → ${STATUS}"
         UI_PASS=$((UI_PASS + 1))
@@ -170,8 +181,6 @@ if [ "$MODE" = "full" ] || [ "$MODE" = "cross" ]; then
         echo "  ❌ ${PAGE} → ${STATUS}"
       fi
     done
-
-    cleanup_server $DEV_PID
 
     if [ $UI_PASS -eq $UI_TOTAL ]; then
       add_score "UI Pages" 10 10 "${UI_PASS}/${UI_TOTAL} OK"
@@ -182,6 +191,9 @@ if [ "$MODE" = "full" ] || [ "$MODE" = "cross" ]; then
   fi
   echo ""
 fi
+
+# Cleanup dev server (single instance for both Step 3 and Step 4)
+cleanup_server $DEV_PID
 
 # ─── Step 5: Verify Agent Review (cross만, 50점) ──────
 if [ "$MODE" = "cross" ]; then
