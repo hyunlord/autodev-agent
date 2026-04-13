@@ -84,7 +84,7 @@ async function main() {
   if (!available) {
     console.log('⚠ Verify Agent not available (need gemini-cli, codex-cli, or claude-cli)');
     console.log('  Skipping LLM review.');
-    const warnResult = { score: 10, issues: ['Verify Agent unavailable'], verdict: 'warn' };
+    const warnResult = { score: 25, issues: ['Verify Agent unavailable'], verdict: 'warn' };
     console.log(`VERIFY_AGENT_RESULT=${JSON.stringify(warnResult)}`);
     // verdict.json도 저장 (fallback 경로 일관성)
     try {
@@ -92,7 +92,7 @@ async function main() {
       mkdirSync(verdictDir, { recursive: true });
       let commitHash = 'unknown';
       try { commitHash = execSync('git rev-parse HEAD', { encoding: 'utf-8', cwd: projectDir }).trim(); } catch { /* */ }
-      writeFileSync(join(verdictDir, 'verdict.json'), JSON.stringify({ timestamp: new Date().toISOString(), verdict: 'warn', score: 10, issues: warnResult.issues, commitHash }, null, 2), 'utf-8');
+      writeFileSync(join(verdictDir, 'verdict.json'), JSON.stringify({ timestamp: new Date().toISOString(), verdict: 'warn', score: 50, issues: warnResult.issues, commitHash }, null, 2), 'utf-8');
     } catch { /* verdict 저장 실패는 무시 */ }
     process.exit(0);
   }
@@ -166,9 +166,9 @@ Be critical — your job is to find problems, not confirm the code works.`;
   console.log('─'.repeat(60));
 
   // 6. Output JSON for verify.sh
-  // Score scaled to 15 points for verify.sh integration (15 = max in cross-check step)
+  // Score scaled to 50 points for verify.sh integration (50 = max in cross-check step)
   const jsonResult = JSON.stringify({
-    score: Math.round(vr.score * 15 / 100),
+    score: Math.round(vr.score * 50 / 100),
     issues: vr.issues,
     verdict: vr.verdict === 'pass' ? 'ok' : vr.verdict === 'fail' ? 'fail' : 'warn',
   });
@@ -205,7 +205,7 @@ Be critical — your job is to find problems, not confirm the code works.`;
 
 main().catch(err => {
   console.error('Verify Agent error:', err);
-  const errResult = { score: 10, issues: [`Error: ${err}`], verdict: 'warn' };
+  const errResult = { score: 25, issues: [`Error: ${err}`], verdict: 'warn' };
   console.log(`VERIFY_AGENT_RESULT=${JSON.stringify(errResult)}`);
   // verdict.json도 저장 (fallback 경로 일관성)
   try {
@@ -213,7 +213,7 @@ main().catch(err => {
     mkdirSync(verdictDir, { recursive: true });
     let commitHash = 'unknown';
     try { commitHash = execSync('git rev-parse HEAD', { encoding: 'utf-8' }).trim(); } catch { /* */ }
-    writeFileSync(join(verdictDir, 'verdict.json'), JSON.stringify({ timestamp: new Date().toISOString(), verdict: 'warn', score: 10, issues: errResult.issues, commitHash }, null, 2), 'utf-8');
+    writeFileSync(join(verdictDir, 'verdict.json'), JSON.stringify({ timestamp: new Date().toISOString(), verdict: 'warn', score: 50, issues: errResult.issues, commitHash }, null, 2), 'utf-8');
   } catch { /* verdict 저장 실패는 무시 */ }
   process.exitCode = 1;
 });

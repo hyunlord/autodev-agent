@@ -65,25 +65,27 @@ lsof -ti:3000 | xargs kill -9 2>/dev/null
 
 ## Score 기반 검증
 
-### 필수 항목 (0 or 만점)
+### 기계적 검증 (Build+TS+API+UI = 50점)
 | 항목 | 배점 | 기준 |
 |------|------|------|
-| Build | 30 | pnpm build exit 0 |
-| TypeScript | 20 | Type error 0건 |
-
-### 품질 항목 (부분 점수 가능)
-| 항목 | 배점 | 기준 |
-|------|------|------|
-| API Health | 15 | 7개 엔드포인트 200 비율 |
+| Build | 20 | pnpm build exit 0 |
+| TypeScript | 10 | Type error 0건 |
+| API Health | 10 | 7개 엔드포인트 200 비율 |
 | UI Pages | 10 | 페이지 접근 가능 비율 |
-| Verify Agent Review | 10 | 다른 LLM 리뷰 점수 |
-| Visual Quality | 15 | UI 시각적 완성도 (레이아웃, 색상, 간격, 인터랙션) |
+
+### 핵심 품질 게이트 (Verify Agent = 50점)
+| 항목 | 배점 | 기준 |
+|------|------|------|
+| Verify Agent Review | 50 | 다른 LLM이 코드 리뷰 (전체의 절반) |
+
+A등급(90%+)을 받으려면 Verify Agent에서 최소 40/50 필요.
+기계적 검증만 만점이면 50/100 = F등급.
 
 ### 등급
-- A (90%+): 바로 커밋
-- B (70-89%): 커밋 가능
-- C (50-69%): 수정 후 재검증
-- F (50% 미만): 거부
+- A (90%+): 바로 커밋 — Verify Agent 40/50+ 필요
+- B (75-89%): 커밋 가능
+- C (60-74%): 수정 후 재검증
+- F (60% 미만): 거부
 
 ### 실행 규칙
 ```bash

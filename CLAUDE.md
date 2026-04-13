@@ -138,9 +138,9 @@ GitHub 레포에서 구현 패턴을 검색하거나 이슈/PR을 관리한다.
 
 | 레벨 | 명령어 | 언제 | 점수 | 검증 방식 |
 |------|--------|------|------|----------|
-| quick | `pnpm verify` | 모든 코드 변경 후 | 70점 만점 | 빌드 + TypeScript + API |
-| full | `pnpm verify:full` | UI 변경 시 | 85점 만점 | + UI 페이지 체크 |
-| cross | `pnpm verify:cross` | 커밋 전 (필수) | 100점 만점 | + **Verify Agent (다른 LLM이 코드 리뷰)** |
+| quick | `pnpm verify` | 모든 코드 변경 후 | 40점 만점 | 빌드(20) + TypeScript(10) + API(10) |
+| full | `pnpm verify:full` | UI 변경 시 | 50점 만점 | + UI 페이지 체크(10) |
+| cross | `pnpm verify:cross` | 커밋 전 (필수) | 100점 만점 | + **Verify Agent(50) — 다른 LLM이 코드 리뷰** |
 | e2e | `pnpm verify:e2e` | 파이프라인 변경 시 | 100점 만점 | 실제 작업 실행 |
 | agent | `pnpm verify:agent` | 수동 실행 | - | Verify Agent만 단독 실행 |
 
@@ -155,10 +155,10 @@ GitHub 레포에서 구현 패턴을 검색하거나 이슈/PR을 관리한다.
 
 | 등급 | 점수 | 의미 |
 |------|------|------|
-| A | 90%+ | Ship it — 바로 커밋 |
-| B | 70-89% | Acceptable — 커밋 가능, 개선 권장 |
-| C | 50-69% | Needs work — 수정 후 재검증 |
-| F | 50% 미만 | Reject — 반드시 수정 |
+| A | 90%+ | Ship it — 바로 커밋 (Verify Agent 40/50+ 필요) |
+| B | 75-89% | Acceptable — 커밋 가능, 개선 권장 |
+| C | 60-74% | Needs work — 수정 후 재검증 |
+| F | 60% 미만 | Reject — 반드시 수정 |
 
 #### Cross-Check 규칙 (Verify 에이전트 분리)
 
@@ -181,11 +181,11 @@ Cross-check는 **코드를 작성한 LLM과 다른 LLM**이 리뷰한다:
 ┌────────────────────┬───────┬──────────────────────┐
 │       항목         │ 점수  │        상태          │
 ├────────────────────┼───────┼──────────────────────┤
-│ Build              │ 30/30 │ ✅ exit 0             │
-│ TypeScript         │ 20/20 │ ✅ 에러 0건           │
-│ API Health         │ 20/20 │ ✅ 7/7 OK             │
+│ Build              │ 20/20 │ ✅ exit 0             │
+│ TypeScript         │ 10/10 │ ✅ 에러 0건           │
+│ API Health         │ 10/10 │ ✅ 7/7 OK             │
 ├────────────────────┼───────┼──────────────────────┤
-│ TOTAL              │ 70/70 │ A (Ship it) 100%     │
+│ TOTAL              │ 40/40 │ A (Ship it) 100%     │
 └────────────────────┴───────┴──────────────────────┘
 ```
 
