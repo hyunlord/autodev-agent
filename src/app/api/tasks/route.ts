@@ -4,6 +4,26 @@ import { WorkerManager } from '@/lib/worker-manager';
 import { nanoid } from 'nanoid';
 import { desc, eq } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
+import type { PlanningMode } from '@/lib/types';
+
+// ─── Planning mode validation ────────────────────────────────
+const VALID_PLANNING_MODES: Set<string> = new Set([
+  'claude-cli', 'gemini-cli', 'codex-cli', 'api', 'manual', 'debate', 'auto',
+]);
+
+const PLANNING_MODE_ALIASES: Record<string, PlanningMode> = {
+  claude: 'claude-cli',
+  gemini: 'gemini-cli',
+  codex: 'codex-cli',
+};
+
+function normalizePlanningMode(raw: unknown): PlanningMode | null {
+  if (typeof raw !== 'string') return null;
+  const lower = raw.trim().toLowerCase();
+  if (VALID_PLANNING_MODES.has(lower)) return lower as PlanningMode;
+  if (lower in PLANNING_MODE_ALIASES) return PLANNING_MODE_ALIASES[lower];
+  return null; // invalid
+}
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
@@ -47,17 +67,32 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'prompt is required' }, { status: 400 });
   }
 
+  // Normalize planningMode with alias support
+  const rawPlanningMode = body.planningMode ?? 'auto';
+  const planningMode = normalizePlanningMode(rawPlanningMode);
+  if (!planningMode) {
+    return NextResponse.json(
+      { error: `Invalid planningMode: "${rawPlanningMode}". Valid values: ${[...VALID_PLANNING_MODES].join(', ')}. Aliases: ${Object.entries(PLANNING_MODE_ALIASES).map(([k, v]) => `${k} → ${v}`).join(', ')}` },
+      { status: 400 },
+    );
+  }
+
   const projectDir = typeof body.projectDir === 'string' && body.projectDir.trim()
     ? body.projectDir.trim()
     : null;
   const parentTaskId: string | null = typeof body.parentTaskId === 'string' ? body.parentTaskId : null;
+
+  // Support autoApprove/costPreference at top-level OR nested in config
+  const cfgObj = (body.config && typeof body.config === 'object') ? body.config : {};
+  const autoApprove = body.autoApprove ?? cfgObj.autoApprove ?? false;
+  const costPreference = body.costPreference ?? cfgObj.costPreference ?? undefined;
 
   const now = new Date().toISOString();
   const task = {
     id: nanoid(),
     prompt,
     status: 'pending' as const,
-    planningMode: body.planningMode ?? 'auto',
+    planningMode,
     agentId: body.agentId ?? 'claude-code',
     projectDir,
     projectType: null,
@@ -67,10 +102,11 @@ export async function POST(req: Request) {
     cycleCount: 0,
     maxCycles: body.maxCycles ?? 10,
     config: JSON.stringify({
-      codingPrompt: body.codingPrompt ?? null,
-      verificationChecklist: body.verificationChecklist ?? null,
-      autoApprove: body.autoApprove ?? false,
-      ...(body.costPreference ? { costPreference: body.costPreference } : {}),
+      codingPrompt: body.codingPrompt ?? cfgObj.codingPrompt ?? null,
+      verificationChecklist: body.verificationChecklist ?? cfgObj.verificationChecklist ?? null,
+      autoApprove,
+      ...(costPreference ? { costPreference } : {}),
+      ...(cfgObj.debateDrafterMode ? { debateDrafterMode: cfgObj.debateDrafterMode } : {}),
     }),
     result: null,
     parentTaskId,
