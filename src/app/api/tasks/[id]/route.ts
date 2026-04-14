@@ -1,6 +1,6 @@
 import { db } from '@/lib/db/client';
 import { tasks, attempts, verifications, events } from '@/lib/db/schema';
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -13,9 +13,14 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 
   const taskAttempts = db.select().from(attempts).where(eq(attempts.taskId, id)).all();
 
+  const attemptIds = taskAttempts.map(a => a.id);
+  const allVerifications = attemptIds.length > 0
+    ? db.select().from(verifications).where(inArray(verifications.attemptId, attemptIds)).all()
+    : [];
+
   const attemptsWithVerifications = taskAttempts.map((attempt) => ({
     ...attempt,
-    verifications: db.select().from(verifications).where(eq(verifications.attemptId, attempt.id)).all(),
+    verifications: allVerifications.filter(v => v.attemptId === attempt.id),
   }));
 
   const result: any = {
@@ -38,7 +43,12 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const task = db.select().from(tasks).where(eq(tasks.id, id)).get();
   if (!task) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
+  const terminalStatuses = ['completed', 'failed', 'escalated'];
+
   if (action === 'stop') {
+    if (terminalStatuses.includes(task.status)) {
+      return NextResponse.json({ error: `Cannot stop task in '${task.status}' state` }, { status: 409 });
+    }
     db.update(tasks).set({
       status: 'failed',
       result: JSON.stringify({
@@ -52,20 +62,24 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   }
 
   if (action === 'approve') {
-    if (editedPlan) {
-      db.update(tasks).set({
-        plan: JSON.stringify(editedPlan),
-        updatedAt: new Date().toISOString(),
-      }).where(eq(tasks.id, id)).run();
+    if (task.status !== 'plan_review' && task.status !== 'pending') {
+      return NextResponse.json({ error: `Cannot approve task in '${task.status}' state` }, { status: 409 });
     }
-    db.update(tasks).set({
+    const updates: Record<string, any> = {
       status: 'coding',
       updatedAt: new Date().toISOString(),
-    }).where(eq(tasks.id, id)).run();
+    };
+    if (editedPlan) {
+      updates.plan = JSON.stringify(editedPlan);
+    }
+    db.update(tasks).set(updates).where(eq(tasks.id, id)).run();
     return NextResponse.json({ success: true, action: 'approved' });
   }
 
   if (action === 'reject') {
+    if (terminalStatuses.includes(task.status)) {
+      return NextResponse.json({ error: `Cannot reject task in '${task.status}' state` }, { status: 409 });
+    }
     db.update(tasks).set({
       status: 'failed',
       result: JSON.stringify({ error: 'Plan rejected by user' }),

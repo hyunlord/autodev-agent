@@ -6,8 +6,10 @@ import { NextResponse } from 'next/server';
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const url = new URL(req.url);
-  const limit = Math.min(Number(url.searchParams.get('limit') ?? 100), 500);
-  const offset = Number(url.searchParams.get('offset') ?? 0);
+  const rawLimit = parseInt(url.searchParams.get('limit') ?? '100', 10);
+  const rawOffset = parseInt(url.searchParams.get('offset') ?? '0', 10);
+  const limit = Math.min(Number.isNaN(rawLimit) ? 100 : rawLimit, 500);
+  const offset = Number.isNaN(rawOffset) ? 0 : rawOffset;
 
   const [totalResult] = db.select({ total: count() }).from(events).where(eq(events.taskId, id)).all();
   const total = totalResult?.total ?? 0;
