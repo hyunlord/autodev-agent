@@ -787,7 +787,7 @@ export default function HarnessPage() {
         </div>
       )}
 
-      {/* Agents Tab — S3: expand/collapse + S4: debate agents from API */}
+      {/* Agents Tab */}
       {tab === 'agents' && (
         <AgentsTab
           agents={agents}

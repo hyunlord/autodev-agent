@@ -8,7 +8,6 @@ interface DiffViewerProps {
 }
 
 export function DiffViewer({ fileDiff, mode, fallbackContent, onLoadFallback }: DiffViewerProps) {
-  // S1: New file — show entire content as green additions
   const isNewFile = fileDiff?.status === 'added';
   if (!fileDiff || fileDiff.hunks.length === 0) {
     if (onLoadFallback && !fallbackContent) onLoadFallback();

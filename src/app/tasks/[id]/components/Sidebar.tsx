@@ -280,7 +280,7 @@ export function Sidebar({
         </section>
       )}
 
-      {/* Verification — S2 */}
+      {/* Verification */}
       <section className="p-4 border-b border-gray-800">
         <h3 className="text-xs text-gray-500 uppercase tracking-wider mb-2">Verification</h3>
         {verifyResult && verifyResult.score != null ? (

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, use } from 'react';
+import { useState, useEffect, useMemo, use } from 'react';
 import { useRouter } from 'next/navigation';
 import { TaskHeader } from './components/TaskHeader';
 import { TimelineView } from './components/TimelineView';
@@ -296,6 +296,19 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
     });
   };
 
+  const verifyResult = useMemo(() => {
+    const verifyEvents = liveEvents.filter(e => e.type === 'verification_result');
+    const last = verifyEvents[verifyEvents.length - 1];
+    if (!last) return null;
+    return {
+      score: last.score ?? (last.detail as any)?.score ?? null,
+      verdict: last.verdict ?? (last.detail as any)?.verdict ?? 'unknown',
+      issues: last.issues ?? (last.detail as any)?.issues ?? [],
+      designScore: last.designScore ?? (last.detail as any)?.designScore ?? null,
+      agentId: last.agentId ?? (last.detail as any)?.agentId ?? null,
+    };
+  }, [liveEvents]);
+
   // --- Loading ---
   if (!task) {
     return (
@@ -384,18 +397,7 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
           currentStatus={currentStatus}
           planData={planData}
           liveUsage={liveUsage}
-          verifyResult={(() => {
-            const verifyEvents = liveEvents.filter(e => e.type === 'verification_result');
-            const last = verifyEvents[verifyEvents.length - 1];
-            if (!last) return null;
-            return {
-              score: last.score ?? (last.detail as any)?.score ?? null,
-              verdict: last.verdict ?? (last.detail as any)?.verdict ?? 'unknown',
-              issues: last.issues ?? (last.detail as any)?.issues ?? [],
-              designScore: last.designScore ?? (last.detail as any)?.designScore ?? null,
-              agentId: last.agentId ?? (last.detail as any)?.agentId ?? null,
-            };
-          })()}
+          verifyResult={verifyResult}
           editingPlan={editingPlan}
           editedCodingPrompt={editedCodingPrompt}
           planTab={planTab}

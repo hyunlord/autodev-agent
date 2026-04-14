@@ -68,6 +68,7 @@ export default function MissionHeader({ activeView, onViewChange, activeTasks, t
         <ThemeToggle />
         <button
           onClick={() => {
+            if (!window.confirm('Reset all UI preferences?')) return;
             Object.keys(localStorage).forEach(key => {
               if (key.startsWith('autodev-')) localStorage.removeItem(key);
             });
