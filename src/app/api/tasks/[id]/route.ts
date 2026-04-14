@@ -5,23 +5,29 @@ import { NextResponse } from 'next/server';
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+  const url = new URL(req.url);
+  const includeEvents = url.searchParams.get('include')?.includes('events');
 
   const task = db.select().from(tasks).where(eq(tasks.id, id)).get();
   if (!task) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
   const taskAttempts = db.select().from(attempts).where(eq(attempts.taskId, id)).all();
-  const taskEvents = db.select().from(events).where(eq(events.taskId, id)).all();
 
   const attemptsWithVerifications = taskAttempts.map((attempt) => ({
     ...attempt,
     verifications: db.select().from(verifications).where(eq(verifications.attemptId, attempt.id)).all(),
   }));
 
-  return NextResponse.json({
+  const result: any = {
     ...task,
     attempts: attemptsWithVerifications,
-    events: taskEvents,
-  });
+  };
+
+  if (includeEvents) {
+    result.events = db.select().from(events).where(eq(events.taskId, id)).all();
+  }
+
+  return NextResponse.json(result);
 }
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {

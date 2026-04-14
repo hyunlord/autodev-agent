@@ -40,7 +40,69 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
   });
   const [activeTab, setActiveTab] = useState<'timeline' | 'diff' | 'artifacts'>('timeline');
 
-  // --- Initial fetch + hydration ---
+  // --- Helper: parse raw events into state ---
+  const hydrateEvents = (rawEvents: any[]) => {
+    const storedEvents: PipelineEvent[] = [];
+    const storedVerifications: VerificationResult[] = [];
+    const storedScreenshots: ScreenshotData[] = [];
+    let storedEscalation: string | null = null;
+    let maxAttempt = 1;
+    const storedUsage = { totalCostUsd: 0, totalInputTokens: 0, totalOutputTokens: 0, agentCosts: {} as Record<string, number> };
+
+    for (const evt of rawEvents) {
+      try {
+        const parsed: PipelineEvent = typeof evt.data === 'string' ? JSON.parse(evt.data) : evt.data;
+        if (!parsed.type) continue;
+        storedEvents.push(parsed);
+
+        if (parsed.type === 'verification_result') {
+          storedVerifications.push({
+            checkId: parsed.checkId as string,
+            status: (parsed.status ?? 'skip') as string,
+            detail: parsed.detail as string,
+          });
+        }
+        if (parsed.type === 'screenshot') {
+          storedScreenshots.push({ path: parsed.path as string, checkId: parsed.checkId as string });
+        }
+        if (parsed.type === 'escalation') {
+          storedEscalation = parsed.report as string;
+        }
+        if (parsed.type === 'attempt_start' && typeof parsed.attemptNum === 'number') {
+          maxAttempt = Math.max(maxAttempt, parsed.attemptNum);
+        }
+        if (parsed.type === 'cycle_start') {
+          setCycleInfo(prev => ({ ...prev, current: parsed.cycleNum as number, max: parsed.totalCycles as number }));
+        }
+        if (parsed.type === 'cycle_complete') {
+          setCycleInfo(prev => ({ ...prev, steps: [...prev.steps, `${parsed.success ? '\u2713' : '\u2717'} ${parsed.summary}`] }));
+        }
+        if (parsed.type === 'plan_ready') {
+          setPlanData(parsed.plan as any);
+          setEditedCodingPrompt((parsed.plan as any)?.codingPrompt ?? '');
+        }
+        if (parsed.type === 'interview_questions') {
+          setInterviewQuestions((parsed as any).questions ?? []);
+        }
+        if (parsed.type === 'cost_update') {
+          storedUsage.totalCostUsd = (parsed as any).totalCostUsd ?? storedUsage.totalCostUsd;
+          storedUsage.totalInputTokens += (parsed as any).inputTokens ?? 0;
+          storedUsage.totalOutputTokens += (parsed as any).outputTokens ?? 0;
+          const aid = (parsed as any).agentId as string;
+          if (aid) storedUsage.agentCosts[aid] = (storedUsage.agentCosts[aid] ?? 0) + ((parsed as any).costUsd ?? 0);
+        }
+      } catch { /* skip unparseable events */ }
+    }
+
+    setLiveEvents(storedEvents);
+    setVerificationResults(storedVerifications);
+    setScreenshots(storedScreenshots);
+    if (storedEscalation) setEscalationReport(storedEscalation);
+    setAttemptCount(maxAttempt);
+    setLiveUsage(storedUsage);
+  };
+
+  // --- Initial fetch: task metadata only (fast) ---
   useEffect(() => {
     window.scrollTo(0, 0);
 
@@ -59,68 +121,19 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
           setPlanData(plan);
           setEditedCodingPrompt(plan.codingPrompt ?? '');
         }
-
-        if (data.events && Array.isArray(data.events) && data.events.length > 0) {
-          const storedEvents: PipelineEvent[] = [];
-          const storedVerifications: VerificationResult[] = [];
-          const storedScreenshots: ScreenshotData[] = [];
-          let storedEscalation: string | null = null;
-          let maxAttempt = 1;
-          const storedUsage = { totalCostUsd: 0, totalInputTokens: 0, totalOutputTokens: 0, agentCosts: {} as Record<string, number> };
-
-          for (const evt of data.events) {
-            try {
-              const parsed: PipelineEvent = typeof evt.data === 'string' ? JSON.parse(evt.data) : evt.data;
-              if (!parsed.type) continue;
-              storedEvents.push(parsed);
-
-              if (parsed.type === 'verification_result') {
-                storedVerifications.push({
-                  checkId: parsed.checkId as string,
-                  status: (parsed.status ?? 'skip') as string,
-                  detail: parsed.detail as string,
-                });
-              }
-              if (parsed.type === 'screenshot') {
-                storedScreenshots.push({ path: parsed.path as string, checkId: parsed.checkId as string });
-              }
-              if (parsed.type === 'escalation') {
-                storedEscalation = parsed.report as string;
-              }
-              if (parsed.type === 'attempt_start' && typeof parsed.attemptNum === 'number') {
-                maxAttempt = Math.max(maxAttempt, parsed.attemptNum);
-              }
-              if (parsed.type === 'cycle_start') {
-                setCycleInfo(prev => ({ ...prev, current: parsed.cycleNum as number, max: parsed.totalCycles as number }));
-              }
-              if (parsed.type === 'cycle_complete') {
-                setCycleInfo(prev => ({ ...prev, steps: [...prev.steps, `${parsed.success ? '\u2713' : '\u2717'} ${parsed.summary}`] }));
-              }
-              if (parsed.type === 'plan_ready') {
-                setPlanData(parsed.plan as any);
-                setEditedCodingPrompt((parsed.plan as any)?.codingPrompt ?? '');
-              }
-              if (parsed.type === 'interview_questions') {
-                setInterviewQuestions((parsed as any).questions ?? []);
-              }
-              if (parsed.type === 'cost_update') {
-                storedUsage.totalCostUsd = (parsed as any).totalCostUsd ?? storedUsage.totalCostUsd;
-                storedUsage.totalInputTokens += (parsed as any).inputTokens ?? 0;
-                storedUsage.totalOutputTokens += (parsed as any).outputTokens ?? 0;
-                const aid = (parsed as any).agentId as string;
-                if (aid) storedUsage.agentCosts[aid] = (storedUsage.agentCosts[aid] ?? 0) + ((parsed as any).costUsd ?? 0);
-              }
-            } catch { /* skip unparseable events */ }
-          }
-
-          setLiveEvents(storedEvents);
-          setVerificationResults(storedVerifications);
-          setScreenshots(storedScreenshots);
-          if (storedEscalation) setEscalationReport(storedEscalation);
-          setAttemptCount(maxAttempt);
-          setLiveUsage(storedUsage);
-        }
       });
+  }, [id]);
+
+  // --- Deferred: load events separately (non-blocking) ---
+  useEffect(() => {
+    fetch(`/api/tasks/${id}/events`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.events && data.events.length > 0) {
+          hydrateEvents(data.events);
+        }
+      })
+      .catch(() => {});
   }, [id]);
 
   // --- Project tasks ---
@@ -133,8 +146,10 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
     }
   }, [task?.projectDir, id]);
 
-  // --- SSE ---
+  // --- SSE: only for active tasks ---
+  const isTerminal = ['completed', 'failed', 'escalated'].includes(currentStatus);
   useEffect(() => {
+    if (isTerminal) return;
     const es = new EventSource(`/api/events?taskId=${id}`);
     es.onmessage = (e) => {
       const event: PipelineEvent = JSON.parse(e.data);
@@ -184,7 +199,7 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
       }
     };
     return () => es.close();
-  }, [id]);
+  }, [id, isTerminal]);
 
   // --- Handlers ---
   const loadFilePreview = async (filePath: string) => {
