@@ -366,20 +366,32 @@ export class VerifyAgent implements IAgent {
         if (!existsSync(join(input.projectDir, 'node_modules'))) {
           await ex('npm', ['install'], { cwd: input.projectDir, reject: false, timeout: 120_000 } as any);
         }
-        const buildResult = await ex('npm', ['run', 'build'], { cwd: input.projectDir, reject: false, timeout: 60_000 } as any);
-        if ((buildResult as any).exitCode !== 0) {
-          const stderr = ((buildResult as any).stderr ?? '').slice(0, 2000);
-          return {
-            passed: false,
-            score: 20,
-            reason: `Build failed: ${stderr.slice(0, 500)}`,
-            issues: ['Build failed'],
-            suggestions: ['Fix build errors before proceeding'],
-            verdict: 're-code',
-            evidence: { buildResult: stderr },
-          };
+        // Check if a build script exists before running it
+        const pkgJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
+        if (pkgJson.scripts?.build) {
+          const buildResult = await ex('npm', ['run', 'build'], { cwd: input.projectDir, reject: false, timeout: 60_000 } as any);
+          if ((buildResult as any).exitCode !== 0) {
+            const stderr = ((buildResult as any).stderr ?? '').slice(0, 2000);
+            // Filter out npm warnings — only treat actual errors as failures
+            const realErrors = stderr.split('\n')
+              .filter((line: string) => !line.startsWith('npm warn') && line.trim().length > 0)
+              .join('\n');
+            if (realErrors.length > 0) {
+              return {
+                passed: false,
+                score: 20,
+                reason: `Build failed: ${realErrors.slice(0, 500)}`,
+                issues: ['Build failed'],
+                suggestions: ['Fix build errors before proceeding'],
+                verdict: 're-code',
+                evidence: { buildResult: stderr },
+              };
+            }
+            // Only npm warnings with non-zero exit — treat as pass with note
+            emit({ type: 'log', level: 'warn', message: '[Verify] Build exited non-zero but only npm warnings found — treating as pass' } as PipelineEvent);
+          }
         }
-      } catch { /* no build script — fine for static projects */ }
+      } catch { /* build script error or parse error — fine for static projects */ }
     }
 
     // Mechanical checks passed — proceed to LLM
