@@ -1144,12 +1144,28 @@ Score 0-100. Be specific in issues. Respond ONLY with valid JSON.`;
     // Extract issues from agent message texts via keyword matching
     const issues: string[] = [];
     const issuePatterns = /\b(defect|bug|error|vulnerability|regression|missing|broken|incorrect|unsafe|invalid|fails?|risk|drops?)\b/i;
+    // Planning/thinking phrases — these describe what the agent intends to do, not actual issues
+    const planningPrefix = /^\s*(I'll|I will|Let me|I need to|I should|Going to|I'm going to|I am going to|Next I'm|Now I'm|After that|First I'll|Then I'll|Using)\b/i;
+    const investigationVerbs = /\b(inspect|check|look at|look for|review|examine|investigate|assess|evaluate|validate|read|reading|checking|loaded|loading|confirmed|confirming|verify|verifying)\b/i;
 
     for (const msg of messages) {
       const sentences = msg.split(/[.!]\s+/);
       for (const sentence of sentences) {
-        if (issuePatterns.test(sentence) && sentence.length > 20 && sentence.length < 300) {
-          issues.push(sentence.trim());
+        const trimmed = sentence.trim();
+        if (trimmed.length <= 20 || trimmed.length >= 300) continue;
+        // Skip planning/thinking sentences
+        if (planningPrefix.test(trimmed)) continue;
+        // Skip sentences that are primarily about investigation actions (no concrete finding)
+        if (investigationVerbs.test(trimmed) && !issuePatterns.test(trimmed)) continue;
+        // Only include if it describes an actual issue
+        if (issuePatterns.test(trimmed)) {
+          // Double-check: if it has an investigation verb but also an issue keyword,
+          // only include if the sentence asserts a finding (contains "is", "are", "has", "should be", "needs")
+          if (investigationVerbs.test(trimmed)) {
+            const assertionPattern = /\b(is|are|has|have|should be|needs to be|must be|will cause|causes|leads to|results in|found|detected|identified)\b/i;
+            if (!assertionPattern.test(trimmed)) continue;
+          }
+          issues.push(trimmed);
         }
       }
     }
