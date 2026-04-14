@@ -1,8 +1,30 @@
 @import "tailwindcss";
 
+:root {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f9fafb;
+  --bg-card: #ffffff;
+  --bg-card-hover: #f3f4f6;
+  --text-primary: #111827;
+  --text-secondary: #6b7280;
+  --border-color: #e5e7eb;
+  --accent: #6366f1;
+}
+
+.dark {
+  --bg-primary: #030712;
+  --bg-secondary: #111827;
+  --bg-card: rgba(17, 24, 39, 0.5);
+  --bg-card-hover: rgba(31, 41, 55, 0.5);
+  --text-primary: #f3f4f6;
+  --text-secondary: #9ca3af;
+  --border-color: #1f2937;
+  --accent: #6366f1;
+}
+
 /* L8: Focus indicator */
 *:focus-visible {
-  outline: 2px solid #6366f1;
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 

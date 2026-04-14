@@ -29,7 +29,7 @@ function resolveTemplate(template: string, vars: Record<string, string>): string
   return template.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] ?? `{{${key}}}`);
 }
 
-export type PromptRole = 'planner' | 'coder' | 'verifier' | 'evaluator';
+export type PromptRole = 'planner' | 'coder' | 'verifier' | 'evaluator' | 'debate-drafter' | 'debate-challenger';
 
 export interface LoadedPrompt {
   content: string;
@@ -295,16 +295,20 @@ function getDefaultFrontmatter(role: PromptRole): Record<string, any> {
     coder: { role: 'coder', description: 'Coding agent', mcp: [] },
     verifier: { role: 'verifier', description: 'Verification agent', mcp: ['playwright'] },
     evaluator: { role: 'evaluator', description: 'Evaluation criteria' },
+    'debate-drafter': { role: 'debate-drafter', description: 'Debate mode draft plan generator' },
+    'debate-challenger': { role: 'debate-challenger', description: 'Debate mode plan challenger' },
   };
   return map[role];
 }
 
 function getDefaultPrompt(role: PromptRole): string {
   switch (role) {
-    case 'planner':   return DEFAULT_PLANNER_PROMPT;
-    case 'coder':     return DEFAULT_CODER_PROMPT;
-    case 'verifier':  return DEFAULT_VERIFIER_PROMPT;
-    case 'evaluator': return DEFAULT_EVALUATOR_PROMPT;
+    case 'planner':           return DEFAULT_PLANNER_PROMPT;
+    case 'coder':             return DEFAULT_CODER_PROMPT;
+    case 'verifier':          return DEFAULT_VERIFIER_PROMPT;
+    case 'evaluator':         return DEFAULT_EVALUATOR_PROMPT;
+    case 'debate-drafter':    return DEFAULT_DEBATE_DRAFTER_PROMPT;
+    case 'debate-challenger': return DEFAULT_DEBATE_CHALLENGER_PROMPT;
   }
 }
 
@@ -620,3 +624,38 @@ When verification fails, the retry should:
 1. Read the specific error message
 2. Fix only the failed check (don't redo everything)
 3. Re-run only the failed checks + the checks that depend on them`;
+
+const DEFAULT_DEBATE_DRAFTER_PROMPT = `You are a planning drafter in Debate Mode. Create a comprehensive implementation plan.
+
+## Your Role
+- Generate an initial draft plan that covers all requirements
+- Be thorough but realistic in your approach
+- Focus on: file structure, dependencies, step-by-step coding instructions
+- Include verification steps that can be machine-checked
+
+## Output
+Respond with valid JSON matching the standard plan schema (same as planner).
+Be specific about implementation details — the challenger will scrutinize vague plans.`;
+
+const DEFAULT_DEBATE_CHALLENGER_PROMPT = `You are a plan challenger in Debate Mode. Review the draft plan critically.
+
+## Your Role
+- Find weaknesses, gaps, and risks in the proposed plan
+- Challenge assumptions that aren't backed by evidence
+- Suggest concrete improvements, not vague concerns
+
+## What to Look For
+- Missing edge cases and error handling
+- Security concerns (input validation, auth, data exposure)
+- Performance issues (N+1 queries, unbounded loops, memory leaks)
+- Accessibility gaps (keyboard nav, screen readers, contrast)
+- Logic errors in the proposed approach
+- Missing verification steps
+
+## Output
+Respond with JSON:
+{
+  "verdict": "approve" | "revise",
+  "issues": [{ "severity": "critical" | "major" | "minor", "description": "...", "suggestion": "..." }],
+  "summary": "One-line overall assessment"
+}`;

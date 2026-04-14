@@ -299,7 +299,7 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
   // --- Loading ---
   if (!task) {
     return (
-      <div className="min-h-screen bg-gray-950 flex items-center justify-center">
+      <div className="min-h-screen bg-[var(--bg-primary)] flex items-center justify-center">
         <div className="flex items-center gap-3">
           <div className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
           <span className="text-sm text-gray-500">Loading task...</span>
@@ -310,7 +310,7 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
 
   // --- Render ---
   return (
-    <div className="min-h-screen bg-gray-950 flex flex-col">
+    <div className="min-h-screen bg-[var(--bg-primary)] flex flex-col">
       <TaskHeader
         task={task}
         currentStatus={currentStatus}
@@ -384,6 +384,18 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
           currentStatus={currentStatus}
           planData={planData}
           liveUsage={liveUsage}
+          verifyResult={(() => {
+            const verifyEvents = liveEvents.filter(e => e.type === 'verification_result');
+            const last = verifyEvents[verifyEvents.length - 1];
+            if (!last) return null;
+            return {
+              score: last.score ?? (last.detail as any)?.score ?? null,
+              verdict: last.verdict ?? (last.detail as any)?.verdict ?? 'unknown',
+              issues: last.issues ?? (last.detail as any)?.issues ?? [],
+              designScore: last.designScore ?? (last.detail as any)?.designScore ?? null,
+              agentId: last.agentId ?? (last.detail as any)?.agentId ?? null,
+            };
+          })()}
           editingPlan={editingPlan}
           editedCodingPrompt={editedCodingPrompt}
           planTab={planTab}

@@ -34,6 +34,14 @@ interface Props {
   onSetInterviewAnswers: (v: Record<number, string>) => void;
   onSubmitInterview: (answers: Record<number, string>) => void;
   onSkipInterview: () => void;
+  // Verification
+  verifyResult: {
+    score: number | null;
+    verdict: string;
+    issues: any[];
+    designScore: number | null;
+    agentId: string | null;
+  } | null;
   // Attempts
   attempts: any[];
   // Project history
@@ -51,6 +59,7 @@ export function Sidebar({
   onApprovePlan, onRejectPlan,
   interviewQuestions, interviewAnswers, submittingAnswers,
   onSetInterviewAnswers, onSubmitInterview, onSkipInterview,
+  verifyResult,
   attempts, projectTasks, parsedResult, escalationReport,
 }: Props) {
   const router = useRouter();
@@ -61,7 +70,7 @@ export function Sidebar({
   })();
 
   return (
-    <div className="bg-gray-900 flex flex-col h-full overflow-y-auto">
+    <div className="bg-[var(--bg-secondary)] flex flex-col h-full overflow-y-auto">
       {/* Task 정보 */}
       <section className="p-4 border-b border-gray-800">
         <h3 className="text-xs text-gray-500 uppercase tracking-wider mb-2">Task</h3>
@@ -270,6 +279,54 @@ export function Sidebar({
           )}
         </section>
       )}
+
+      {/* Verification — S2 */}
+      <section className="p-4 border-b border-gray-800">
+        <h3 className="text-xs text-gray-500 uppercase tracking-wider mb-2">Verification</h3>
+        {verifyResult && verifyResult.score != null ? (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-gray-600">Score</span>
+              <div className="flex items-center gap-2">
+                <span className={`text-sm font-medium ${
+                  verifyResult.score >= 80 ? 'text-emerald-400' :
+                  verifyResult.score >= 50 ? 'text-amber-400' :
+                  'text-red-400'
+                }`}>
+                  {verifyResult.score}/100
+                </span>
+                <span className={`text-xs px-1.5 py-0.5 rounded ${
+                  verifyResult.verdict === 'pass' ? 'bg-emerald-500/15 text-emerald-400' :
+                  verifyResult.verdict === 're-code' ? 'bg-amber-500/15 text-amber-400' :
+                  'bg-red-500/15 text-red-400'
+                }`}>
+                  {verifyResult.verdict}
+                </span>
+              </div>
+            </div>
+            {verifyResult.issues && verifyResult.issues.length > 0 && (
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-gray-600">Issues</span>
+                <span className="text-xs text-amber-400">{verifyResult.issues.length} found</span>
+              </div>
+            )}
+            {verifyResult.designScore != null && (
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-gray-600">Design (VLM)</span>
+                <span className="text-xs text-violet-400">{verifyResult.designScore}/15</span>
+              </div>
+            )}
+            {verifyResult.agentId && (
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-gray-600">Reviewer</span>
+                <span className="text-xs text-gray-400">{verifyResult.agentId}</span>
+              </div>
+            )}
+          </div>
+        ) : (
+          <p className="text-xs text-gray-600">Not verified yet</p>
+        )}
+      </section>
 
       {/* Configuration */}
       <section className="p-4 border-b border-gray-800">

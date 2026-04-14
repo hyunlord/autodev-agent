@@ -179,6 +179,75 @@ interface Project {
   taskCount: number;
 }
 
+function AgentsTab({ agents, sourceColor, onEdit, onReset }: {
+  agents: AgentFile[];
+  sourceColor: (s: string) => string;
+  onEdit: (role: string, content: string) => void;
+  onReset: (role: string) => void;
+}) {
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggle = (role: string) => {
+    setExpanded(prev => {
+      const next = new Set(prev);
+      next.has(role) ? next.delete(role) : next.add(role);
+      return next;
+    });
+  };
+
+  return (
+    <div className="space-y-3">
+      {agents.map(agent => {
+        const isExpanded = expanded.has(agent.role);
+        const lineCount = agent.content.split('\n').length;
+        return (
+          <div key={agent.role} className="bg-gray-900/50 border border-gray-800 rounded-xl p-4">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-3">
+                <h3 className="text-sm font-semibold">{agent.role}.md</h3>
+                <span className={`text-[10px] px-2 py-0.5 rounded-full ${sourceColor(agent.source)}`}>
+                  {agent.source}
+                </span>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => onEdit(agent.role, agent.content)}
+                  className="px-3 py-1 text-xs bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition-colors"
+                >
+                  Edit
+                </button>
+                {agent.source !== 'default' && (
+                  <button
+                    onClick={() => onReset(agent.role)}
+                    className="px-3 py-1 text-xs text-red-400 hover:bg-red-900/20 rounded-lg transition-colors"
+                  >
+                    Reset
+                  </button>
+                )}
+              </div>
+            </div>
+            <pre className={`text-xs text-gray-400 whitespace-pre-wrap bg-gray-950 rounded-lg p-3 overflow-y-auto ${
+              isExpanded ? 'max-h-[600px]' : 'max-h-36'
+            }`}>
+              {agent.content}
+            </pre>
+            {lineCount > 8 && (
+              <button
+                onClick={() => toggle(agent.role)}
+                className="text-indigo-400 hover:text-indigo-300 text-xs mt-1.5"
+              >
+                {isExpanded ? '접기 ▲' : '더보기 ▼'}
+              </button>
+            )}
+            {agent.filePath && (
+              <p className="text-[10px] text-gray-600 mt-2">{agent.filePath}</p>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function HarnessPage() {
   const [tab, setTab] = useState<'pipeline' | 'agents' | 'mcp' | 'presets'>('pipeline');
   const [selectedStage, setSelectedStage] = useState<string | null>(null);
@@ -364,7 +433,7 @@ export default function HarnessPage() {
   };
 
   return (
-    <div className="min-h-screen p-8 max-w-5xl mx-auto">
+    <div className="min-h-screen p-8 max-w-5xl mx-auto bg-[var(--bg-primary)]">
       <Link href="/" className="text-indigo-400 hover:text-indigo-300 text-sm mb-4 inline-block">
         &larr; Dashboard
       </Link>
@@ -718,44 +787,14 @@ export default function HarnessPage() {
         </div>
       )}
 
-      {/* Agents Tab */}
+      {/* Agents Tab — S3: expand/collapse + S4: debate agents from API */}
       {tab === 'agents' && (
-        <div className="space-y-3">
-          {agents.map(agent => (
-            <div key={agent.role} className="bg-gray-900/50 border border-gray-800 rounded-xl p-4">
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-3">
-                  <h3 className="text-sm font-semibold">{agent.role}.md</h3>
-                  <span className={`text-[10px] px-2 py-0.5 rounded-full ${sourceColor(agent.source)}`}>
-                    {agent.source}
-                  </span>
-                </div>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => handleEdit(agent.role, agent.content)}
-                    className="px-3 py-1 text-xs bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition-colors"
-                  >
-                    Edit
-                  </button>
-                  {agent.source !== 'default' && (
-                    <button
-                      onClick={() => handleReset(agent.role)}
-                      className="px-3 py-1 text-xs text-red-400 hover:bg-red-900/20 rounded-lg transition-colors"
-                    >
-                      Reset
-                    </button>
-                  )}
-                </div>
-              </div>
-              <pre className="text-xs text-gray-400 max-h-32 overflow-y-auto whitespace-pre-wrap bg-gray-950 rounded-lg p-3">
-                {agent.content.slice(0, 500)}{agent.content.length > 500 ? '...' : ''}
-              </pre>
-              {agent.filePath && (
-                <p className="text-[10px] text-gray-600 mt-2">{agent.filePath}</p>
-              )}
-            </div>
-          ))}
-        </div>
+        <AgentsTab
+          agents={agents}
+          sourceColor={sourceColor}
+          onEdit={handleEdit}
+          onReset={handleReset}
+        />
       )}
 
       {/* MCP Tab */}

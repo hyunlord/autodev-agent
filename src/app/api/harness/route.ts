@@ -33,7 +33,7 @@ export async function GET(req: Request) {
     return NextResponse.json(harnessCache.data);
   }
 
-  const roles: PromptRole[] = ['planner', 'coder', 'verifier', 'evaluator'];
+  const roles: PromptRole[] = ['planner', 'coder', 'verifier', 'evaluator', 'debate-drafter', 'debate-challenger'];
 
   const agents = roles.map(role => {
     const loaded = loadPrompt(role, projectDir);

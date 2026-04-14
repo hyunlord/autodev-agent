@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import ThemeToggle from '../ThemeToggle';
 
 const VIEWS = [
   { id: 'kanban' as const, label: 'Kanban' },
@@ -18,9 +19,9 @@ interface MissionHeaderProps {
 
 export default function MissionHeader({ activeView, onViewChange, activeTasks, todayCost, onNewTask }: MissionHeaderProps) {
   return (
-    <div className="flex items-center justify-between px-5 py-3 border-b border-gray-800">
+    <div className="flex items-center justify-between px-5 py-3 border-b border-[var(--border-color)]">
       <div className="flex items-center gap-5">
-        <h1 className="text-lg font-bold text-gray-100">AutoDev</h1>
+        <Link href="/" className="text-lg font-bold text-gray-100 hover:text-indigo-400 transition-colors">AutoDev</Link>
         <div data-tour="view-tabs" role="tablist" aria-label="View mode" className="flex gap-1 bg-gray-900 rounded-lg p-0.5">
           {VIEWS.map((v) => (
             <button
@@ -64,6 +65,20 @@ export default function MissionHeader({ activeView, onViewChange, activeTasks, t
         >
           Harness
         </Link>
+        <ThemeToggle />
+        <button
+          onClick={() => {
+            Object.keys(localStorage).forEach(key => {
+              if (key.startsWith('autodev-')) localStorage.removeItem(key);
+            });
+            localStorage.removeItem('autodev-onboarding-done');
+            window.location.reload();
+          }}
+          className="px-2 py-1 text-[10px] text-gray-600 hover:text-gray-400 transition-colors"
+          title="Reset all UI preferences"
+        >
+          Reset prefs
+        </button>
         <button
           data-tour="new-task"
           onClick={onNewTask}
