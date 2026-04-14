@@ -23,9 +23,12 @@ async function main() {
   let changedFiles: string[] = [];
   try {
     const statusOutput = execSync('git status --porcelain', { cwd: projectDir, encoding: 'utf-8' });
-    changedFiles = statusOutput.trim().split('\n')
+    changedFiles = statusOutput.split('\n')
       .filter(Boolean)
       .map(line => {
+        // git porcelain format: "XY filename" — X=staging, Y=working tree, then space
+        // IMPORTANT: don't trim() the full output before split — it eats the leading
+        // space of the first line's status code (e.g., " M file" → "M file" → slice(3) drops a char)
         const raw = line.slice(3).trim();
         // Handle git renames: "old -> new" → use new path
         const arrowIdx = raw.indexOf(' -> ');

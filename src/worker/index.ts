@@ -33,7 +33,8 @@ process.on('uncaughtException', (err: Error & { code?: string }) => {
     return;
   }
   console.error('[Worker] Uncaught exception:', err);
-  // Don't exit — graceful degradation over crash
+  // Non-IPC uncaught exceptions leave process in undefined state — exit gracefully
+  setTimeout(() => process.exit(1), 1000);
 });
 
 console.log('[Worker] Starting...');
@@ -81,6 +82,14 @@ function startPipeline(taskId: string): void {
   activeTasks.set(taskId, abortController);
   console.log(`[Worker] Starting pipeline for task ${taskId} (active: ${activeTasks.size}/${MAX_CONCURRENT_PIPELINES})`);
 
+  // Notify UI immediately so queued→started transition is visible
+  try {
+    process.send?.({
+      taskId,
+      event: { type: 'log', level: 'info', message: `Pipeline starting (active: ${activeTasks.size}/${MAX_CONCURRENT_PIPELINES})` } as PipelineEvent,
+    });
+  } catch { /* IPC may be closed */ }
+
   const emit = (event: PipelineEvent) => {
     try {
       process.send?.({ taskId, event });
@@ -121,8 +130,8 @@ process.on('message', async (msg: WorkerMessage) => {
   if (msg.type === 'dispatch') {
     const { taskId } = msg;
 
-    if (activeTasks.has(taskId)) {
-      console.warn(`[Worker] Task ${taskId} already running, ignoring duplicate dispatch`);
+    if (activeTasks.has(taskId) || pendingQueue.some(q => q.taskId === taskId)) {
+      console.warn(`[Worker] Task ${taskId} already running or queued, ignoring duplicate dispatch`);
       return;
     }
 
