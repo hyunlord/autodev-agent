@@ -192,8 +192,9 @@ export async function executeParallelCoding(params: {
   costPreference?: CostPreference;
   hookEngine?: HookEngine;
   taskId?: string;
+  taskAgentId?: string;
 }): Promise<ParallelResult[]> {
-  const { subTasks, projectDir, systemPrompt, workspaceContext, emit, signal, costPreference, hookEngine, taskId } = params;
+  const { subTasks, projectDir, systemPrompt, workspaceContext, emit, signal, costPreference, hookEngine, taskId, taskAgentId } = params;
 
   const levels = topologicalLevels(subTasks);
 
@@ -253,7 +254,7 @@ export async function executeParallelCoding(params: {
 
     const levelResults = await Promise.all(
       runnable.map(t =>
-        executeSubTask(t, projectDir, systemPrompt, workspaceContext, emit, signal, costPreference, hookEngine, taskId),
+        executeSubTask(t, projectDir, systemPrompt, workspaceContext, emit, signal, costPreference, hookEngine, taskId, taskAgentId),
       ),
     );
 
@@ -276,11 +277,13 @@ async function executeSubTask(
   costPreference?: CostPreference,
   hookEngine?: HookEngine,
   taskId?: string,
+  taskAgentId?: string,
 ): Promise<ParallelResult> {
   const startTime = Date.now();
 
-  // 에이전트 선택: subTask.agent 지정 시 해당 사용, 아니면 기본 fallback 순서
-  const selection = await selectAgent(subTask.agent ?? null, null, costPreference);
+  // 에이전트 선택: task-level agentId 우선, 없으면 subTask.agent, 최종 fallback
+  const preferredAgent = taskAgentId ?? subTask.agent ?? null;
+  const selection = await selectAgent(preferredAgent, null, costPreference);
   const agent = selection.agent;
   const agentId = selection.agentId;
 

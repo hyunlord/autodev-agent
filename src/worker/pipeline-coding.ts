@@ -131,6 +131,7 @@ export async function executeCodingLoop(params: {
       costPreference: _codeTaskCfg.costPreference,
       hookEngine,
       taskId,
+      taskAgentId: agentId,
     });
 
     // 결과 합산
