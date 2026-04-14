@@ -8,6 +8,20 @@ import { NextResponse } from 'next/server';
 let harnessCache: { data: unknown; key: string; expiry: number } | null = null;
 const HARNESS_CACHE_TTL = 5000;
 
+function loadPipelineConfig(projectDir?: string): Record<string, unknown> {
+  const paths = [
+    projectDir ? join(projectDir, '.autodev', 'pipeline-config.json') : null,
+    join(homedir(), '.autodev', 'pipeline-config.json'),
+  ].filter(Boolean) as string[];
+
+  for (const p of paths) {
+    if (existsSync(p)) {
+      try { return JSON.parse(readFileSync(p, 'utf-8')); } catch { /* skip */ }
+    }
+  }
+  return {};
+}
+
 // GET — load all harness files
 export async function GET(req: Request) {
   const url = new URL(req.url);
@@ -32,7 +46,8 @@ export async function GET(req: Request) {
   });
 
   const mcpConfig = loadMcpConfig(projectDir);
-  const data = { agents, mcpConfig };
+  const pipelineConfig = loadPipelineConfig(projectDir);
+  const data = { agents, mcpConfig, pipelineConfig };
 
   harnessCache = { data, key: cacheKey, expiry: now + HARNESS_CACHE_TTL };
 
@@ -59,6 +74,20 @@ export async function POST(req: Request) {
       appendFileSync(join(baseDir, 'harness-log.jsonl'), JSON.stringify({
         timestamp: new Date().toISOString(), action: 'edit',
         file: `agents/${role}.md`, scope: scope ?? 'global',
+      }) + '\n');
+    } catch { /* non-critical */ }
+    return NextResponse.json({ success: true, filePath, scope: scope ?? 'global' });
+  }
+
+  if (type === 'pipeline-config') {
+    const dir = baseDir;
+    mkdirSync(dir, { recursive: true });
+    const filePath = join(dir, 'pipeline-config.json');
+    writeFileSync(filePath, JSON.stringify(content, null, 2), 'utf-8');
+    try {
+      appendFileSync(join(baseDir, 'harness-log.jsonl'), JSON.stringify({
+        timestamp: new Date().toISOString(), action: 'config',
+        file: 'pipeline-config.json', scope: scope ?? 'global',
       }) + '\n');
     } catch { /* non-critical */ }
     return NextResponse.json({ success: true, filePath, scope: scope ?? 'global' });

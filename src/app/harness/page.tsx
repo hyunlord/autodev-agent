@@ -1,6 +1,67 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
+
+// --- Pipeline Config Types ---
+interface VerificationStageConfig {
+  mechanical: boolean;    // Stage 1: always ON
+  browser: boolean;       // Stage 2
+  vlm: boolean;           // Stage 2.5
+  vlmRuns: number;        // 1-3
+  acceptance: boolean;    // Stage 2.8
+  sast: boolean;          // Stage 2.9a
+  a11y: boolean;          // Stage 2.9b
+  llmReview: boolean;     // Stage 3: always ON
+  propertyTest: boolean;  // Stage 3.5
+  debate: boolean;        // Debate Verification
+}
+
+interface PipelineConfig {
+  planningMode: 'normal' | 'debate' | 'manual';
+  codingMode: 'single' | 'parallel' | 'arena';
+  verification: VerificationStageConfig;
+}
+
+const DEFAULT_PIPELINE_CONFIG: PipelineConfig = {
+  planningMode: 'normal',
+  codingMode: 'single',
+  verification: {
+    mechanical: true,
+    browser: true,
+    vlm: false,
+    vlmRuns: 1,
+    acceptance: true,
+    sast: false,
+    a11y: false,
+    llmReview: true,
+    propertyTest: false,
+    debate: false,
+  },
+};
+
+const VERIFICATION_STAGES = [
+  { key: 'mechanical', label: 'Stage 1: Mechanical Checks', desc: '빌드, 파일 존재, TypeScript 에러', locked: true },
+  { key: 'browser', label: 'Stage 2: Browser Testing', desc: 'Playwright 스크린샷 + DOM 검증', locked: false },
+  { key: 'vlm', label: 'Stage 2.5: VLM Visual Analysis', desc: '디자인 채점 (runs: 1-3)', locked: false, hasRuns: true },
+  { key: 'acceptance', label: 'Stage 2.8: Acceptance Criteria', desc: 'Plan의 검증 스펙 체크', locked: false },
+  { key: 'sast', label: 'Stage 2.9a: SAST Security Scan', desc: 'Semgrep 정적 보안 분석', locked: false },
+  { key: 'a11y', label: 'Stage 2.9b: A11y Accessibility', desc: 'axe-core WCAG 접근성 검사', locked: false },
+  { key: 'llmReview', label: 'Stage 3: LLM Code Review', desc: 'Cross-model 코드 리뷰', locked: true },
+  { key: 'propertyTest', label: 'Stage 3.5: Property-Based Testing', desc: 'fast-check 속성 테스트', locked: false },
+  { key: 'debate', label: 'Debate Verification', desc: 'Primary + Challenger 검증', locked: false },
+] as const;
+
+const PLANNING_MODES = [
+  { value: 'normal', label: 'Normal Mode', desc: '단일 LLM이 계획 생성' },
+  { value: 'debate', label: 'Debate Mode', desc: 'Drafter → Challenger → QC 3단계' },
+  { value: 'manual', label: 'Manual Mode', desc: '사용자가 직접 Plan 작성' },
+] as const;
+
+const CODING_MODES = [
+  { value: 'single', label: 'Single Agent', desc: '단일 에이전트가 순차 실행' },
+  { value: 'parallel', label: 'Parallel Sub-tasks (DAG)', desc: 'Plan의 sub-tasks를 병렬 실행' },
+  { value: 'arena', label: 'Arena Mode', desc: '여러 에이전트가 경쟁, 최고 결과 선택' },
+] as const;
 
 const PIPELINE_STAGES = [
   {
@@ -14,6 +75,7 @@ const PIPELINE_STAGES = [
     skipCondition: null as string | null,
     onFail: null as string | null,
     nextLabel: '',
+    expandable: false,
   },
   {
     id: 'plan',
@@ -26,6 +88,7 @@ const PIPELINE_STAGES = [
     skipCondition: null,
     onFail: 'task failed',
     nextLabel: '',
+    expandable: true,
   },
   {
     id: 'review',
@@ -38,6 +101,7 @@ const PIPELINE_STAGES = [
     skipCondition: 'auto-approve 활성화 시',
     onFail: 'task rejected',
     nextLabel: 'approved',
+    expandable: false,
   },
   {
     id: 'select',
@@ -50,6 +114,7 @@ const PIPELINE_STAGES = [
     skipCondition: null,
     onFail: null,
     nextLabel: '',
+    expandable: false,
   },
   {
     id: 'code',
@@ -62,6 +127,7 @@ const PIPELINE_STAGES = [
     skipCondition: null,
     onFail: 'retry',
     nextLabel: '',
+    expandable: true,
   },
   {
     id: 'verify',
@@ -74,6 +140,7 @@ const PIPELINE_STAGES = [
     skipCondition: null,
     onFail: 'retry → escalation',
     nextLabel: '',
+    expandable: true,
   },
   {
     id: 'complete',
@@ -86,6 +153,7 @@ const PIPELINE_STAGES = [
     skipCondition: null,
     onFail: null,
     nextLabel: '',
+    expandable: false,
   },
 ];
 
@@ -116,6 +184,8 @@ export default function HarnessPage() {
   const [selectedStage, setSelectedStage] = useState<string | null>(null);
   const [agents, setAgents] = useState<AgentFile[]>([]);
   const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
+  const [pipelineConfig, setPipelineConfig] = useState<PipelineConfig>(DEFAULT_PIPELINE_CONFIG);
+  const [configDirty, setConfigDirty] = useState(false);
   const [editingRole, setEditingRole] = useState<string | null>(null);
   const [editContent, setEditContent] = useState('');
   const [saving, setSaving] = useState(false);
@@ -144,7 +214,12 @@ export default function HarnessPage() {
       : '';
     fetch(`/api/harness${params}`)
       .then(r => r.json())
-      .then(data => setAgents(data.agents ?? []))
+      .then(data => {
+        setAgents(data.agents ?? []);
+        if (data.pipelineConfig && Object.keys(data.pipelineConfig).length > 0) {
+          setPipelineConfig(prev => ({ ...prev, ...data.pipelineConfig, verification: { ...prev.verification, ...(data.pipelineConfig.verification ?? {}) } }));
+        }
+      })
       .catch(() => {});
   }, [selectedScope]);
 
@@ -250,6 +325,38 @@ export default function HarnessPage() {
     setCommandLoading(false);
   };
 
+  const savePipelineConfig = useCallback(async (config: PipelineConfig) => {
+    const isProject = selectedScope !== 'global';
+    await fetch('/api/harness', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'pipeline-config',
+        content: config,
+        scope: isProject ? 'project' : 'global',
+        projectDir: isProject ? selectedScope : undefined,
+      }),
+    });
+    setConfigDirty(false);
+    setMessage('Pipeline config saved');
+    setTimeout(() => setMessage(''), 2000);
+  }, [selectedScope]);
+
+  const updateConfig = useCallback((updater: (prev: PipelineConfig) => PipelineConfig) => {
+    setPipelineConfig(prev => {
+      const next = updater(prev);
+      setConfigDirty(true);
+      return next;
+    });
+  }, []);
+
+  const toggleVerification = useCallback((key: string) => {
+    updateConfig(prev => ({
+      ...prev,
+      verification: { ...prev.verification, [key]: !prev.verification[key as keyof VerificationStageConfig] },
+    }));
+  }, [updateConfig]);
+
   const sourceColor = (source: string) => {
     if (source === 'project') return 'text-teal-400 bg-teal-900/30';
     if (source === 'global') return 'text-purple-400 bg-purple-900/30';
@@ -315,72 +422,196 @@ export default function HarnessPage() {
           </p>
 
           <div className="flex flex-col items-center gap-2">
-            {PIPELINE_STAGES.map((stage, i) => (
-              <div key={stage.id} className="w-full max-w-lg">
-                <button
-                  onClick={() => setSelectedStage(selectedStage === stage.id ? null : stage.id)}
-                  className={`w-full text-left px-4 py-3 rounded-xl border transition-colors ${
-                    selectedStage === stage.id
-                      ? 'bg-gray-800 border-gray-600'
-                      : 'bg-gray-900/50 border-gray-800 hover:border-gray-700'
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <span className="text-lg">{stage.emoji}</span>
-                      <div>
-                        <p className="text-sm font-medium">{stage.name}</p>
-                        <p className="text-[10px] text-gray-500">{stage.description}</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {stage.mcpTools.length > 0 && stage.mcpTools.map(mcp => (
-                        <span key={mcp} className="text-[10px] px-1.5 py-0.5 rounded bg-blue-900/30 text-blue-400">
-                          {mcp}
-                        </span>
-                      ))}
-                      {stage.skippable && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-900/30 text-amber-400">
-                          skippable
-                        </span>
-                      )}
-                    </div>
-                  </div>
+            {PIPELINE_STAGES.map((stage, i) => {
+              const isExpanded = selectedStage === stage.id;
+              const activeCount = stage.id === 'verify'
+                ? VERIFICATION_STAGES.filter(v => pipelineConfig.verification[v.key as keyof VerificationStageConfig]).length
+                : undefined;
 
-                  {selectedStage === stage.id && (
-                    <div className="mt-3 pt-3 border-t border-gray-700 text-xs text-gray-400 space-y-2">
-                      <div>
-                        <span className="text-gray-500">Agent prompt: </span>
-                        <span>{stage.agentFile ?? 'N/A'}</span>
-                      </div>
-                      <div>
-                        <span className="text-gray-500">MCP tools: </span>
-                        <span>{stage.mcpTools.length > 0 ? stage.mcpTools.join(', ') : 'None'}</span>
-                      </div>
-                      {stage.skipCondition && (
+              return (
+                <div key={stage.id} className="w-full max-w-lg">
+                  <button
+                    onClick={() => setSelectedStage(isExpanded ? null : stage.id)}
+                    className={`w-full text-left px-4 py-3 rounded-xl border transition-colors ${
+                      isExpanded
+                        ? 'bg-gray-800 border-indigo-600/50'
+                        : 'bg-gray-900/50 border-gray-800 hover:border-gray-700'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <span className="text-lg">{stage.emoji}</span>
                         <div>
-                          <span className="text-gray-500">Skip when: </span>
-                          <span>{stage.skipCondition}</span>
+                          <p className="text-sm font-medium">{stage.name}</p>
+                          <p className="text-[10px] text-gray-500">{stage.description}</p>
                         </div>
-                      )}
-                      {stage.onFail && (
-                        <div>
-                          <span className="text-gray-500">On fail: </span>
-                          <span>{stage.onFail}</span>
-                        </div>
-                      )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {stage.id === 'plan' && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-900/30 text-indigo-400">
+                            {pipelineConfig.planningMode}
+                          </span>
+                        )}
+                        {stage.id === 'code' && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-900/30 text-indigo-400">
+                            {pipelineConfig.codingMode}
+                          </span>
+                        )}
+                        {stage.id === 'verify' && activeCount !== undefined && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-900/30 text-indigo-400">
+                            {activeCount}/{VERIFICATION_STAGES.length} stages
+                          </span>
+                        )}
+                        {stage.mcpTools.length > 0 && stage.mcpTools.map(mcp => (
+                          <span key={mcp} className="text-[10px] px-1.5 py-0.5 rounded bg-blue-900/30 text-blue-400">
+                            {mcp}
+                          </span>
+                        ))}
+                        {stage.skippable && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-900/30 text-amber-400">
+                            skippable
+                          </span>
+                        )}
+                        {stage.expandable && (
+                          <span className={`text-[10px] transition-transform ${isExpanded ? 'rotate-180' : ''}`}>▾</span>
+                        )}
+                      </div>
+                    </div>
+                  </button>
+
+                  {/* --- Planning sub-options --- */}
+                  {isExpanded && stage.id === 'plan' && (
+                    <div className="mt-1 ml-6 border-l-2 border-indigo-600/30 pl-4 py-2 space-y-1">
+                      {PLANNING_MODES.map(mode => (
+                        <label key={mode.value} className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-800/50 cursor-pointer">
+                          <input
+                            type="radio"
+                            name="planningMode"
+                            checked={pipelineConfig.planningMode === mode.value}
+                            onChange={() => updateConfig(prev => ({ ...prev, planningMode: mode.value }))}
+                            className="accent-indigo-500"
+                          />
+                          <div>
+                            <p className={`text-xs font-medium ${pipelineConfig.planningMode === mode.value ? 'text-white' : 'text-gray-400'}`}>
+                              {mode.label}
+                            </p>
+                            <p className="text-[10px] text-gray-600">{mode.desc}</p>
+                          </div>
+                        </label>
+                      ))}
                     </div>
                   )}
-                </button>
 
-                {i < PIPELINE_STAGES.length - 1 && (
-                  <div className="flex justify-center py-1">
-                    <div className="w-px h-4 bg-gray-700" />
-                  </div>
-                )}
-              </div>
-            ))}
+                  {/* --- Coding sub-options --- */}
+                  {isExpanded && stage.id === 'code' && (
+                    <div className="mt-1 ml-6 border-l-2 border-indigo-600/30 pl-4 py-2 space-y-1">
+                      {CODING_MODES.map(mode => (
+                        <label key={mode.value} className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-800/50 cursor-pointer">
+                          <input
+                            type="radio"
+                            name="codingMode"
+                            checked={pipelineConfig.codingMode === mode.value}
+                            onChange={() => updateConfig(prev => ({ ...prev, codingMode: mode.value }))}
+                            className="accent-indigo-500"
+                          />
+                          <div>
+                            <p className={`text-xs font-medium ${pipelineConfig.codingMode === mode.value ? 'text-white' : 'text-gray-400'}`}>
+                              {mode.label}
+                            </p>
+                            <p className="text-[10px] text-gray-600">{mode.desc}</p>
+                          </div>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* --- Verification sub-stages --- */}
+                  {isExpanded && stage.id === 'verify' && (
+                    <div className="mt-1 ml-6 border-l-2 border-indigo-600/30 pl-4 py-2 space-y-1">
+                      {VERIFICATION_STAGES.map(vs => {
+                        const enabled = pipelineConfig.verification[vs.key as keyof VerificationStageConfig] as boolean;
+                        return (
+                          <div key={vs.key} className={`flex items-center justify-between px-3 py-2 rounded-lg transition-colors ${
+                            enabled ? 'hover:bg-gray-800/50' : 'opacity-50'
+                          }`}>
+                            <div className="flex items-center gap-3">
+                              <button
+                                onClick={() => !vs.locked && toggleVerification(vs.key)}
+                                disabled={vs.locked}
+                                className={`w-5 h-5 rounded flex items-center justify-center border transition-colors ${
+                                  enabled
+                                    ? 'bg-indigo-600 border-indigo-500 text-white'
+                                    : 'bg-gray-800 border-gray-700 text-gray-600'
+                                } ${vs.locked ? 'cursor-not-allowed' : 'cursor-pointer hover:border-indigo-400'}`}
+                              >
+                                {enabled && <span className="text-[10px]">✓</span>}
+                              </button>
+                              <div>
+                                <p className={`text-xs font-medium ${enabled ? 'text-white' : 'text-gray-500'}`}>
+                                  {vs.label}
+                                  {vs.locked && <span className="ml-1 text-[9px] text-indigo-400">(필수)</span>}
+                                </p>
+                                <p className={`text-[10px] ${enabled ? 'text-gray-500' : 'text-gray-700'}`}>{vs.desc}</p>
+                              </div>
+                            </div>
+                            {!enabled && !vs.locked && (
+                              <span className="text-[9px] text-gray-600 px-1.5 py-0.5 rounded bg-gray-800">disabled</span>
+                            )}
+                            {'hasRuns' in vs && vs.hasRuns && enabled && (
+                              <div className="flex items-center gap-1">
+                                <span className="text-[10px] text-gray-500">runs:</span>
+                                <select
+                                  value={pipelineConfig.verification.vlmRuns}
+                                  onChange={e => updateConfig(prev => ({
+                                    ...prev,
+                                    verification: { ...prev.verification, vlmRuns: Number(e.target.value) },
+                                  }))}
+                                  className="px-1 py-0.5 bg-gray-800 border border-gray-700 rounded text-[10px] text-gray-300"
+                                >
+                                  {[1, 2, 3].map(n => <option key={n} value={n}>{n}</option>)}
+                                </select>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* --- Generic stage details (non-expandable) --- */}
+                  {isExpanded && !stage.expandable && (
+                    <div className="mt-1 ml-6 border-l-2 border-gray-700/50 pl-4 py-2 text-xs text-gray-400 space-y-1">
+                      <div><span className="text-gray-500">Agent: </span>{stage.agentFile ?? 'N/A'}</div>
+                      <div><span className="text-gray-500">MCP: </span>{stage.mcpTools.length > 0 ? stage.mcpTools.join(', ') : 'None'}</div>
+                      {stage.skipCondition && <div><span className="text-gray-500">Skip: </span>{stage.skipCondition}</div>}
+                      {stage.onFail && <div><span className="text-gray-500">On fail: </span>{stage.onFail}</div>}
+                    </div>
+                  )}
+
+                  {i < PIPELINE_STAGES.length - 1 && (
+                    <div className="flex justify-center py-1">
+                      <div className={`w-px h-4 ${
+                        stage.id === 'verify' && !pipelineConfig.verification.browser && !pipelineConfig.verification.vlm
+                          ? 'bg-gray-800 border-dashed' : 'bg-gray-700'
+                      }`} />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
+
+          {/* Save config button */}
+          {configDirty && (
+            <div className="mt-4 flex justify-center">
+              <button
+                onClick={() => savePipelineConfig(pipelineConfig)}
+                className="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm rounded-lg transition-colors"
+              >
+                Save Pipeline Config
+              </button>
+            </div>
+          )}
 
           <div className="mt-4 p-4 bg-gray-900/30 border border-gray-800 rounded-xl max-w-lg mx-auto">
             <p className="text-xs text-gray-500 mb-2">재시도 &amp; 에스컬레이션</p>
@@ -389,13 +620,6 @@ export default function HarnessPage() {
               <p>• 3회 실패 → Escalation 리포트 생성 + 롤백</p>
               <p>• Auto-cycle: 완료 후 다시 Planning (GOAL_COMPLETE까지)</p>
             </div>
-          </div>
-
-          <div className="mt-4 p-3 bg-gray-900/30 border border-gray-800 rounded-lg max-w-lg mx-auto">
-            <p className="text-[10px] text-gray-600">
-              파이프라인 흐름을 커스터마이징하려면 .autodev/orchestrator.md 파일을 생성하세요.
-              (현재: 코드 기본값 사용)
-            </p>
           </div>
 
           {/* Harness Command */}
