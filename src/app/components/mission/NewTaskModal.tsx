@@ -31,6 +31,7 @@ export default function NewTaskModal({ onClose, onCreated, initialProjectDir, ch
   const [costPref, setCostPref] = useState<'cheap' | 'balanced' | 'quality'>('balanced');
   const [harnessPreview, setHarnessPreview] = useState<Array<{ role: string; source: string }> | null>(null);
   const [chainTask, setChainTask] = useState(initialChain ?? null);
+  const [isNewProject, setIsNewProject] = useState(false);
 
   useEffect(() => {
     fetch('/api/status').then(r => r.json()).then(data => {
@@ -44,8 +45,13 @@ export default function NewTaskModal({ onClose, onCreated, initialProjectDir, ch
         .then(r => r.json())
         .then(data => setHarnessPreview(data.agents?.map((a: { role: string; source: string }) => ({ role: a.role, source: a.source })) ?? null))
         .catch(() => setHarnessPreview(null));
+      fetch(`/api/projects/check?dir=${encodeURIComponent(projectDir)}`)
+        .then(r => r.json())
+        .then(d => setIsNewProject(!d.hasConfig))
+        .catch(() => setIsNewProject(false));
     } else {
       setHarnessPreview(null);
+      setIsNewProject(false);
     }
   }, [projectDir]);
 
@@ -241,6 +247,15 @@ export default function NewTaskModal({ onClose, onCreated, initialProjectDir, ch
                 {h.role}: {h.source}
               </span>
             ))}
+          </div>
+        )}
+
+        {/* New project notice */}
+        {isNewProject && projectDir && (
+          <div className="mt-2 p-3 rounded-lg border border-amber-500/30 bg-amber-500/5">
+            <p className="text-xs text-amber-400">
+              New project detected — default harness settings will be created in <code className="bg-amber-900/30 px-1 rounded">.autodev/</code>
+            </p>
           </div>
         )}
 

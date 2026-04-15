@@ -7,11 +7,14 @@ const VIEWS = [
   { id: 'kanban' as const, label: 'Kanban' },
   { id: 'grid' as const, label: 'Grid' },
   { id: 'timeline' as const, label: 'Timeline' },
+  { id: 'projects' as const, label: 'Projects' },
 ];
 
+type ViewType = 'kanban' | 'grid' | 'timeline' | 'projects';
+
 interface MissionHeaderProps {
-  activeView: 'kanban' | 'grid' | 'timeline';
-  onViewChange: (view: 'kanban' | 'grid' | 'timeline') => void;
+  activeView: ViewType;
+  onViewChange: (view: ViewType) => void;
   activeTasks: number;
   todayCost: number;
   onNewTask: () => void;

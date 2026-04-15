@@ -8,7 +8,9 @@ interface ProjectInfo {
   taskCount: number;
   completedCount: number;
   failedCount: number;
+  runningCount: number;
   latestTask: string;
+  totalCost: number;
   projectType?: string;
 }
 
@@ -48,7 +50,7 @@ export default function ProjectPage({ params }: { params: Promise<{ dir: string 
   const router = useRouter();
 
   // Tabs
-  const [activeTab, setActiveTab] = useState<'tasks' | 'files' | 'harness'>('tasks');
+  const [activeTab, setActiveTab] = useState<'overview' | 'tasks' | 'files' | 'harness'>('overview');
 
   // Harness state
   const [harnessAgents, setHarnessAgents] = useState<AgentFile[]>([]);
@@ -199,41 +201,141 @@ export default function ProjectPage({ params }: { params: Promise<{ dir: string 
         </div>
       </div>
 
-      {info && (
-        <div className="grid grid-cols-4 gap-3 mb-6">
-          <div className="bg-gray-900 rounded-lg p-3 border border-gray-800">
-            <p className="text-xs text-gray-500">Total tasks</p>
-            <p className="text-xl font-bold text-gray-200">{info.taskCount}</p>
-          </div>
-          <div className="bg-gray-900 rounded-lg p-3 border border-gray-800">
-            <p className="text-xs text-gray-500">Completed</p>
-            <p className="text-xl font-bold text-green-400">{info.completedCount}</p>
-          </div>
-          <div className="bg-gray-900 rounded-lg p-3 border border-gray-800">
-            <p className="text-xs text-gray-500">Failed</p>
-            <p className="text-xl font-bold text-red-400">{info.failedCount}</p>
-          </div>
-          <div className="bg-gray-900 rounded-lg p-3 border border-gray-800">
-            <p className="text-xs text-gray-500">Last activity</p>
-            <p className="text-sm font-medium text-gray-300">{new Date(info.latestTask).toLocaleDateString()}</p>
-          </div>
-        </div>
-      )}
-
       {/* Tabs */}
-      <div className="flex gap-1 mb-4">
-        {(['tasks', 'files', 'harness'] as const).map(t => (
+      <div className="flex gap-1 mb-4 border-b" style={{ borderColor: 'var(--border-color)' }}>
+        {([
+          { id: 'overview' as const, label: 'Overview' },
+          { id: 'tasks' as const, label: `Tasks (${projectTasks.length})` },
+          { id: 'harness' as const, label: 'Harness' },
+          { id: 'files' as const, label: `Files (${files.length})` },
+        ]).map(t => (
           <button
-            key={t}
-            onClick={() => setActiveTab(t)}
-            className={`px-4 py-2 text-sm rounded-lg transition-colors ${
-              activeTab === t ? 'bg-gray-800 text-white' : 'text-gray-500 hover:text-gray-300'
+            key={t.id}
+            onClick={() => setActiveTab(t.id)}
+            className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+              activeTab === t.id
+                ? 'border-indigo-500 text-indigo-400'
+                : 'border-transparent hover:text-gray-400'
             }`}
+            style={{ color: activeTab === t.id ? undefined : 'var(--text-secondary)' }}
           >
-            {t === 'tasks' ? `Tasks (${projectTasks.length})` : t === 'files' ? `Files (${files.length})` : 'Harness'}
+            {t.label}
           </button>
         ))}
       </div>
+
+      {/* Overview Tab */}
+      {activeTab === 'overview' && info && (
+        <div className="space-y-6">
+          {/* Stats cards */}
+          <div className="grid grid-cols-4 gap-3">
+            <div className="rounded-lg p-4 border" style={{ background: 'var(--bg-card)', borderColor: 'var(--border-color)' }}>
+              <p className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>Total Tasks</p>
+              <p className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{info.taskCount}</p>
+            </div>
+            <div className="rounded-lg p-4 border" style={{ background: 'var(--bg-card)', borderColor: 'var(--border-color)' }}>
+              <p className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>Success Rate</p>
+              <p className={`text-2xl font-bold ${
+                info.taskCount > 0 && (info.completedCount / info.taskCount) >= 0.8 ? 'text-emerald-400' :
+                info.taskCount > 0 && (info.completedCount / info.taskCount) >= 0.5 ? 'text-amber-400' : 'text-red-400'
+              }`}>
+                {info.taskCount > 0 ? Math.round((info.completedCount / info.taskCount) * 100) : 0}%
+              </p>
+            </div>
+            <div className="rounded-lg p-4 border" style={{ background: 'var(--bg-card)', borderColor: 'var(--border-color)' }}>
+              <p className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>Total Cost</p>
+              <p className="text-2xl font-bold text-violet-400">${info.totalCost.toFixed(2)}</p>
+            </div>
+            <div className="rounded-lg p-4 border" style={{ background: 'var(--bg-card)', borderColor: 'var(--border-color)' }}>
+              <p className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>Status</p>
+              {info.runningCount > 0 ? (
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse" />
+                  <span className="text-lg font-bold text-blue-400">{info.runningCount} running</span>
+                </div>
+              ) : (
+                <p className="text-2xl font-bold text-emerald-400">Idle</p>
+              )}
+            </div>
+          </div>
+
+          {/* Breakdown */}
+          <div className="rounded-lg border p-4" style={{ background: 'var(--bg-card)', borderColor: 'var(--border-color)' }}>
+            <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--text-primary)' }}>Task Breakdown</h3>
+            <div className="flex gap-6 text-sm">
+              <div className="flex items-center gap-2">
+                <span className="w-3 h-3 rounded-full bg-emerald-500" />
+                <span style={{ color: 'var(--text-secondary)' }}>Completed: <span className="font-medium text-emerald-400">{info.completedCount}</span></span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="w-3 h-3 rounded-full bg-red-500" />
+                <span style={{ color: 'var(--text-secondary)' }}>Failed: <span className="font-medium text-red-400">{info.failedCount}</span></span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="w-3 h-3 rounded-full bg-blue-500" />
+                <span style={{ color: 'var(--text-secondary)' }}>Running: <span className="font-medium text-blue-400">{info.runningCount}</span></span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="w-3 h-3 rounded-full bg-gray-500" />
+                <span style={{ color: 'var(--text-secondary)' }}>Pending: <span className="font-medium" style={{ color: 'var(--text-primary)' }}>{info.taskCount - info.completedCount - info.failedCount - info.runningCount}</span></span>
+              </div>
+            </div>
+            {/* Progress bar */}
+            {info.taskCount > 0 && (
+              <div className="mt-3 h-2 rounded-full overflow-hidden" style={{ background: 'var(--bg-secondary, #1f2937)' }}>
+                <div className="h-full flex">
+                  <div className="bg-emerald-500" style={{ width: `${(info.completedCount / info.taskCount) * 100}%` }} />
+                  <div className="bg-blue-500" style={{ width: `${(info.runningCount / info.taskCount) * 100}%` }} />
+                  <div className="bg-red-500" style={{ width: `${(info.failedCount / info.taskCount) * 100}%` }} />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Recent tasks (last 5) */}
+          <div className="rounded-lg border p-4" style={{ background: 'var(--bg-card)', borderColor: 'var(--border-color)' }}>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Recent Activity</h3>
+              <button onClick={() => setActiveTab('tasks')} className="text-xs text-indigo-400 hover:text-indigo-300">
+                View all &rarr;
+              </button>
+            </div>
+            <div className="space-y-2">
+              {projectTasks.slice(0, 5).map(t => (
+                <Link key={t.id} href={`/tasks/${t.id}`} className="flex items-center justify-between p-2 rounded-lg hover:bg-gray-800/50 transition-colors">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <span className={`w-2 h-2 rounded-full shrink-0 ${
+                      t.status === 'completed' ? 'bg-emerald-500' :
+                      t.status === 'failed' || t.status === 'escalated' ? 'bg-red-500' :
+                      ['planning', 'coding', 'verifying'].includes(t.status) ? 'bg-blue-500 animate-pulse' :
+                      'bg-gray-500'
+                    }`} />
+                    <span className="text-sm truncate" style={{ color: 'var(--text-primary)' }}>{t.prompt}</span>
+                  </div>
+                  <span className="text-xs shrink-0 ml-3" style={{ color: 'var(--text-secondary)' }}>
+                    {new Date(t.updatedAt).toLocaleDateString()}
+                  </span>
+                </Link>
+              ))}
+              {projectTasks.length === 0 && (
+                <p className="text-sm py-2" style={{ color: 'var(--text-secondary)' }}>No tasks yet.</p>
+              )}
+            </div>
+          </div>
+
+          {/* Harness scope info */}
+          <div className="text-xs px-3 py-2 rounded-lg" style={{ background: 'var(--bg-card)', borderColor: 'var(--border-color)', border: '1px solid var(--border-color)' }}>
+            <span style={{ color: 'var(--text-secondary)' }}>Harness scope: </span>
+            <span style={{ color: 'var(--text-primary)' }}>{projectDir}/.autodev/</span>
+            {harnessAgents.length > 0 && harnessAgents.every(a => a.source !== 'project') && (
+              <span className="text-amber-400 ml-2">(inheriting from global)</span>
+            )}
+            <button onClick={() => setActiveTab('harness')} className="ml-2 text-indigo-400 hover:text-indigo-300">
+              Configure &rarr;
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Tasks Tab */}
       {activeTab === 'tasks' && (

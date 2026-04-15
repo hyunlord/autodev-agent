@@ -5,6 +5,7 @@ import MissionHeader from './components/mission/MissionHeader';
 import KanbanView from './components/mission/KanbanView';
 import GridView from './components/mission/GridView';
 import TimelineView from './components/mission/TimelineView';
+import ProjectsView from './components/mission/ProjectsView';
 import KpiBar from './components/mission/KpiBar';
 import NewTaskModal from './components/mission/NewTaskModal';
 
@@ -42,12 +43,23 @@ function parseResult(result: unknown): Record<string, unknown> | null {
 }
 
 export default function MissionControl() {
-  const [view, setView] = useState<'kanban' | 'grid' | 'timeline'>('kanban');
+  const [view, setView] = useState<'kanban' | 'grid' | 'timeline' | 'projects'>('kanban');
   const [tasks, setTasks] = useState<Task[]>([]);
   const [showNewTask, setShowNewTask] = useState(false);
   const [taskEvents, setTaskEvents] = useState<Record<string, TaskEvent[]>>({});
   const [initialProjectDir, setInitialProjectDir] = useState<string | undefined>();
   const [chainTask, setChainTask] = useState<{ id: string; prompt: string } | null>(null);
+  const [projects, setProjects] = useState<Array<{
+    projectDir: string;
+    projectName: string | null;
+    taskCount: number;
+    completedCount: number;
+    failedCount: number;
+    runningCount: number;
+    latestTask: string;
+    totalCost: number;
+    projectType: string | null;
+  }>>([]);
 
   // Handle URL params (projectDir, chain, newTask)
   useEffect(() => {
@@ -76,11 +88,28 @@ export default function MissionControl() {
     } catch { /* ignore */ }
   }, []);
 
+  const fetchProjects = useCallback(async () => {
+    try {
+      const res = await fetch('/api/projects');
+      const data = await res.json();
+      setProjects(data);
+    } catch { /* ignore */ }
+  }, []);
+
   useEffect(() => {
     fetchTasks();
     const interval = setInterval(fetchTasks, 5000);
     return () => clearInterval(interval);
   }, [fetchTasks]);
+
+  // Fetch projects when switching to projects view
+  useEffect(() => {
+    if (view === 'projects') {
+      fetchProjects();
+      const interval = setInterval(fetchProjects, 10000);
+      return () => clearInterval(interval);
+    }
+  }, [view, fetchProjects]);
 
   // Load events for Timeline view
   useEffect(() => {
@@ -131,6 +160,7 @@ export default function MissionControl() {
         {view === 'kanban' && <KanbanView tasks={tasks} />}
         {view === 'grid' && <GridView tasks={tasks} onNewTask={() => setShowNewTask(true)} />}
         {view === 'timeline' && <TimelineView tasks={tasks} events={taskEvents} />}
+        {view === 'projects' && <ProjectsView projects={projects} onNewProject={() => setShowNewTask(true)} />}
       </div>
 
       <KpiBar

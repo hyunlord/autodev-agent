@@ -13,6 +13,7 @@ export async function GET() {
       latestTask: sql<string>`max(${tasks.updatedAt})`,
       completedCount: sql<number>`sum(case when ${tasks.status} = 'completed' then 1 else 0 end)`,
       failedCount: sql<number>`sum(case when ${tasks.status} in ('failed', 'escalated') then 1 else 0 end)`,
+      runningCount: sql<number>`sum(case when ${tasks.status} in ('planning', 'coding', 'verifying', 'retrying') then 1 else 0 end)`,
     })
     .from(tasks)
     .where(sql`${tasks.projectDir} is not null`)
@@ -22,13 +23,37 @@ export async function GET() {
 
   const enriched = projects.map(p => {
     let projectName: string | null = null;
+    let projectType: string | null = null;
     if (p.projectDir) {
       const nameFile = join(p.projectDir, '.autodev', 'project-name.txt');
       if (existsSync(nameFile)) {
         try { projectName = readFileSync(nameFile, 'utf-8').trim(); } catch {}
       }
     }
-    return { ...p, projectName };
+
+    // Get totalCost from attempts
+    const costResult = db.select({
+      total: sql<number>`coalesce(sum(${attempts.costUsd}), 0)`,
+    }).from(attempts)
+      .innerJoin(tasks, eq(attempts.taskId, tasks.id))
+      .where(eq(tasks.projectDir, p.projectDir!))
+      .get();
+
+    // Get projectType from the latest task
+    const latestTaskRow = db.select({ projectType: tasks.projectType })
+      .from(tasks)
+      .where(eq(tasks.projectDir, p.projectDir!))
+      .orderBy(desc(tasks.updatedAt))
+      .limit(1)
+      .get();
+    projectType = latestTaskRow?.projectType ?? null;
+
+    return {
+      ...p,
+      projectName,
+      projectType,
+      totalCost: costResult?.total ?? 0,
+    };
   });
 
   return NextResponse.json(enriched);
