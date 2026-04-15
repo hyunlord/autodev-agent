@@ -3,6 +3,8 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { BUILT_IN_PRESETS } from '@/lib/prompts/presets';
+import Tooltip from '../Tooltip';
+import { TOOLTIPS } from '../tooltips';
 
 interface NewTaskModalProps {
   onClose: () => void;
@@ -132,9 +134,20 @@ export default function NewTaskModal({ onClose, onCreated, initialProjectDir, ch
           autoFocus
         />
 
+        {/* Guide text */}
+        <div className="mt-3 p-2.5 rounded-lg bg-gray-800/50">
+          <p className="text-[10px] text-gray-500">
+            작업을 설명하면 AI가 자동으로 계획 → 코딩 → 검증합니다.
+            각 옵션에 마우스를 올리면 상세 설명이 표시됩니다.
+          </p>
+        </div>
+
         {/* Planning mode */}
         <div className="mt-3 flex items-center gap-2">
-          <label className="text-xs text-gray-500">Planning:</label>
+          <label className="text-xs text-gray-500 flex items-center gap-1">
+            Planning:
+            <Tooltip text="AI가 구현 계획을 세우는 방식을 선택합니다. 각 모드마다 속도, 비용, 품질이 다릅니다." position="bottom" />
+          </label>
           <div className="flex gap-1 flex-wrap">
             {([
               { id: 'claude-cli', label: 'Claude CLI' },
@@ -144,18 +157,19 @@ export default function NewTaskModal({ onClose, onCreated, initialProjectDir, ch
               { id: 'debate', label: 'Debate' },
               { id: 'manual', label: 'Manual' },
             ] as const).map((mode) => (
-              <button
-                key={mode.id}
-                type="button"
-                onClick={() => setPlanningMode(mode.id)}
-                className={`px-2.5 py-1 text-xs rounded-lg transition-colors ${
-                  planningMode === mode.id
-                    ? 'bg-indigo-600 text-white'
-                    : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
-                }`}
-              >
-                {mode.label}
-              </button>
+              <Tooltip key={mode.id} text={TOOLTIPS.planningMode[mode.id] ?? ''} position="bottom">
+                <button
+                  type="button"
+                  onClick={() => setPlanningMode(mode.id)}
+                  className={`px-2.5 py-1 text-xs rounded-lg transition-colors ${
+                    planningMode === mode.id
+                      ? 'bg-indigo-600 text-white'
+                      : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                  }`}
+                >
+                  {mode.label}
+                </button>
+              </Tooltip>
             ))}
           </div>
         </div>
@@ -219,7 +233,10 @@ export default function NewTaskModal({ onClose, onCreated, initialProjectDir, ch
 
         {/* Agent selector */}
         <div className="mt-3">
-          <label className="block text-sm text-gray-400 mb-1">Coding Agent</label>
+          <label className="text-sm text-gray-400 mb-1 flex items-center gap-1">
+            Coding Agent
+            <Tooltip text="코드를 생성할 AI 에이전트를 선택합니다. Auto는 비용 설정에 따라 자동 선택." position="bottom" />
+          </label>
           <select
             value={selectedAgent}
             onChange={(e) => setSelectedAgent(e.target.value)}
@@ -269,6 +286,7 @@ export default function NewTaskModal({ onClose, onCreated, initialProjectDir, ch
               className="rounded border-gray-700 bg-gray-800 text-indigo-600 focus:ring-indigo-500"
             />
             <span className="text-sm text-gray-400">Auto-approve plan (skip review)</span>
+            <Tooltip text={TOOLTIPS.autoApprove} position="bottom" />
           </label>
           {autoApprove && (
             <p className="text-[10px] text-amber-500 mt-1 ml-5">
@@ -279,49 +297,53 @@ export default function NewTaskModal({ onClose, onCreated, initialProjectDir, ch
 
         {/* Cost preference */}
         <div className="mt-3 flex items-center gap-3">
-          <label className="text-xs text-gray-500">Cost:</label>
+          <label className="text-xs text-gray-500 flex items-center gap-1">
+            Cost:
+            <Tooltip text="에이전트 자동 선택 시 비용 vs 품질 우선순위를 결정합니다." position="bottom" />
+          </label>
           <div className="flex gap-1">
             {([
               { id: 'cheap' as const, label: 'Budget' },
               { id: 'balanced' as const, label: 'Balanced' },
               { id: 'quality' as const, label: 'Quality' },
             ]).map((pref) => (
-              <button
-                key={pref.id}
-                type="button"
-                onClick={() => setCostPref(pref.id)}
-                className={`px-2.5 py-1 text-xs rounded-lg transition-colors ${
-                  costPref === pref.id
-                    ? 'bg-indigo-600 text-white'
-                    : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
-                }`}
-              >
-                {pref.label}
-              </button>
+              <Tooltip key={pref.id} text={TOOLTIPS.costPreference[pref.id] ?? ''} position="bottom">
+                <button
+                  type="button"
+                  onClick={() => setCostPref(pref.id)}
+                  className={`px-2.5 py-1 text-xs rounded-lg transition-colors ${
+                    costPref === pref.id
+                      ? 'bg-indigo-600 text-white'
+                      : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                  }`}
+                >
+                  {pref.label}
+                </button>
+              </Tooltip>
             ))}
           </div>
         </div>
 
         {/* Execution mode */}
         <div className="mt-3 flex items-center gap-3 flex-wrap">
-          <label className="text-xs text-gray-500">Execution:</label>
+          <label className="text-xs text-gray-500 flex items-center gap-1">
+            Execution:
+            <Tooltip text="작업 실행 방식을 선택합니다. Single은 한 번, Auto-cycle은 자동 재시도." position="bottom" />
+          </label>
           <div className="flex gap-2">
-            <button type="button" onClick={() => setExecutionMode('single')}
-              className={`px-3 py-1 text-xs rounded-lg transition-colors ${executionMode === 'single' ? 'bg-indigo-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}>
-              Single run
-            </button>
-            <button type="button" onClick={() => setExecutionMode('auto-cycle')}
-              className={`px-3 py-1 text-xs rounded-lg transition-colors ${executionMode === 'auto-cycle' ? 'bg-amber-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}>
-              Auto-cycle
-            </button>
-            <button type="button" onClick={() => setExecutionMode('interview')}
-              className={`px-3 py-1 text-xs rounded-lg transition-colors ${executionMode === 'interview' ? 'bg-teal-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}>
-              Interview
-            </button>
-            <button type="button" onClick={() => setExecutionMode('arena')}
-              className={`px-3 py-1 text-xs rounded-lg transition-colors ${executionMode === 'arena' ? 'bg-rose-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}>
-              Arena
-            </button>
+            {([
+              { id: 'single' as const, label: 'Single run', color: 'indigo' },
+              { id: 'auto-cycle' as const, label: 'Auto-cycle', color: 'amber' },
+              { id: 'interview' as const, label: 'Interview', color: 'teal' },
+              { id: 'arena' as const, label: 'Arena', color: 'rose' },
+            ]).map(mode => (
+              <Tooltip key={mode.id} text={TOOLTIPS.executionMode[mode.id] ?? ''} position="bottom">
+                <button type="button" onClick={() => setExecutionMode(mode.id)}
+                  className={`px-3 py-1 text-xs rounded-lg transition-colors ${executionMode === mode.id ? `bg-${mode.color}-600 text-white` : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}>
+                  {mode.label}
+                </button>
+              </Tooltip>
+            ))}
           </div>
           {executionMode === 'auto-cycle' && (
             <div className="flex items-center gap-2">

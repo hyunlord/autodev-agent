@@ -1,6 +1,54 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
+import Tooltip from '../components/Tooltip';
+import { TOOLTIPS } from '../components/tooltips';
+
+// --- AI Edit Bar for Agent Prompts ---
+function AiEditBar({ editContent, editingRole, onApply }: {
+  editContent: string;
+  editingRole: string;
+  onApply: (newContent: string) => void;
+}) {
+  const [instruction, setInstruction] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleAiEdit = async () => {
+    if (!instruction.trim()) return;
+    setLoading(true);
+    try {
+      const res = await fetch('/api/harness/ai-edit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currentPrompt: editContent, instruction, role: editingRole }),
+      });
+      const data = await res.json();
+      if (data.editedPrompt) onApply(data.editedPrompt);
+    } catch { /* ignore */ }
+    setLoading(false);
+    setInstruction('');
+  };
+
+  return (
+    <div className="flex items-center gap-2 px-4 py-2.5 border-t border-gray-800 bg-gray-900/80">
+      <span className="text-[10px] text-gray-500 whitespace-nowrap">AI 수정:</span>
+      <input
+        value={instruction}
+        onChange={e => setInstruction(e.target.value)}
+        onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleAiEdit(); } }}
+        placeholder="예: 더 엄격하게, 한국어로 변환, 보안 체크 추가..."
+        className="flex-1 px-3 py-1.5 text-xs bg-gray-950 border border-gray-700 rounded-lg text-gray-300 placeholder-gray-600 outline-none focus:border-indigo-500"
+      />
+      <button
+        onClick={handleAiEdit}
+        disabled={!instruction.trim() || loading}
+        className="px-3 py-1.5 text-xs bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg disabled:opacity-40 transition-colors whitespace-nowrap"
+      >
+        {loading ? '수정 중...' : '적용'}
+      </button>
+    </div>
+  );
+}
 
 // --- Pipeline Config Types ---
 interface VerificationStageConfig {
@@ -49,7 +97,7 @@ const VERIFICATION_STAGES = [
   { key: 'llmReview', label: 'Stage 3: LLM Code Review', desc: 'Cross-model 코드 리뷰', locked: true },
   { key: 'propertyTest', label: 'Stage 3.5: Property-Based Testing', desc: 'fast-check 속성 테스트', locked: false },
   { key: 'debate', label: 'Debate Verification', desc: 'Primary + Challenger 검증', locked: false },
-] as const;
+] as { key: string; label: string; desc: string; locked: boolean; hasRuns?: boolean }[];
 
 const PLANNING_MODES = [
   { value: 'normal', label: 'Normal Mode', desc: '단일 LLM이 계획 생성' },
@@ -616,9 +664,10 @@ export default function HarnessPage() {
                                 {enabled && <span className="text-[10px]">✓</span>}
                               </button>
                               <div>
-                                <p className={`text-xs font-medium ${enabled ? 'text-white' : 'text-gray-500'}`}>
+                                <p className={`text-xs font-medium flex items-center gap-1 ${enabled ? 'text-white' : 'text-gray-500'}`}>
                                   {vs.label}
-                                  {vs.locked && <span className="ml-1 text-[9px] text-indigo-400">(필수)</span>}
+                                  {vs.locked && <span className="text-[9px] text-indigo-400">(필수)</span>}
+                                  <Tooltip text={TOOLTIPS.verification[vs.key] ?? vs.desc} position="right" />
                                 </p>
                                 <p className={`text-[10px] ${enabled ? 'text-gray-500' : 'text-gray-700'}`}>{vs.desc}</p>
                               </div>
@@ -889,6 +938,12 @@ export default function HarnessPage() {
               onChange={e => setEditContent(e.target.value)}
               className="flex-1 p-4 bg-gray-950 text-sm text-gray-200 font-mono resize-none outline-none"
               spellCheck={false}
+            />
+            {/* AI 수정 */}
+            <AiEditBar
+              editContent={editContent}
+              editingRole={editingRole}
+              onApply={(newContent) => setEditContent(newContent)}
             />
           </div>
         </div>
