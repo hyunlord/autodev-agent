@@ -334,7 +334,29 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
       };
     }
 
-    // 4. Derive from individual verification results
+    // 4. Check attempts for verify agent output (score lives in attempt.output)
+    if (task?.attempts && task.attempts.length > 0) {
+      for (let i = task.attempts.length - 1; i >= 0; i--) {
+        const attempt = task.attempts[i];
+        const agentId = attempt.agentId ?? '';
+        if (!agentId.includes('verify')) continue;
+        let output = attempt.output;
+        if (typeof output === 'string') {
+          try { output = JSON.parse(output); } catch { continue; }
+        }
+        if (output?.score != null) {
+          return {
+            score: output.score,
+            verdict: output.verdict ?? (output.passed ? 'pass' : 'fail'),
+            issues: output.issues ?? [],
+            designScore: output.designScore ?? null,
+            agentId,
+          };
+        }
+      }
+    }
+
+    // 5. Derive from individual verification results
     if (verificationResults.length > 0) {
       const passCount = verificationResults.filter(v => v.status === 'pass').length;
       const total = verificationResults.length;
@@ -348,7 +370,7 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
     }
 
     return null;
-  }, [liveEvents, parsedResult, verificationResults]);
+  }, [liveEvents, parsedResult, verificationResults, task?.attempts]);
 
   // --- Load artifact files for completed tasks ---
   const parsedResultForArtifacts = parsedResult;
