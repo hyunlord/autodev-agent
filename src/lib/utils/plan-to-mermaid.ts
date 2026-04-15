@@ -15,7 +15,7 @@ interface Plan {
 export function planToMermaid(plan: Plan): string {
   const lines: string[] = ['graph TD'];
   const summary = plan.summary ?? 'Task';
-  lines.push(`  START(["🎯 ${escapeMermaid(summary.slice(0, 50))}"])`);
+  lines.push(`  START(["🎯 ${wrapText(escapeMermaid(summary), 5, 40)}"])`);
 
   const tasks = plan.tasks ?? plan.steps ?? [];
 
@@ -25,7 +25,7 @@ export function planToMermaid(plan: Plan): string {
     if (steps.length > 0) {
       steps.forEach((step, i) => {
         const id = `T${i + 1}`;
-        lines.push(`  ${id}["${i + 1}. ${escapeMermaid(step.slice(0, 60))}"]`);
+        lines.push(`  ${id}["${i + 1}. ${wrapText(escapeMermaid(step), 5, 50)}"]`);
         lines.push(i === 0 ? `  START --> ${id}` : `  T${i} --> ${id}`);
       });
       lines.push(`  T${steps.length} --> DONE(["✅ Complete"])`);
@@ -36,7 +36,7 @@ export function planToMermaid(plan: Plan): string {
       }
     } else {
       // 정말 아무것도 없으면 단일 노드
-      const label = escapeMermaid((plan.codingPrompt ?? summary).slice(0, 80));
+      const label = wrapText(escapeMermaid((plan.codingPrompt ?? summary)), 5, 60);
       lines.push(`  TASK["📝 ${label}"]`);
       lines.push(`  START --> TASK --> DONE(["✅ Complete"])`);
       lines.push('  style START fill:#7c3aed,color:#fff,stroke:#7c3aed');
@@ -46,7 +46,7 @@ export function planToMermaid(plan: Plan): string {
   } else {
     tasks.forEach((task, i) => {
       const id = `T${i + 1}`;
-      const desc = escapeMermaid(task.description.slice(0, 60));
+      const desc = wrapText(escapeMermaid(task.description), 5, 50);
       const files = task.files?.length ? `<br/>📁 ${task.files.join(', ').slice(0, 40)}` : '';
       lines.push(`  ${id}["${i + 1}. ${desc}${files}"]`);
       lines.push(i === 0 ? `  START --> ${id}` : `  T${i} --> ${id}`);
@@ -88,4 +88,16 @@ function extractStepsFromPrompt(prompt: string): string[] {
 
 function escapeMermaid(text: string): string {
   return text.replace(/"/g, "'").replace(/[[\]{}()#<>]/g, ' ');
+}
+
+/** Wrap long text into multiple lines using <br/> for Mermaid htmlLabels */
+function wrapText(text: string, wordsPerLine: number = 5, maxLen: number = 50): string {
+  const trimmed = text.length > maxLen ? text.slice(0, maxLen) + '...' : text;
+  const words = trimmed.split(' ');
+  if (words.length <= wordsPerLine) return trimmed;
+  const lines: string[] = [];
+  for (let i = 0; i < words.length; i += wordsPerLine) {
+    lines.push(words.slice(i, i + wordsPerLine).join(' '));
+  }
+  return lines.join('<br/>');
 }

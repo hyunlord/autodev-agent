@@ -298,17 +298,57 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
   };
 
   const verifyResult = useMemo(() => {
+    // 1. Check verification_result events
     const verifyEvents = liveEvents.filter(e => e.type === 'verification_result');
     const last = verifyEvents[verifyEvents.length - 1];
-    if (!last) return null;
-    return {
-      score: last.score ?? (last.detail as any)?.score ?? null,
-      verdict: last.verdict ?? (last.detail as any)?.verdict ?? 'unknown',
-      issues: last.issues ?? (last.detail as any)?.issues ?? [],
-      designScore: last.designScore ?? (last.detail as any)?.designScore ?? null,
-      agentId: last.agentId ?? (last.detail as any)?.agentId ?? null,
-    };
-  }, [liveEvents]);
+    if (last && (last.score != null || (last.detail as any)?.score != null)) {
+      return {
+        score: last.score ?? (last.detail as any)?.score ?? null,
+        verdict: last.verdict ?? (last.detail as any)?.verdict ?? 'unknown',
+        issues: last.issues ?? (last.detail as any)?.issues ?? [],
+        designScore: last.designScore ?? (last.detail as any)?.designScore ?? null,
+        agentId: last.agentId ?? (last.detail as any)?.agentId ?? null,
+      };
+    }
+
+    // 2. Check task_complete event for score
+    const completeEvent = liveEvents.findLast(e => e.type === 'task_complete');
+    if (completeEvent?.score != null) {
+      return {
+        score: completeEvent.score,
+        verdict: completeEvent.verdict ?? (completeEvent.success ? 'pass' : 'fail'),
+        issues: completeEvent.issues ?? [],
+        designScore: completeEvent.designScore ?? null,
+        agentId: completeEvent.agentId ?? null,
+      };
+    }
+
+    // 3. Check parsedResult for verification data
+    if (parsedResult?.score != null) {
+      return {
+        score: parsedResult.score,
+        verdict: parsedResult.verdict ?? (parsedResult.passed ? 'pass' : 'fail'),
+        issues: parsedResult.issues ?? [],
+        designScore: parsedResult.designScore ?? null,
+        agentId: parsedResult.verifyAgentId ?? parsedResult.agentId ?? null,
+      };
+    }
+
+    // 4. Derive from individual verification results
+    if (verificationResults.length > 0) {
+      const passCount = verificationResults.filter(v => v.status === 'pass').length;
+      const total = verificationResults.length;
+      return {
+        score: Math.round((passCount / total) * 100),
+        verdict: passCount === total ? 'pass' : passCount > 0 ? 're-code' : 'fail',
+        issues: verificationResults.filter(v => v.status === 'fail').map(v => v.detail),
+        designScore: null,
+        agentId: null,
+      };
+    }
+
+    return null;
+  }, [liveEvents, parsedResult, verificationResults]);
 
   // --- Load artifact files for completed tasks ---
   const parsedResultForArtifacts = parsedResult;

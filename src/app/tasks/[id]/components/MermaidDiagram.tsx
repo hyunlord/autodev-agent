@@ -16,6 +16,11 @@ export default function MermaidDiagram({ chart }: Props) {
       mermaid.default.initialize({
         startOnLoad: false,
         theme: 'dark',
+        flowchart: {
+          useMaxWidth: true,
+          htmlLabels: true,
+          wrappingWidth: 200,
+        },
         themeVariables: {
           primaryColor: '#6366f1',
           primaryTextColor: '#e5e7eb',

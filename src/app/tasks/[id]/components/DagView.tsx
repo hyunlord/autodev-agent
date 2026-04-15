@@ -106,7 +106,9 @@ export default function DagView({ subTasks }: DagViewProps) {
         attributionPosition="bottom-left"
         proOptions={{ hideAttribution: true }}
       >
-        <Controls className="!bg-gray-900 !border-gray-700" />
+        <Controls
+          className="!bg-gray-900 !border-gray-700 !shadow-none [&>button]:!bg-gray-800 [&>button]:!border-gray-700 [&>button]:!text-gray-400 [&>button:hover]:!bg-gray-700"
+        />
         <Background color="#374151" gap={20} size={1} />
       </ReactFlow>
     </div>

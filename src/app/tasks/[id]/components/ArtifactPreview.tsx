@@ -120,7 +120,7 @@ export function ArtifactPreview({ files }: ArtifactPreviewProps) {
 
         {/* Preview panel */}
         {(viewMode === 'preview' || viewMode === 'split') && canPreview && (
-          <div style={{ background: '#ffffff' }}>
+          <div>
             <iframe
               srcDoc={previewHtml!}
               className="w-full border-0"

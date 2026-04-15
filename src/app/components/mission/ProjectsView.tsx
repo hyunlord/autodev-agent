@@ -45,7 +45,11 @@ export default function ProjectsView({ projects, onNewProject }: ProjectsViewPro
 }
 
 function ProjectCard({ project }: { project: ProjectCardData }) {
-  const dirName = project.projectDir.split('/').pop() ?? project.projectDir;
+  const dirName = project.projectDir.split('/').filter(Boolean).pop() ?? project.projectDir;
+  // Prefer dirName over projectName if projectName looks like a task prompt (too long)
+  const displayName = (project.projectName && project.projectName.length <= 30)
+    ? project.projectName
+    : dirName;
   const successRate = project.taskCount > 0
     ? Math.round((project.completedCount / project.taskCount) * 100)
     : 0;
@@ -62,7 +66,7 @@ function ProjectCard({ project }: { project: ProjectCardData }) {
         {/* Header: project name + type badge */}
         <div className="flex items-center justify-between mb-3">
           <h3 className="font-medium text-sm truncate" style={{ color: 'var(--text-primary)' }}>
-            {project.projectName ?? dirName}
+            {displayName}
           </h3>
           {project.projectType && (
             <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-500/15 text-indigo-400 shrink-0 ml-2">
