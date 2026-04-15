@@ -67,7 +67,7 @@ if [ -f "$CROSS_RESULT" ]; then
     PERCENT=$(python3 -c "import json; print(json.load(open('$CROSS_RESULT')).get('percent',0))" 2>/dev/null || echo "0")
     RESULT_TREE=$(python3 -c "import json; print(json.load(open('$CROSS_RESULT')).get('treeHash',''))" 2>/dev/null || echo "")
 
-    if [ "$GRADE" = "A" ] || [ "$GRADE" = "B" ]; then
+    if [ "$GRADE" = "A" ]; then
       # tree hash 비교 — cross 이후 코드가 변경되었으면 재검증
       if [ -n "$RESULT_TREE" ] && [ "$RESULT_TREE" != "unknown" ] && [ "$RESULT_TREE" != "$CURRENT_TREE_HASH" ]; then
         echo "⚠️  pre-commit: verify:cross ${GRADE} (${SCORE}/${MAX_SC}) 있지만 이후 코드 변경됨"
@@ -82,7 +82,7 @@ if [ -f "$CROSS_RESULT" ]; then
       echo "   Fix issues and run 'pnpm verify:cross' again."
       exit 1
     else
-      echo "⚠️  pre-commit: verify:cross grade ${GRADE} (${SCORE}/${MAX_SC}) — needs improvement"
+      echo "⚠️  pre-commit: verify:cross grade ${GRADE} (${SCORE}/${MAX_SC}) — Grade A (95%+) required"
     fi
   else
     echo "⚠️  pre-commit: cross-result.json is stale (${RESULT_AGE}s old, max ${MAX_AGE}s)"
@@ -102,13 +102,13 @@ if [ "$CROSS_REQUIRED" = true ]; then
       SCORE=$(python3 -c "import json; print(json.load(open('$CROSS_RESULT')).get('score',0))" 2>/dev/null || echo "0")
       MAX_SC=$(python3 -c "import json; print(json.load(open('$CROSS_RESULT')).get('maxScore',100))" 2>/dev/null || echo "100")
 
-      if [ "$GRADE" = "A" ] || [ "$GRADE" = "B" ]; then
+      if [ "$GRADE" = "A" ]; then
         echo ""
         echo "✅ pre-commit: verify:cross ${GRADE} (${SCORE}/${MAX_SC})"
       else
         echo ""
         echo "❌ pre-commit: verify:cross grade ${GRADE} (${SCORE}/${MAX_SC})"
-        echo "   Grade A/B required for commit. Fix issues first."
+        echo "   Grade A (95%+) required for commit. Fix issues first."
         exit 1
       fi
     else

@@ -2,9 +2,10 @@
 # AutoDev Agent — ship: verify:cross → commit → push 원커맨드
 #
 # 사용법:
-#   pnpm ship "feat: 새 기능 추가"          — verify:cross 후 커밋+푸시
+#   pnpm ship "feat: 새 기능 추가"          — verify:cross 후 커밋+푸시 (A등급 95+ 필요)
 #   pnpm ship "fix: 버그 수정" --no-push    — verify:cross 후 커밋만 (푸시 안 함)
 #   pnpm ship --verify-only                 — verify:cross만 실행 (커밋/푸시 안 함)
+#   pnpm ship "msg" --force                 — LLM 연결 실패 시 우회 (명시적 선택)
 
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$PROJECT_DIR"
@@ -13,6 +14,7 @@ cd "$PROJECT_DIR"
 COMMIT_MSG=""
 NO_PUSH=false
 VERIFY_ONLY=false
+FORCE=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -22,6 +24,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --verify-only)
       VERIFY_ONLY=true
+      shift
+      ;;
+    --force)
+      FORCE=true
       shift
       ;;
     *)
@@ -46,27 +52,65 @@ echo ""
 echo "━━━ Step 1/3: verify:cross ━━━"
 echo ""
 
-if ! bash scripts/verify.sh cross; then
-  echo ""
-  echo "❌ Ship aborted: verify:cross FAILED"
-  echo "   Fix issues and try again."
-  exit 1
-fi
-
-# cross-result.json 확인 (verify.sh가 생성)
 CROSS_RESULT="$HOME/.autodev/cross-result.json"
+
+bash scripts/verify.sh cross
+VERIFY_EXIT=$?
+
+# cross-result.json 읽기
+GRADE="?"
+SCORE=0
+MAX_SC=100
 if [ -f "$CROSS_RESULT" ]; then
   GRADE=$(python3 -c "import json; print(json.load(open('$CROSS_RESULT')).get('grade','?'))" 2>/dev/null || echo "?")
   SCORE=$(python3 -c "import json; print(json.load(open('$CROSS_RESULT')).get('score',0))" 2>/dev/null || echo "0")
   MAX_SC=$(python3 -c "import json; print(json.load(open('$CROSS_RESULT')).get('maxScore',100))" 2>/dev/null || echo "100")
+fi
 
-  if [ "$GRADE" != "A" ] && [ "$GRADE" != "B" ]; then
+if [ $VERIFY_EXIT -ne 0 ] || [ "$GRADE" != "A" ]; then
+  if [ "$FORCE" = true ]; then
+    # --force: LLM 연결 실패(llm_unavailable) + 기계적 검증 만점일 때만 우회 허용
+    MECH_SCORE=$(python3 -c "import json; print(json.load(open('$CROSS_RESULT')).get('mechanicalScore',0))" 2>/dev/null || echo "0")
+    MECH_MAX=$(python3 -c "import json; print(json.load(open('$CROSS_RESULT')).get('mechanicalMax',0))" 2>/dev/null || echo "0")
+    VA_STATUS=$(python3 -c "import json; print(json.load(open('$CROSS_RESULT')).get('verifyAgentStatus','unknown'))" 2>/dev/null || echo "unknown")
+
+    # --force 허용 조건: verifyAgentStatus == llm_unavailable + 기계적 검증 만점 + 결과 신선도
+    if [ "$VA_STATUS" != "llm_unavailable" ]; then
+      echo ""
+      echo "❌ Ship aborted: --force는 LLM 연결 실패 시에만 사용 가능"
+      echo "   현재 Verify Agent 상태: ${VA_STATUS}"
+      [ "$VA_STATUS" = "reviewed" ] && echo "   LLM이 실제 리뷰 후 낮은 점수를 줌. 이슈를 수정하세요."
+      exit 1
+    fi
+
+    # 결과 신선도 확인 (tree hash)
+    RESULT_TREE=$(python3 -c "import json; print(json.load(open('$CROSS_RESULT')).get('treeHash',''))" 2>/dev/null || echo "")
+    CURRENT_TREE=$(git write-tree 2>/dev/null || echo "unknown")
+    if [ -n "$RESULT_TREE" ] && [ "$RESULT_TREE" != "unknown" ] && [ "$RESULT_TREE" != "$CURRENT_TREE" ]; then
+      echo ""
+      echo "❌ Ship aborted: cross-result가 현재 코드와 불일치 (stale)"
+      echo "   pnpm verify:cross를 다시 실행하세요."
+      exit 1
+    fi
+
+    if [ "$MECH_MAX" -gt 0 ] 2>/dev/null && [ "$MECH_SCORE" -eq "$MECH_MAX" ] 2>/dev/null; then
+      echo ""
+      echo "⚠️  Grade ${GRADE} (${SCORE}/${MAX_SC}) — --force bypass (LLM unavailable)"
+      echo "   기계적 검증 ${MECH_SCORE}/${MECH_MAX} 만점. 수동 리뷰 책임은 사용자에게 있음."
+    else
+      echo ""
+      echo "❌ Ship aborted: 기계적 검증 ${MECH_SCORE}/${MECH_MAX} 미달 — --force로도 우회 불가"
+      echo "   --force는 빌드/TS/API/UI 만점 + LLM 연결 실패 시에만 사용 가능"
+      exit 1
+    fi
+  else
     echo ""
     echo "❌ Ship aborted: grade ${GRADE} (${SCORE}/${MAX_SC})"
-    echo "   Grade A/B required. Fix issues first."
+    echo "   Grade A (95%+) required. Fix issues first."
+    echo "   LLM 연결 실패 시: pnpm ship \"msg\" --force"
     exit 1
   fi
-
+else
   echo ""
   echo "✅ verify:cross ${GRADE} (${SCORE}/${MAX_SC})"
 fi

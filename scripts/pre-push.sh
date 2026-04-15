@@ -64,7 +64,7 @@ if [ -n "$RESULT_COMMIT" ] && [ "$RESULT_COMMIT" != "unknown" ]; then
 fi
 
 # ── 등급 판정 ──
-if [ "$GRADE" = "A" ] || [ "$GRADE" = "B" ]; then
+if [ "$GRADE" = "A" ]; then
   echo "✅ pre-push: verify:cross ${GRADE} (${SCORE}/${MAX_SC} = ${PERCENT}%, ${RESULT_AGE}s ago)"
   exit 0
 fi
@@ -72,6 +72,6 @@ fi
 echo ""
 echo "❌ pre-push BLOCKED: verify:cross grade = ${GRADE} (${SCORE}/${MAX_SC} = ${PERCENT}%)"
 echo ""
-echo "   Grade A/B required for push."
+echo "   Grade A (95%+) required for push."
 echo "   Fix issues, run 'pnpm verify:cross', then push again."
 exit 1

@@ -81,6 +81,9 @@ json_get_nested() {
 # Score tracking
 TOTAL_SCORE=0
 MAX_SCORE=0
+MECHANICAL_SCORE=0
+MECHANICAL_MAX=0
+VERIFY_AGENT_STATUS="not_run"  # not_run, llm_unavailable, reviewed
 DETAILS=""
 
 add_score() {
@@ -205,6 +208,10 @@ fi
 # Cleanup dev server (single instance for both Step 3 and Step 4)
 cleanup_server $DEV_PID
 
+# 기계적 검증 점수 스냅샷 (Verify Agent 전)
+MECHANICAL_SCORE=$TOTAL_SCORE
+MECHANICAL_MAX=$MAX_SCORE
+
 # ─── Step 5: Verify Agent Review (cross만, 50점) ──────
 if [ "$MODE" = "cross" ]; then
   echo "=== Step 5: Verify Agent Review (다른 LLM이 코드 리뷰) ==="
@@ -212,6 +219,7 @@ if [ "$MODE" = "cross" ]; then
   if [ "$CI" = "true" ]; then
     echo "  ⏭️  Skipping Verify Agent in CI (no LLM CLI)"
     add_score "Verify Agent" 30 50 "skipped (CI)"
+    VERIFY_AGENT_STATUS="ci_skipped"
   else
 
   # Detect changes: staged + last commit + working tree (not just HEAD~1)
@@ -236,9 +244,17 @@ if [ "$MODE" = "cross" ]; then
       if [ -n "$AGENT_SCORE" ] && [ "$AGENT_SCORE" -le 50 ] 2>/dev/null; then
         add_score "Verify Agent" "$AGENT_SCORE" 50 "$AGENT_VERDICT"
         echo "  Score: ${AGENT_SCORE}/50 (${AGENT_VERDICT})"
+        # LLM이 실제 리뷰했는지 vs unavailable 응답인지 구분
+        ISSUES_TEXT=$(json_get "$AGENT_JSON" "issues" "")
+        if echo "$ISSUES_TEXT" | grep -qi "unavailable"; then
+          VERIFY_AGENT_STATUS="llm_unavailable"
+        else
+          VERIFY_AGENT_STATUS="reviewed"
+        fi
       else
         add_score "Verify Agent" 25 50 "파싱 실패, 기본 점수"
         echo "  ⚠ 점수 파싱 실패, 기본 25점"
+        VERIFY_AGENT_STATUS="llm_unavailable"
       fi
 
       # Show issues if any
@@ -253,6 +269,7 @@ if [ "$MODE" = "cross" ]; then
         if [ -n "$VF_COMMIT" ] && [ "$VF_COMMIT" != "unknown" ] && [ "$VF_COMMIT" != "$CURRENT_HEAD" ]; then
           add_score "Verify Agent" 25 50 "LLM unavailable (stale verdict)"
           echo "  ⚠ verdict.json commitHash 불일치 — 기계적 체크 기반 점수"
+          VERIFY_AGENT_STATUS="llm_unavailable"
           echo "  Output: $(echo "$AGENT_OUTPUT" | tail -5)"
         else
           VF_SCORE=$(json_get_nested "$VERDICT_FILE" "Math.min(Math.round(d.score*50/100),50)" "0")
@@ -260,17 +277,20 @@ if [ "$MODE" = "cross" ]; then
 
           add_score "Verify Agent" "$VF_SCORE" 50 "$VF_VERDICT"
           echo "  Score: ${VF_SCORE}/50 (${VF_VERDICT}) — verdict.json fallback"
+          VERIFY_AGENT_STATUS="reviewed"
           echo "$AGENT_OUTPUT" | grep "Issues:" -A 20 | head -15
         fi
       else
         add_score "Verify Agent" 25 50 "LLM unavailable"
         echo "  ⚠ Verify Agent LLM 응답 없음 — 기계적 체크 기반 점수 (25/50)"
+        VERIFY_AGENT_STATUS="llm_unavailable"
         echo "  Output: $(echo "$AGENT_OUTPUT" | tail -5)"
       fi
     fi
   else
     add_score "Verify Agent" 50 50 "변경 없음"
     echo "  ✅ 변경된 파일 없음 (skip)"
+    VERIFY_AGENT_STATUS="no_changes"
   fi
 
   fi  # end CI else
@@ -288,13 +308,13 @@ fi
 # ─── Score Summary ────────────────────────────
 PERCENT=$((TOTAL_SCORE * 100 / MAX_SCORE))
 
-if [ $PERCENT -ge 90 ]; then
+if [ $PERCENT -ge 95 ]; then
   GRADE="A"
   LABEL="Ship it"
-elif [ $PERCENT -ge 80 ]; then
+elif [ $PERCENT -ge 85 ]; then
   GRADE="B"
-  LABEL="Acceptable"
-elif [ $PERCENT -ge 70 ]; then
+  LABEL="Review needed (커밋 차단)"
+elif [ $PERCENT -ge 75 ]; then
   GRADE="C"
   LABEL="Needs work (커밋 차단)"
 else
@@ -328,15 +348,23 @@ fs.writeFileSync('$RESULT_DIR/cross-result.json', JSON.stringify({
   mode: '$MODE',
   commitHash: '$COMMIT_HASH',
   treeHash: '$TREE_HASH',
+  mechanicalScore: $MECHANICAL_SCORE,
+  mechanicalMax: $MECHANICAL_MAX,
+  verifyAgentStatus: '$VERIFY_AGENT_STATUS',
 }, null, 2));
 " 2>/dev/null || true
 fi
 
 # ─── Exit code ─────
-# F등급: 모든 모드에서 실패
-# C등급: cross 모드에서만 실패 (커밋 차단), quick/full은 경고만
+# A등급만 통과, B/C/F는 cross 모드에서 실패
+# quick/full은 F만 실패
+# CI에서는 cross도 F만 실패 (LLM CLI 없으므로 A 불가)
 if [ "$GRADE" = "F" ]; then
   exit 1
-elif [ "$GRADE" = "C" ] && [ "$MODE" = "cross" ]; then
-  exit 1
+elif [ "$MODE" = "cross" ] && [ "$GRADE" != "A" ]; then
+  if [ "$CI" = "true" ]; then
+    echo "⚠️  CI mode: grade ${GRADE} (LLM unavailable) — reporting only"
+  else
+    exit 1
+  fi
 fi
