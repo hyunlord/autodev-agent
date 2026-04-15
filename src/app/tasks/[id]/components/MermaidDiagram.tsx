@@ -17,10 +17,20 @@ export default function MermaidDiagram({ chart }: Props) {
         startOnLoad: false,
         theme: 'dark',
         themeVariables: {
-          primaryColor: '#7c3aed',
-          primaryTextColor: '#fff',
-          lineColor: '#6b7280',
-          secondaryColor: '#1f2937',
+          primaryColor: '#6366f1',
+          primaryTextColor: '#e5e7eb',
+          primaryBorderColor: '#4f46e5',
+          lineColor: '#4b5563',
+          secondaryColor: '#1e1b4b',
+          tertiaryColor: '#1f2937',
+          fontSize: '13px',
+          fontFamily: 'ui-monospace, SFMono-Regular, monospace',
+          nodeBkg: '#1f2937',
+          nodeTextColor: '#e5e7eb',
+          nodeBorder: '#4b5563',
+          edgeLabelBackground: '#111827',
+          clusterBkg: '#111827',
+          clusterBorder: '#374151',
         },
       });
       mermaid.default.run({ nodes: [ref.current!] });
@@ -28,5 +38,9 @@ export default function MermaidDiagram({ chart }: Props) {
     });
   }, [chart, rendered]);
 
-  return <div ref={ref} className="mermaid text-sm overflow-x-auto">{chart}</div>;
+  return (
+    <div className="rounded-lg overflow-hidden">
+      <div ref={ref} className="mermaid text-sm overflow-x-auto">{chart}</div>
+    </div>
+  );
 }

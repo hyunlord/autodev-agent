@@ -2,7 +2,15 @@
   "name": "autodev-agent",
   "version": "0.1.0",
   "description": "Universal AI development orchestrator — Plan, Code, Verify with multiple LLM agents",
-  "keywords": ["ai", "coding", "agent", "orchestrator", "llm", "development", "automation"],
+  "keywords": [
+    "ai",
+    "coding",
+    "agent",
+    "orchestrator",
+    "llm",
+    "development",
+    "automation"
+  ],
   "author": "Kwan Hyeon",
   "license": "MIT",
   "repository": {
@@ -71,6 +79,7 @@
     "driver.js": "^1.4.0",
     "drizzle-orm": "^0.39.3",
     "execa": "^9.6.1",
+    "highlight.js": "^11.11.1",
     "js-yaml": "^4.1.1",
     "mermaid": "^11.14.0",
     "nanoid": "^5.1.7",

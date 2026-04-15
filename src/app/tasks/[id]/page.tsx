@@ -30,7 +30,8 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
   const [interviewAnswers, setInterviewAnswers] = useState<Record<number, string>>({});
   const [submittingAnswers, setSubmittingAnswers] = useState(false);
   const [cycleInfo, setCycleInfo] = useState<CycleInfo>({ current: 0, max: 0, steps: [] });
-  const [planTab, setPlanTab] = useState<'json' | 'diagram'>('json');
+  const [planTab, setPlanTab] = useState<'json' | 'diagram' | 'cards'>('json');
+  const [artifactFiles, setArtifactFiles] = useState<Record<string, string>>({});
   const [diffData, setDiffData] = useState<any>(null);
   const [diffView, setDiffView] = useState<'unified' | 'split'>('unified');
   const [diffLoading, setDiffLoading] = useState(false);
@@ -309,6 +310,32 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
     };
   }, [liveEvents]);
 
+  // --- Load artifact files for completed tasks ---
+  const parsedResultForArtifacts = parsedResult;
+  useEffect(() => {
+    if (!task?.projectDir || !['completed'].includes(currentStatus)) return;
+    const modifiedFiles: string[] = parsedResultForArtifacts?.modifiedFiles ?? [];
+    const previewableFiles = modifiedFiles.filter(f =>
+      /\.(html?|css|js|jsx|ts|tsx|json)$/i.test(f)
+    );
+    if (previewableFiles.length === 0) return;
+    // Only load HTML bundles (html + their css/js)
+    const hasHtml = previewableFiles.some(f => /\.html?$/i.test(f));
+    if (!hasHtml) return;
+
+    Promise.all(
+      previewableFiles.map(f =>
+        fetch(`/api/files?projectDir=${encodeURIComponent(task.projectDir!)}&file=${encodeURIComponent(f)}`)
+          .then(r => r.ok ? r.json() : null)
+          .then(data => data ? [f, data.content as string] as const : null)
+          .catch(() => null)
+      )
+    ).then(entries => {
+      const valid = entries.filter((e): e is [string, string] => e !== null);
+      if (valid.length > 0) setArtifactFiles(Object.fromEntries(valid));
+    });
+  }, [task?.projectDir, currentStatus, parsedResultForArtifacts]);
+
   // --- Loading ---
   if (!task) {
     return (
@@ -386,6 +413,7 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
                 screenshots={screenshots}
                 verificationResults={verificationResults}
                 escalationReport={escalationReport}
+                artifactFiles={artifactFiles}
               />
             )}
           </div>

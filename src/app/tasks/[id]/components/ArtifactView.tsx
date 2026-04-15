@@ -1,7 +1,10 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import dynamic from 'next/dynamic';
 import { VlmCard } from './VlmCard';
+import { ArtifactPreview } from './ArtifactPreview';
+import { ScreenshotCompare } from './ScreenshotCompare';
 import { planToMermaid } from '@/lib/utils/plan-to-mermaid';
 import type { PlanData, ScreenshotData, VerificationResult } from './types';
 
@@ -16,10 +19,21 @@ interface Props {
   screenshots: ScreenshotData[];
   verificationResults: VerificationResult[];
   escalationReport: string | null;
+  artifactFiles?: Record<string, string>;
 }
 
-export function ArtifactView({ planData, screenshots, verificationResults, escalationReport }: Props) {
-  const hasAny = planData || screenshots.length > 0 || escalationReport;
+export function ArtifactView({ planData, screenshots, verificationResults, escalationReport, artifactFiles }: Props) {
+  const hasAny = planData || screenshots.length > 0 || escalationReport || (artifactFiles && Object.keys(artifactFiles).length > 0);
+
+  // Screenshot comparison: pair consecutive screenshots by checkId
+  const screenshotPairs = screenshots.length >= 2
+    ? screenshots.reduce<Array<{ before: ScreenshotData; after: ScreenshotData }>>((pairs, ss, i) => {
+        if (i > 0 && screenshots[i - 1].checkId === ss.checkId) {
+          pairs.push({ before: screenshots[i - 1], after: ss });
+        }
+        return pairs;
+      }, [])
+    : [];
 
   if (!hasAny) {
     return (
@@ -31,6 +45,14 @@ export function ArtifactView({ planData, screenshots, verificationResults, escal
 
   return (
     <div className="space-y-6">
+      {/* Artifact preview (HTML/CSS/JS) */}
+      {artifactFiles && Object.keys(artifactFiles).length > 0 && (
+        <section>
+          <h3 className="text-xs text-gray-500 uppercase tracking-wider mb-2">Artifact Preview</h3>
+          <ArtifactPreview files={artifactFiles} />
+        </section>
+      )}
+
       {/* DAG view (sub-task dependencies) */}
       {planData?.subTasks && planData.subTasks.length > 0 && (
         <section>
@@ -45,6 +67,26 @@ export function ArtifactView({ planData, screenshots, verificationResults, escal
           <h3 className="text-xs text-gray-500 uppercase tracking-wider mb-2">Plan Diagram</h3>
           <div className="bg-gray-900 rounded-lg p-4 border border-gray-800 min-h-32">
             <MermaidDiagram chart={planToMermaid(planData)} />
+          </div>
+        </section>
+      )}
+
+      {/* Screenshot comparisons (Before/After slider) */}
+      {screenshotPairs.length > 0 && (
+        <section>
+          <h3 className="text-xs text-gray-500 uppercase tracking-wider mb-2">
+            Screenshot Comparison ({screenshotPairs.length})
+          </h3>
+          <div className="space-y-3">
+            {screenshotPairs.map((pair, i) => (
+              <div key={i}>
+                <p className="text-[10px] text-gray-600 mb-1">{pair.before.checkId}</p>
+                <ScreenshotCompare
+                  beforeUrl={`/api/screenshots/${encodeURIComponent(pair.before.path)}`}
+                  afterUrl={`/api/screenshots/${encodeURIComponent(pair.after.path)}`}
+                />
+              </div>
+            ))}
           </div>
         </section>
       )}

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { CostBreakdown } from './CostBreakdown';
+import { PlanCardView } from './PlanCardView';
 import { planToMermaid } from '@/lib/utils/plan-to-mermaid';
 
 const MermaidDiagram = dynamic(() => import('./MermaidDiagram'), {
@@ -21,10 +22,10 @@ interface Props {
   // Plan review
   editingPlan: boolean;
   editedCodingPrompt: string;
-  planTab: 'json' | 'diagram';
+  planTab: 'json' | 'diagram' | 'cards';
   onSetEditingPlan: (v: boolean) => void;
   onSetEditedCodingPrompt: (v: string) => void;
-  onSetPlanTab: (v: 'json' | 'diagram') => void;
+  onSetPlanTab: (v: 'json' | 'diagram' | 'cards') => void;
   onApprovePlan: (edited?: boolean) => void;
   onRejectPlan: () => void;
   // Interview
@@ -159,18 +160,15 @@ export function Sidebar({
             <div className="flex items-center gap-2">
               <h3 className="text-xs text-indigo-400 uppercase tracking-wider">Plan</h3>
               <div className="flex gap-0.5">
-                <button
-                  onClick={() => onSetPlanTab('json')}
-                  className={`px-1.5 py-0.5 text-[10px] rounded transition-colors ${planTab === 'json' ? 'bg-indigo-700 text-white' : 'bg-gray-800 text-gray-500 hover:bg-gray-700'}`}
-                >
-                  Detail
-                </button>
-                <button
-                  onClick={() => onSetPlanTab('diagram')}
-                  className={`px-1.5 py-0.5 text-[10px] rounded transition-colors ${planTab === 'diagram' ? 'bg-indigo-700 text-white' : 'bg-gray-800 text-gray-500 hover:bg-gray-700'}`}
-                >
-                  Diagram
-                </button>
+                {(['json', 'cards', 'diagram'] as const).map(tab => (
+                  <button
+                    key={tab}
+                    onClick={() => onSetPlanTab(tab)}
+                    className={`px-1.5 py-0.5 text-[10px] rounded transition-colors ${planTab === tab ? 'bg-indigo-700 text-white' : 'bg-gray-800 text-gray-500 hover:bg-gray-700'}`}
+                  >
+                    {tab === 'json' ? 'Detail' : tab === 'cards' ? 'Cards' : 'Diagram'}
+                  </button>
+                ))}
               </div>
             </div>
             {currentStatus === 'plan_review' && (
@@ -189,6 +187,10 @@ export function Sidebar({
             <div className="bg-gray-950 rounded-lg p-3 min-h-24 border border-gray-800">
               <MermaidDiagram chart={planToMermaid(planData)} />
             </div>
+          )}
+
+          {planTab === 'cards' && (
+            <PlanCardView plan={planData} />
           )}
 
           {planTab === 'json' && (
