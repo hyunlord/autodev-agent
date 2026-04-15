@@ -73,7 +73,7 @@ export interface VerifyResult {
   reason: string;
   issues: string[];
   suggestions: string[];
-  verdict: 'pass' | 're-code' | 're-plan' | 'fail';
+  verdict: 'pass' | 're-code' | 're-plan' | 'fail' | 'warn';
   evidence: {
     screenshots?: string[];
     buildResult?: string;

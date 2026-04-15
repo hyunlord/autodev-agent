@@ -301,18 +301,29 @@ export class VerifyAgent implements IAgent {
   }
 
   // ─── I5: Visual Regression — screenshot comparison ──────
+  // TODO: Replace byte-size heuristic with pixel-level diffing (pixelmatch) for accurate comparison.
+  // Current approach: byte-size comparison as a fast heuristic.
+  // Limitation: PNG metadata/compression changes can cause false-fails,
+  // and same-size pixel changes can cause false-passes.
+  // Pixel comparison will be introduced when pixelmatch is added as a dependency.
   private compareScreenshots(
     currentPath: string,
     baselinePath: string,
     emit: (e: PipelineEvent) => void,
   ): { match: boolean; diffPercentage: number } {
-    const currentSize = readFileSync(currentPath).length;
-    const baselineSize = readFileSync(baselinePath).length;
-    const sizeDiff = Math.abs(currentSize - baselineSize) / Math.max(currentSize, baselineSize);
+    const currentBuf = readFileSync(currentPath);
+    const baselineBuf = readFileSync(baselinePath);
+
+    // Quick check: identical bytes = definitely match
+    if (currentBuf.equals(baselineBuf)) {
+      return { match: true, diffPercentage: 0 };
+    }
+
+    const sizeDiff = Math.abs(currentBuf.length - baselineBuf.length) / Math.max(currentBuf.length, baselineBuf.length);
 
     if (sizeDiff > 0.15) {
       emit({ type: 'log', level: 'warn',
-        message: `[VisualRegression] Screenshot size changed by ${(sizeDiff * 100).toFixed(1)}%`,
+        message: `[VisualRegression] Screenshot size changed by ${(sizeDiff * 100).toFixed(1)}% (byte-size heuristic)`,
       } as PipelineEvent);
       return { match: false, diffPercentage: sizeDiff * 100 };
     }
@@ -1122,7 +1133,7 @@ Score 0-100. Be specific in issues. Respond ONLY with valid JSON.`;
           reason: `LLM verification unavailable (${err}). No code review performed — mechanical checks only.`,
           issues: ['LLM verification unavailable — manual review recommended'],
           suggestions: [],
-          verdict: 'warn' as any,
+          verdict: 'warn',
           evidence: {},
         },
         costUsd: 0,
@@ -1250,7 +1261,8 @@ If the code has no testable pure functions or invariants, output: {"tested":0,"p
     try {
       let cliArgs: string[];
       if (this.llm === 'codex-cli') {
-        cliArgs = ['exec', '--full-auto', '--sandbox', 'workspace-write', '--json', pbtPrompt];
+        // Read-only: no --full-auto/--sandbox to prevent repo mutation during verification
+        cliArgs = ['exec', '--json', pbtPrompt];
       } else {
         cliArgs = ['-p', pbtPrompt, '--output-format', 'text'];
       }
@@ -1282,30 +1294,57 @@ If the code has no testable pure functions or invariants, output: {"tested":0,"p
     // Strip markdown fences if LLM wrapped them
     testCode = testCode.replace(/^```(?:javascript|js)?\n?/m, '').replace(/\n?```$/m, '');
 
-    // 3. Write test file
-    const autodevDir = join(input.projectDir, '.autodev');
-    mkdirSync(autodevDir, { recursive: true });
-    const testFilePath = join(autodevDir, 'pbt-test.js');
+    // Codex --json returns JSONL envelopes — extract agent_message text
+    if (this.llm === 'codex-cli' && testCode.startsWith('{')) {
+      const lines = testCode.split('\n');
+      const codeMessages: string[] = [];
+      for (const line of lines) {
+        try {
+          const obj = JSON.parse(line.trim());
+          if (obj.type === 'item.completed' && obj.item?.type === 'agent_message') {
+            codeMessages.push(obj.item.text ?? '');
+          }
+        } catch { continue; }
+      }
+      if (codeMessages.length > 0) {
+        // Find the message that looks like JavaScript code
+        const codeMsg = codeMessages.find(m => m.includes('require(') || m.includes('fc.assert') || m.includes('fast-check'));
+        testCode = codeMsg
+          ? codeMsg.replace(/^```(?:javascript|js)?\n?/m, '').replace(/\n?```$/m, '')
+          : '';
+      }
+    }
+
+    if (!testCode || testCode.length < 20) {
+      return { propertiesTested: 0, examples: 0, failures: 0, failingProperties: [], generatedTestFile: null };
+    }
+
+    // 3. Write test file to isolated .autodev/pbt/ directory
+    const pbtDir = join(input.projectDir, '.autodev', 'pbt');
+    mkdirSync(pbtDir, { recursive: true });
+    const testFilePath = join(pbtDir, 'pbt-test.js');
     writeFileSync(testFilePath, testCode, 'utf-8');
 
-    emit({ type: 'log', level: 'info', message: `[PBT] Generated test → .autodev/pbt-test.js` } as PipelineEvent);
+    emit({ type: 'log', level: 'info', message: `[PBT] Generated test → .autodev/pbt/pbt-test.js` } as PipelineEvent);
 
-    // 4. Ensure fast-check is available
+    // 4. Ensure fast-check is available (install in pbt dir to avoid mutating project)
     try {
       await execa('node', ['-e', 'require("fast-check")'], { cwd: input.projectDir, timeout: 5_000 } as any);
     } catch {
       try {
-        emit({ type: 'log', level: 'info', message: '[PBT] Installing fast-check...' } as PipelineEvent);
-        await execa('npm', ['install', '--no-save', 'fast-check'], { cwd: input.projectDir, timeout: 30_000 } as any);
+        emit({ type: 'log', level: 'info', message: '[PBT] Installing fast-check in .autodev/pbt/ (isolated)...' } as PipelineEvent);
+        // Install in isolated pbt directory, not project root — prevents project mutation
+        writeFileSync(join(pbtDir, 'package.json'), '{"private":true}', 'utf-8');
+        await execa('npm', ['install', '--no-save', 'fast-check'], { cwd: pbtDir, timeout: 30_000 } as any);
       } catch {
         return { propertiesTested: 0, examples: 0, failures: 0, failingProperties: [], generatedTestFile: testFilePath };
       }
     }
 
-    // 5. Run the test
+    // 5. Run the test (in pbt dir so local fast-check is resolved)
     try {
       const result = await execa('node', [testFilePath], {
-        cwd: input.projectDir, timeout: 30_000, reject: false,
+        cwd: pbtDir, timeout: 30_000, reject: false,
       } as any);
       const testOutput = ((result as any).stdout ?? '') as string;
 
@@ -1361,6 +1400,21 @@ If the code has no testable pure functions or invariants, output: {"tested":0,"p
 
     emit({ type: 'log', level: 'info', message: `[Verify Debate] Round 2: Challenger (${challengerLlmId})...` } as PipelineEvent);
 
+    // Build code context for challenger (same files primary reviewed)
+    const fileContents = (evidence.fileContents ?? {}) as Record<string, string>;
+    const challengerCodeBudget = 8000;
+    let challengerCodeUsed = 0;
+    const challengerCodeParts: string[] = [];
+    for (const [path, content] of Object.entries(fileContents)) {
+      const part = `### ${path}\n\`\`\`\n${content.slice(0, 2000)}\n\`\`\``;
+      if (challengerCodeUsed + part.length > challengerCodeBudget) break;
+      challengerCodeParts.push(part);
+      challengerCodeUsed += part.length;
+    }
+    const challengerCodeSection = challengerCodeParts.length > 0
+      ? `\n\nCODE UNDER REVIEW:\n${challengerCodeParts.join('\n')}`
+      : '';
+
     const challengerPrompt = `You are a Challenger reviewing another AI's code review.
 
 PRIMARY REVIEW RESULT:
@@ -1368,12 +1422,14 @@ PRIMARY REVIEW RESULT:
 - Score: ${primaryResult.verifyResult.score}/100
 - Issues: ${JSON.stringify(primaryResult.verifyResult.issues)}
 - Suggestions: ${JSON.stringify(primaryResult.verifyResult.suggestions)}
+${challengerCodeSection}
 
 YOUR JOB:
-1. Do you AGREE or DISAGREE with the verdict?
-2. Are there issues the primary reviewer MISSED?
-3. Are any of the reported issues FALSE POSITIVES (hallucinations)?
-4. What score would YOU give? (0-100)
+1. Read the CODE above — form your own opinion FIRST
+2. Then compare with the primary review — AGREE or DISAGREE?
+3. Are there issues the primary reviewer MISSED?
+4. Are any of the reported issues FALSE POSITIVES (hallucinations)?
+5. What score would YOU give? (0-100)
 
 RESPOND WITH ONLY JSON (no markdown, no explanation):
 {
@@ -1389,7 +1445,8 @@ RESPOND WITH ONLY JSON (no markdown, no explanation):
       const execa = await getExeca();
       let cliArgs: string[];
       if (challengerLlmId === 'codex-cli') {
-        cliArgs = ['exec', '--full-auto', '--sandbox', 'workspace-write', '--json', challengerPrompt];
+        // Read-only: no --full-auto/--sandbox to prevent repo mutation during verification
+        cliArgs = ['exec', '--json', challengerPrompt];
       } else {
         cliArgs = ['-p', challengerPrompt, '--output-format', 'text'];
       }
