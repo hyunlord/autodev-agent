@@ -892,18 +892,21 @@ Example: {"passed":true,"score":85,"reason":"All features correct","issues":[],"
         const cliPath = await resolveCli('claude');
         if (!cliPath) throw new Error('Claude CLI not found');
         const claudePrompt = verifyPrompt + jsonEnforcement;
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 180_000);
+        const claudeTimeout = 180_000;
+        const subprocess = ex(cliPath, [
+          '-p', claudePrompt,
+          '--output-format', 'text',
+          '--max-turns', '2',
+          '--dangerously-skip-permissions',
+        ], { cwd: input.projectDir, reject: false, timeout: claudeTimeout });
+        const killTimer = setTimeout(() => { try { subprocess.kill('SIGKILL'); } catch {} }, claudeTimeout + 5_000);
         try {
-          const result = await ex(cliPath, [
-            '-p', claudePrompt,
-            '--output-format', 'text',
-            '--max-turns', '2',
-            '--dangerously-skip-permissions',
-          ], { cwd: input.projectDir, reject: false, timeout: 180_000, cancelSignal: controller.signal } as any);
+          const result = await subprocess;
+          if ((result as any).timedOut || (result as any).isCanceled) throw new Error(`claude-cli timed out after ${claudeTimeout / 1000}s`);
           stdout = (result as any).stdout ?? '';
+          if (!stdout.trim()) throw new Error('claude-cli returned empty output');
         } finally {
-          clearTimeout(timer);
+          clearTimeout(killTimer);
         }
       } else if (this.llm === 'gemini-cli') {
         const cliPath = await resolveCli('gemini');
@@ -911,16 +914,20 @@ Example: {"passed":true,"score":85,"reason":"All features correct","issues":[],"
         const geminiPrompt = (verifyPrompt.length > 25000
           ? verifyPrompt.slice(0, 24500) + '\n...[prompt truncated]'
           : verifyPrompt) + jsonEnforcement;
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 180_000);
+        // Dynamic timeout based on file count (90s-150s, max 180s)
+        const fileCount = input.modifiedFiles.length;
+        const geminiTimeout = Math.min(fileCount <= 5 ? 120_000 : fileCount <= 10 ? 150_000 : 180_000, 180_000);
+        const subprocess = ex(cliPath, ['-p', geminiPrompt], {
+          cwd: '/tmp', reject: false, timeout: geminiTimeout,
+        });
+        const killTimer = setTimeout(() => { try { subprocess.kill('SIGKILL'); } catch {} }, geminiTimeout + 5_000);
         try {
-          const result = await ex(cliPath, ['-p', geminiPrompt], {
-            cwd: '/tmp', reject: false, timeout: 180_000,
-            cancelSignal: controller.signal,
-          } as any);
+          const result = await subprocess;
+          if ((result as any).timedOut || (result as any).isCanceled) throw new Error(`Gemini timed out after ${geminiTimeout / 1000}s`);
           stdout = (result as any).stdout ?? '';
+          if (!stdout.trim()) throw new Error('Gemini returned empty output');
         } finally {
-          clearTimeout(timer);
+          clearTimeout(killTimer);
         }
       } else if (this.llm === 'codex-cli') {
         const cliPath = await resolveCli('codex');
@@ -969,18 +976,20 @@ Review this code for: 1) type errors 2) logic bugs 3) missing error handling 4) 
 Original request: ${(input.originalPrompt ?? '').slice(0, 500)}
 
 Score 0-100. Be specific in issues. Respond ONLY with valid JSON.`;
-        // No --full-auto → Codex can't run shell commands, must respond with JSON directly
-        // Reduced timeout from 180s to 60s since no command execution overhead
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 60_000);
+        // Dynamic timeout based on file count (90s-150s, max 180s)
+        const codexFileCount = input.modifiedFiles.length;
+        const codexTimeout = Math.min(codexFileCount <= 5 ? 120_000 : codexFileCount <= 10 ? 150_000 : 180_000, 180_000);
+        const subprocess = ex(cliPath, [
+          'exec', '--json',
+          codexPrompt,
+        ], { cwd: input.projectDir, reject: false, timeout: codexTimeout });
+        const killTimer = setTimeout(() => { try { subprocess.kill('SIGKILL'); } catch {} }, codexTimeout + 5_000);
         try {
-          const result = await ex(cliPath, [
-            'exec', '--json',
-            codexPrompt,
-          ], { cwd: input.projectDir, reject: false, timeout: 60_000, cancelSignal: controller.signal } as any);
+          const result = await subprocess;
+          if ((result as any).timedOut || (result as any).isCanceled) throw new Error(`codex-cli timed out after ${codexTimeout / 1000}s`);
           stdout = (result as any).stdout ?? '';
         } finally {
-          clearTimeout(timer);
+          clearTimeout(killTimer);
         }
       }
 
