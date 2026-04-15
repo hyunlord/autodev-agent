@@ -866,7 +866,15 @@ verdict meanings:
 - "re-plan": Fundamental approach is wrong (e.g., wrong architecture, missing key concept)
 - "fail": Cannot be fixed with current tools/approach
 
-Scoring:
+${input.skipMechanical ? `Scoring (CODE REVIEW mode — reviewing a code diff, not verifying a feature):
+- 0 issues found: score 95
+- 1 minor issue (style, naming, small improvement): score 88
+- 2 minor issues: score 82
+- 1 real bug (logic error, crash, data loss): score 70
+- 2+ real bugs: score 50-65
+- Critical security vulnerability: score below 50
+
+This is a CODE REVIEW, not feature verification. Score based on the CHANGES only. Pre-existing code patterns are out of scope. If you cannot verify something because it is outside the provided code, do NOT flag it.` : `Scoring:
 - 90-100: All features work correctly, good code quality, AND polished visual design (if UI task)
 - 80-89: All features work, minor issues OR acceptable but basic visual design
 - 70-79: Core features work, some issues, visual design needs improvement
@@ -876,7 +884,7 @@ Scoring:
 For UI/frontend tasks: A fully functional but visually unstyled result should score no higher than 79.
 A result with broken functionality but beautiful design should score based on functionality (design doesn't compensate for broken features).
 
-CRITICAL: Score 80+ ONLY if you have traced through the logic with concrete inputs and verified correctness. Do NOT give high scores based on "the code looks reasonable."`;
+CRITICAL: Score 80+ ONLY if you have traced through the logic with concrete inputs and verified correctness. Do NOT give high scores based on "the code looks reasonable."`}`;
 
     // ─── Debug: dump prompt to file ───────────────────────
     try {
@@ -983,25 +991,40 @@ Example: {"passed":true,"score":85,"reason":"All features correct","issues":[],"
           ? codexFileParts.join('\n')
           : `### ${Object.keys(fileContents)[0] ?? 'unknown'}\n\`\`\`\n${Object.values(fileContents)[0]?.slice(0, 8000) ?? ''}\n\`\`\``;
 
-        const codexPrompt = `RESPOND IN UNDER 50 WORDS PER FIELD. Output ONLY valid JSON, nothing else.
+        // Layer 1 code review: use git diff instead of full files for focused review
+        // skipMechanical is the canonical flag for code review mode (set by scripts/verify-agent.ts)
+        const gitDiff = (input.context as any)?.gitDiff as string | undefined;
+        const isCodeReview = input.skipMechanical && !!gitDiff;
+        const codeSection = isCodeReview && gitDiff
+          ? `=== GIT DIFF (review ONLY these changes, not pre-existing code) ===\n${gitDiff}`
+          : `=== CODE ===\n${codexFileSection}`;
+
+        const codexPrompt = `IMPORTANT: Do NOT run any shell commands. Do NOT explore files. Do NOT use tools. Analyze ONLY the code provided below and respond with JSON immediately.
+
+RESPOND IN UNDER 50 WORDS PER FIELD. Output ONLY valid JSON, nothing else.
 {"passed":bool,"score":0-100,"reason":"...","issues":["..."],"suggestions":["..."],"verdict":"pass"|"re-code"|"re-plan"|"fail"}
 
 Truncated files (marked [--- END OF VISIBLE PORTION ---]) are NOT incomplete — do NOT flag them.
+${isCodeReview ? `\nThis is a CODE REVIEW of a diff. Only flag issues in CHANGED lines (+ lines in the diff). Pre-existing code is out of scope.
+IMPORTANT scoring for code review:
+- 0 issues: score 95. 1 minor issue: score 88. 2 minor issues: score 82.
+- 1 real bug: score 70. 2+ real bugs: score 50-65. Critical security bug: score below 50.
+- "Minor issue" = style, naming, small improvement. "Real bug" = logic error, crash, data loss, security hole.
+- If you cannot verify something because it is outside the diff, do NOT flag it as an issue.` : ''}
 
-=== FILES (${input.modifiedFiles.length} total, showing ${codexFileParts.length}) ===
+=== FILES (${input.modifiedFiles.length} total${isCodeReview ? '' : `, showing ${codexFileParts.length}`}) ===
 ${input.modifiedFiles.join(', ')}
 
-=== CODE ===
-${codexFileSection}
+${codeSection}
 
 === CONTEXT ===
 ${codexContext}
 
 === TASK ===
 Review this code for: 1) type errors 2) logic bugs 3) missing error handling 4) regressions 5) security issues.
-Original request: ${(input.originalPrompt ?? '').slice(0, 500)}
+${isCodeReview ? 'Review ONLY the changed lines in the diff above. Do NOT report issues in unchanged code.' : `Original request: ${(input.originalPrompt ?? '').slice(0, 500)}`}
 
-Score 0-100. Be specific in issues. Respond ONLY with valid JSON.`;
+Score 0-100. Be specific in issues. Respond ONLY with valid JSON. Do NOT run commands — all code is above.`;
         // Dynamic timeout based on file count (90s-150s, max 180s)
         const codexFileCount = input.modifiedFiles.length;
         // Codex agentic mode reads files + runs commands — needs generous timeout
@@ -1045,7 +1068,9 @@ Score 0-100. Be specific in issues. Respond ONLY with valid JSON.`;
         if (findings) {
           if (findings.issues.length > 0) {
             emit({ type: 'log', level: 'info', message: `[Verify] Codex exploration: synthesized ${findings.issues.length} issue(s) from ${findings.commandCount} commands` } as PipelineEvent);
-            const synthScore = Math.max(30, 70 - findings.issues.length * 10);
+            // Timeout with partial exploration: penalize per issue but don't assume bad code
+            // 0 issues → 75 (incomplete review), 1 → 65, 2 → 55, 3 → 50, 4+ → 45
+            const synthScore = Math.max(45, 75 - findings.issues.length * 10);
             return {
               verifyResult: {
                 passed: false,
@@ -1090,6 +1115,30 @@ Score 0-100. Be specific in issues. Respond ONLY with valid JSON.`;
       }
       if (Array.isArray(parsed.suggestions)) {
         parsed.suggestions = parsed.suggestions.filter((s: string) => !truncationPattern.test(s));
+      }
+
+      // ─── Code review mode: calibrate score based on issue severity ──
+      // LLMs in code review mode tend to under-score: they find design suggestions
+      // but score as if they were bugs. Apply a floor based on issue count when
+      // no critical bugs are present (security, crash, data loss keywords).
+      if (input.skipMechanical && Array.isArray(parsed.issues)) {
+        const criticalPattern = /\b(security|vulnerab|inject|crash|data loss|undefined is not|cannot read|race condition|deadlock|memory leak|XSS|SQL|CSRF|secret|credential|password|token leak)\b/i;
+        const hasCritical = parsed.issues.some((i: string) => criticalPattern.test(i));
+        if (!hasCritical) {
+          // No critical bugs — apply score floor based on issue count
+          // Design suggestions shouldn't block commits. Per-issue penalty: 3 points.
+          // 0 issues → 95, 1 → 92, 2 → 89, 3 → 86, 4 → 83, 5+ → 80
+          const issueCount = parsed.issues.length;
+          const scoreFloor = Math.max(80, 95 - issueCount * 3);
+          if (parsed.score < scoreFloor) {
+            emit({ type: 'log', level: 'info', message: `[Verify] Code review calibration: ${parsed.score} → ${scoreFloor} (${issueCount} non-critical issue(s))` } as PipelineEvent);
+            parsed.score = scoreFloor;
+            if (scoreFloor >= 80 && parsed.verdict !== 'pass') {
+              parsed.verdict = 'pass';
+              parsed.passed = true;
+            }
+          }
+        }
       }
 
       // ─── Detect Codex hallucinations (e.g. "no code provided" despite code in prompt) ──

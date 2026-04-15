@@ -245,8 +245,9 @@ if [ "$MODE" = "cross" ]; then
         add_score "Verify Agent" "$AGENT_SCORE" 50 "$AGENT_VERDICT"
         echo "  Score: ${AGENT_SCORE}/50 (${AGENT_VERDICT})"
         # LLM이 실제 리뷰했는지 vs unavailable 응답인지 구분
-        ISSUES_TEXT=$(json_get "$AGENT_JSON" "issues" "")
-        if echo "$ISSUES_TEXT" | grep -qi "unavailable"; then
+        # verdict="unavailable"은 LLM unavailable/error 폴백 (verify-agent.ts:100,221)
+        # verdict="ok"/"warn"/"fail"은 실제 리뷰 완료
+        if [ "$AGENT_VERDICT" = "unavailable" ]; then
           VERIFY_AGENT_STATUS="llm_unavailable"
         else
           VERIFY_AGENT_STATUS="reviewed"

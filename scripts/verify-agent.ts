@@ -96,7 +96,7 @@ async function main() {
   if (!available) {
     console.log('⚠ Verify Agent not available (need gemini-cli, codex-cli, or claude-cli)');
     console.log('  Skipping LLM review.');
-    const warnResult = { score: 25, issues: ['Verify Agent unavailable'], verdict: 'warn' };
+    const warnResult = { score: 25, issues: ['Verify Agent unavailable'], verdict: 'unavailable' };
     console.log(`VERIFY_AGENT_RESULT=${JSON.stringify(warnResult)}`);
     // verdict.json도 저장 (fallback 경로 일관성) — score를 VERIFY_AGENT_RESULT와 일치시킴
     try {
@@ -104,7 +104,7 @@ async function main() {
       mkdirSync(verdictDir, { recursive: true });
       let commitHash = 'unknown';
       try { commitHash = execSync('git rev-parse HEAD', { encoding: 'utf-8', cwd: projectDir }).trim(); } catch { /* */ }
-      writeFileSync(join(verdictDir, 'verdict.json'), JSON.stringify({ timestamp: new Date().toISOString(), verdict: 'warn', score: warnResult.score, issues: warnResult.issues, commitHash }, null, 2), 'utf-8');
+      writeFileSync(join(verdictDir, 'verdict.json'), JSON.stringify({ timestamp: new Date().toISOString(), verdict: 'unavailable', score: warnResult.score, issues: warnResult.issues, commitHash }, null, 2), 'utf-8');
     } catch { /* verdict 저장 실패는 무시 */ }
     process.exit(0);
   }
@@ -112,9 +112,38 @@ async function main() {
   console.log(`Using: ${verifyAgent.name}`);
   console.log('');
 
-  // 3. Build prompt with changed file contents
+  // 3. Collect git diff for focused review (staged + unstaged + untracked)
+  let gitDiff = '';
+  try {
+    // Tracked file changes (staged + unstaged)
+    gitDiff = execSync('git diff HEAD', { cwd: projectDir, encoding: 'utf-8', maxBuffer: 500_000 }).trim();
+    if (!gitDiff) {
+      gitDiff = execSync('git diff HEAD~1 HEAD', { cwd: projectDir, encoding: 'utf-8', maxBuffer: 500_000 }).trim();
+    }
+    // Append untracked (new) files as synthetic diff entries
+    const untracked = execSync('git ls-files --others --exclude-standard', { cwd: projectDir, encoding: 'utf-8', maxBuffer: 100_000 }).trim();
+    if (untracked) {
+      const untrackedFiles = untracked.split('\n').filter(Boolean).slice(0, 5);
+      for (const f of untrackedFiles) {
+        const fullPath = join(projectDir, f);
+        if (existsSync(fullPath) && statSync(fullPath).isFile() && statSync(fullPath).size < 5000) {
+          const content = require('fs').readFileSync(fullPath, 'utf-8');
+          gitDiff += `\n\ndiff --git a/${f} b/${f}\nnew file\n--- /dev/null\n+++ b/${f}\n${content.split('\n').map((l: string) => `+${l}`).join('\n')}`;
+        }
+      }
+    }
+  } catch (e) {
+    console.log(`  ⚠ Git diff collection failed: ${e}`);
+  }
+  const diffSection = gitDiff
+    ? `\n\n=== GIT DIFF (focus your review on THESE changes) ===\n${gitDiff.length > 8000 ? gitDiff.slice(0, 8000) + '\n[--- DIFF TRUNCATED ---]' : gitDiff}`
+    : '\n\n(No git diff available — review full file contents instead)';
+
+  // 4. Build prompt with changed file contents
   const prompt = `You are reviewing code changes to the AutoDev Agent project.
 AutoDev Agent is a universal AI development orchestrator built with Next.js, TypeScript, SQLite.
+
+Review ONLY the changed lines (see GIT DIFF below). Do NOT flag pre-existing patterns or code that was not modified.
 
 Review these changes for:
 1. TypeScript type errors or missing types
@@ -124,9 +153,16 @@ Review these changes for:
 5. Security issues (hardcoded secrets, path traversal, etc.)
 6. Code quality (naming, structure, unnecessary complexity)
 
-Be critical — your job is to find problems, not confirm the code works.`;
+This is a CODE REVIEW (pre-commit check), not feature verification.
+Score based on the quality and correctness of the CHANGES ONLY:
+- Clean changes with no bugs or regressions → score 85+
+- Minor style/naming issues only → score 80-89
+- Real bugs in the changed code → score 60-79
+- Critical security or logic bugs in changed code → score below 60
+Only flag issues in code that was ADDED or MODIFIED in this diff. Pre-existing code patterns are out of scope.${diffSection}`;
+  // Remove redundant isCodeReview — skipMechanical + gitDiff presence is the canonical check
 
-  // 4. Invoke Verify Agent
+  // 5. Invoke Verify Agent
   const result = await verifyAgent.invoke({
     prompt: 'Review the code changes',
     originalPrompt: prompt,
@@ -143,6 +179,9 @@ Be critical — your job is to find problems, not confirm the code works.`;
       projectDir,
       projectType: 'nextjs',
       files: changedFiles,
+      gitDiff: gitDiff.length > 10000
+        ? gitDiff.slice(0, 10000) + '\n[--- DIFF TRUNCATED — remaining hunks omitted for size ---]'
+        : gitDiff,
     },
     config: {
       timeoutMs: 180_000,
@@ -217,7 +256,7 @@ Be critical — your job is to find problems, not confirm the code works.`;
 
 main().catch(err => {
   console.error('Verify Agent error:', err);
-  const errResult = { score: 25, issues: [`Error: ${err}`], verdict: 'warn' };
+  const errResult = { score: 25, issues: [`Error: ${err}`], verdict: 'unavailable' };
   console.log(`VERIFY_AGENT_RESULT=${JSON.stringify(errResult)}`);
   // verdict.json도 저장 (fallback 경로 일관성) — score를 VERIFY_AGENT_RESULT와 일치시킴
   try {
@@ -225,7 +264,7 @@ main().catch(err => {
     mkdirSync(verdictDir, { recursive: true });
     let commitHash = 'unknown';
     try { commitHash = execSync('git rev-parse HEAD', { encoding: 'utf-8' }).trim(); } catch { /* */ }
-    writeFileSync(join(verdictDir, 'verdict.json'), JSON.stringify({ timestamp: new Date().toISOString(), verdict: 'warn', score: 25, issues: errResult.issues, commitHash }, null, 2), 'utf-8');
+    writeFileSync(join(verdictDir, 'verdict.json'), JSON.stringify({ timestamp: new Date().toISOString(), verdict: 'unavailable', score: 25, issues: errResult.issues, commitHash }, null, 2), 'utf-8');
   } catch { /* verdict 저장 실패는 무시 */ }
   process.exitCode = 1;
 });
