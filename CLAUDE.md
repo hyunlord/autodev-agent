@@ -148,7 +148,7 @@ GitHub 레포에서 구현 패턴을 검색하거나 이슈/PR을 관리한다.
 
 커밋 전 `pnpm verify:cross` 실행 시, **Verify Agent가 변경된 코드를 리뷰**한다.
 - Claude Code로 코딩했으면 → Gemini CLI 또는 Codex CLI가 리뷰
-- Verify Agent가 없으면 → score 10/15 + warn (빌드를 막지 않음)
+- Verify Agent가 없으면 → 25/50 + warn (cross 모드에서 C등급 = 커밋 차단)
 - Verify Agent는 레이어 2(서비스)에서 사용하는 것과 **같은 Verify Agent**
 
 #### 등급 기준
@@ -156,9 +156,9 @@ GitHub 레포에서 구현 패턴을 검색하거나 이슈/PR을 관리한다.
 | 등급 | 점수 | 의미 |
 |------|------|------|
 | A | 90%+ | Ship it — 바로 커밋 (Verify Agent 40/50+ 필요) |
-| B | 75-89% | Acceptable — 커밋 가능, 개선 권장 |
-| C | 60-74% | Needs work — 수정 후 재검증 |
-| F | 60% 미만 | Reject — 반드시 수정 |
+| B | 80-89% | Acceptable — 커밋 가능, 개선 권장 |
+| C | 70-79% | Needs work — 커밋 차단, 수정 후 재검증 |
+| F | 70% 미만 | Reject — 반드시 수정 |
 
 #### Cross-Check 규칙 (Verify 에이전트 분리)
 
@@ -246,9 +246,9 @@ Build + TypeScript + API Health 점검. 결과 표 출력 필수.
 pnpm verify:cross
 ```
 다른 LLM(Gemini)이 코드를 리뷰한다.
-- A/B 등급 → 커밋 가능
-- C 등급 → 수정 후 재검증
-- F 등급 → 반드시 수정
+- A/B 등급 → 커밋 가능 (80%+)
+- C 등급 → 커밋 차단, 수정 후 재검증 (70-79%)
+- F 등급 → 반드시 수정 (70% 미만)
 
 #### Step 4: UI 변경 시 추가 (해당 시)
 ```bash

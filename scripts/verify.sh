@@ -251,7 +251,7 @@ if [ "$MODE" = "cross" ]; then
         # commitHash 검증 — 현재 실행에서 생성된 verdict인지 확인
         VF_COMMIT=$(json_get_file "$VERDICT_FILE" "commitHash" "")
         if [ -n "$VF_COMMIT" ] && [ "$VF_COMMIT" != "unknown" ] && [ "$VF_COMMIT" != "$CURRENT_HEAD" ]; then
-          add_score "Verify Agent" 20 50 "LLM unavailable (stale verdict)"
+          add_score "Verify Agent" 25 50 "LLM unavailable (stale verdict)"
           echo "  ⚠ verdict.json commitHash 불일치 — 기계적 체크 기반 점수"
           echo "  Output: $(echo "$AGENT_OUTPUT" | tail -5)"
         else
@@ -263,8 +263,8 @@ if [ "$MODE" = "cross" ]; then
           echo "$AGENT_OUTPUT" | grep "Issues:" -A 20 | head -15
         fi
       else
-        add_score "Verify Agent" 20 50 "LLM unavailable"
-        echo "  ⚠ Verify Agent LLM 응답 없음 — 기계적 체크 기반 점수 (20/50)"
+        add_score "Verify Agent" 25 50 "LLM unavailable"
+        echo "  ⚠ Verify Agent LLM 응답 없음 — 기계적 체크 기반 점수 (25/50)"
         echo "  Output: $(echo "$AGENT_OUTPUT" | tail -5)"
       fi
     fi
@@ -291,12 +291,12 @@ PERCENT=$((TOTAL_SCORE * 100 / MAX_SCORE))
 if [ $PERCENT -ge 90 ]; then
   GRADE="A"
   LABEL="Ship it"
-elif [ $PERCENT -ge 75 ]; then
+elif [ $PERCENT -ge 80 ]; then
   GRADE="B"
   LABEL="Acceptable"
-elif [ $PERCENT -ge 60 ]; then
+elif [ $PERCENT -ge 70 ]; then
   GRADE="C"
-  LABEL="Needs work"
+  LABEL="Needs work (커밋 차단)"
 else
   GRADE="F"
   LABEL="Reject"
@@ -310,11 +310,8 @@ echo "├────────────────────┼──�
 echo "│ TOTAL              │ $(printf '%3s' $TOTAL_SCORE)/${MAX_SCORE} │ ${GRADE} (${LABEL}) ${PERCENT}%     │"
 echo "└────────────────────┴───────┴──────────────────────┘"
 
-if [ "$GRADE" = "F" ]; then
-  exit 1
-fi
-
 # ─── Save overall result for hooks (cross-result.json) ─────
+# Note: cross-result.json은 exit 전에 저장 — pre-commit이 등급을 읽을 수 있어야 함
 if [ "$MODE" = "cross" ]; then
   RESULT_DIR="$HOME/.autodev"
   mkdir -p "$RESULT_DIR"
@@ -333,4 +330,13 @@ fs.writeFileSync('$RESULT_DIR/cross-result.json', JSON.stringify({
   treeHash: '$TREE_HASH',
 }, null, 2));
 " 2>/dev/null || true
+fi
+
+# ─── Exit code ─────
+# F등급: 모든 모드에서 실패
+# C등급: cross 모드에서만 실패 (커밋 차단), quick/full은 경고만
+if [ "$GRADE" = "F" ]; then
+  exit 1
+elif [ "$GRADE" = "C" ] && [ "$MODE" = "cross" ]; then
+  exit 1
 fi
