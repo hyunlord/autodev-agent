@@ -42,6 +42,8 @@ export class VerifyAgent implements IAgent {
    * Coding Agent와 다른 LLM을 자동 선택
    */
   static async selectDifferentFrom(codingAgentId: string): Promise<{ primary: VerifyAgent; fallbacks: string[] }> {
+    // Codex 우선: exec --json 에이전트 모드로 실제 파일을 읽으며 심층 리뷰
+    // Gemini CLI는 -p 모드에서 대형 프롬프트 시 approval 대기로 행(hang)
     const candidates = ['codex-cli', 'gemini-cli', 'claude-cli'];
     const codingLlm = codingAgentId.replace('claude-code', 'claude-cli');
 
@@ -885,50 +887,63 @@ CRITICAL: Score 80+ ONLY if you have traced through the logic with concrete inpu
 Required keys: passed (bool), score (0-100), reason (string), issues (string[]), suggestions (string[]), verdict ("pass"|"re-code"|"re-plan"|"fail").
 Example: {"passed":true,"score":85,"reason":"All features correct","issues":[],"suggestions":[],"verdict":"pass"}`;
 
-    try {
-      const ex = await getExeca();
+    // Helper: run CLI with hard timeout using child_process.spawn + process group kill
+    // execa v9's timeout doesn't reliably kill CLI process trees (gemini/codex spawn children)
+    const runCliWithTimeout = (
+      cmd: string, args: string[], opts: { cwd: string; timeoutMs: number },
+    ): Promise<{ stdout: string; timedOut: boolean }> => {
+      return new Promise((resolve) => {
+        const { spawn } = require('child_process') as typeof import('child_process');
+        const child = spawn(cmd, args, {
+          cwd: opts.cwd,
+          detached: true,  // Create process group for reliable tree-kill
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: { ...process.env },
+        });
+        let out = '';
+        let timedOut = false;
+        child.stdout?.on('data', (d: Buffer) => { out += d.toString(); });
+        child.stderr?.on('data', (d: Buffer) => { out += d.toString(); });
+        const timer = setTimeout(() => {
+          timedOut = true;
+          // Kill entire process group (negative PID)
+          try { process.kill(-child.pid!, 'SIGKILL'); } catch {}
+          try { child.kill('SIGKILL'); } catch {}
+        }, opts.timeoutMs);
+        child.on('close', () => { clearTimeout(timer); resolve({ stdout: out, timedOut }); });
+        child.on('error', () => { clearTimeout(timer); resolve({ stdout: out, timedOut }); });
+      });
+    };
 
+    try {
       if (this.llm === 'claude-cli') {
         const cliPath = await resolveCli('claude');
         if (!cliPath) throw new Error('Claude CLI not found');
         const claudePrompt = verifyPrompt + jsonEnforcement;
         const claudeTimeout = 180_000;
-        const subprocess = ex(cliPath, [
+        const { stdout: out, timedOut } = await runCliWithTimeout(cliPath, [
           '-p', claudePrompt,
           '--output-format', 'text',
           '--max-turns', '2',
           '--dangerously-skip-permissions',
-        ], { cwd: input.projectDir, reject: false, timeout: claudeTimeout });
-        const killTimer = setTimeout(() => { try { subprocess.kill('SIGKILL'); } catch {} }, claudeTimeout + 5_000);
-        try {
-          const result = await subprocess;
-          if ((result as any).timedOut || (result as any).isCanceled) throw new Error(`claude-cli timed out after ${claudeTimeout / 1000}s`);
-          stdout = (result as any).stdout ?? '';
-          if (!stdout.trim()) throw new Error('claude-cli returned empty output');
-        } finally {
-          clearTimeout(killTimer);
-        }
+        ], { cwd: input.projectDir, timeoutMs: claudeTimeout });
+        if (timedOut) throw new Error(`claude-cli timed out after ${claudeTimeout / 1000}s`);
+        stdout = out;
+        if (!stdout.trim()) throw new Error('claude-cli returned empty output');
       } else if (this.llm === 'gemini-cli') {
         const cliPath = await resolveCli('gemini');
         if (!cliPath) throw new Error('Gemini CLI not found');
         const geminiPrompt = (verifyPrompt.length > 25000
           ? verifyPrompt.slice(0, 24500) + '\n...[prompt truncated]'
           : verifyPrompt) + jsonEnforcement;
-        // Dynamic timeout based on file count (90s-150s, max 180s)
-        const fileCount = input.modifiedFiles.length;
-        const geminiTimeout = Math.min(fileCount <= 5 ? 120_000 : fileCount <= 10 ? 150_000 : 180_000, 180_000);
-        const subprocess = ex(cliPath, ['-p', geminiPrompt], {
-          cwd: '/tmp', reject: false, timeout: geminiTimeout,
-        });
-        const killTimer = setTimeout(() => { try { subprocess.kill('SIGKILL'); } catch {} }, geminiTimeout + 5_000);
-        try {
-          const result = await subprocess;
-          if ((result as any).timedOut || (result as any).isCanceled) throw new Error(`Gemini timed out after ${geminiTimeout / 1000}s`);
-          stdout = (result as any).stdout ?? '';
-          if (!stdout.trim()) throw new Error('Gemini returned empty output');
-        } finally {
-          clearTimeout(killTimer);
-        }
+        // Gemini is primary verifier — always 180s (large files like verify-agent.ts need full time)
+        const geminiTimeout = 180_000;
+        const { stdout: out, timedOut } = await runCliWithTimeout(cliPath, [
+          '-p', geminiPrompt, '--approval-mode', 'plan',
+        ], { cwd: input.projectDir, timeoutMs: geminiTimeout });
+        if (timedOut) throw new Error(`Gemini timed out after ${geminiTimeout / 1000}s`);
+        stdout = out;
+        if (!stdout.trim()) throw new Error('Gemini returned empty output');
       } else if (this.llm === 'codex-cli') {
         const cliPath = await resolveCli('codex');
         if (!cliPath) throw new Error('Codex CLI not found');
@@ -978,18 +993,22 @@ Original request: ${(input.originalPrompt ?? '').slice(0, 500)}
 Score 0-100. Be specific in issues. Respond ONLY with valid JSON.`;
         // Dynamic timeout based on file count (90s-150s, max 180s)
         const codexFileCount = input.modifiedFiles.length;
-        const codexTimeout = Math.min(codexFileCount <= 5 ? 120_000 : codexFileCount <= 10 ? 150_000 : 180_000, 180_000);
-        const subprocess = ex(cliPath, [
+        // Codex agentic mode reads files + runs commands — needs generous timeout
+        const codexTimeout = 180_000;
+        const { stdout: out, timedOut: codexTimedOut } = await runCliWithTimeout(cliPath, [
           'exec', '--json',
           codexPrompt,
-        ], { cwd: input.projectDir, reject: false, timeout: codexTimeout });
-        const killTimer = setTimeout(() => { try { subprocess.kill('SIGKILL'); } catch {} }, codexTimeout + 5_000);
-        try {
-          const result = await subprocess;
-          if ((result as any).timedOut || (result as any).isCanceled) throw new Error(`codex-cli timed out after ${codexTimeout / 1000}s`);
-          stdout = (result as any).stdout ?? '';
-        } finally {
-          clearTimeout(killTimer);
+        ], { cwd: input.projectDir, timeoutMs: codexTimeout });
+        stdout = out;
+        // Codex agentic mode: may time out while still producing useful JSONL output
+        // Try to extract findings from partial output before giving up
+        if (codexTimedOut) {
+          if (stdout.length > 1000) {
+            emit({ type: 'log', level: 'info', message: `[Verify] Codex timed out but has ${(stdout.length/1024).toFixed(0)}KB output — extracting findings` } as PipelineEvent);
+            // Let the JSONL extraction below handle it (don't throw yet)
+          } else {
+            throw new Error(`codex-cli timed out after ${codexTimeout / 1000}s`);
+          }
         }
       }
 
