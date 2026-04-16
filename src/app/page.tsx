@@ -147,7 +147,7 @@ export default function MissionControl() {
     : 0;
 
   return (
-    <div className="min-h-screen bg-gray-950 flex flex-col">
+    <div className="min-h-screen flex flex-col" style={{ background: 'var(--bg-primary)' }}>
       <MissionHeader
         activeView={view}
         onViewChange={setView}

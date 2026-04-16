@@ -34,7 +34,7 @@ export default function KanbanView({ tasks }: { tasks: Task[] }) {
             <div className="flex items-center gap-2 mb-3">
               <span className={`w-2 h-2 rounded-full ${col.dotColor} ${col.pulse ? 'animate-pulse' : ''}`} />
               <span className={`text-xs font-medium ${col.textColor}`}>{t(col.key)}</span>
-              <span className="text-[10px] text-gray-600 bg-gray-800 px-1.5 py-0.5 rounded">
+              <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ color: 'var(--text-secondary)', background: 'var(--bg-card)' }}>
                 {colTasks.length}
               </span>
             </div>

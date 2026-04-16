@@ -26,7 +26,7 @@ function getBorderColor(column: string): string {
   if (column === 'review') return 'border-amber-500/30';
   if (column === 'failed') return 'border-red-500/30';
   if (column === 'done') return 'border-emerald-500/20';
-  return 'border-gray-800';
+  return '';
 }
 
 function getStatusBadge(status: string): { label: string; className: string } {
@@ -87,25 +87,25 @@ export default function KanbanCard({ task, column }: KanbanCardProps) {
 
   return (
     <Link href={`/tasks/${task.id}`}>
-      <div role="article" aria-label={`Task: ${task.prompt.slice(0, 50)}`} className={`p-3 bg-gray-900 rounded-lg border ${getBorderColor(column)} hover:border-gray-600 transition-colors cursor-pointer ${column === 'done' ? 'opacity-70' : ''}`}>
+      <div role="article" aria-label={`Task: ${task.prompt.slice(0, 50)}`} className={`p-3 rounded-lg border ${getBorderColor(column)} hover:border-gray-600 transition-colors cursor-pointer ${column === 'done' ? 'opacity-70' : ''}`} style={{ background: 'var(--bg-card)', borderColor: getBorderColor(column) ? undefined : 'var(--border-color)' }}>
         <div className="flex items-start justify-between gap-2 mb-1.5">
-          <p className="text-sm text-gray-200 line-clamp-2 leading-tight">{task.prompt}</p>
+          <p className="text-sm line-clamp-2 leading-tight" style={{ color: 'var(--text-primary)' }}>{task.prompt}</p>
           <span aria-label={`Status: ${badge.label}`} role="status" className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium ${badge.className}`}>
             {badge.label}
           </span>
         </div>
 
         {projectName && (
-          <p className="text-[10px] text-gray-600 font-mono truncate mb-2">{projectName}</p>
+          <p className="text-[10px] font-mono truncate mb-2" style={{ color: 'var(--text-secondary)' }}>{projectName}</p>
         )}
 
         {column === 'running' && (
           <div className="mb-2">
-            <div className="flex items-center justify-between text-[10px] text-gray-500 mb-1">
+            <div className="flex items-center justify-between text-[10px] mb-1" style={{ color: 'var(--text-secondary)' }}>
               <span>{task.status}</span>
               <span>{progress}%</span>
             </div>
-            <div className="w-full h-1.5 bg-gray-800 rounded-full overflow-hidden">
+            <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--bg-card)' }}>
               <div
                 className="h-full bg-blue-500 rounded-full transition-all duration-500"
                 style={{ width: `${progress}%` }}
@@ -114,7 +114,7 @@ export default function KanbanCard({ task, column }: KanbanCardProps) {
           </div>
         )}
 
-        <div className="flex items-center gap-2 text-[10px] text-gray-500">
+        <div className="flex items-center gap-2 text-[10px]" style={{ color: 'var(--text-secondary)' }}>
           {task.agentId && <span>{task.agentId}</span>}
           {cost != null && <span>${Number(cost).toFixed(2)}</span>}
         </div>
@@ -129,7 +129,8 @@ export default function KanbanCard({ task, column }: KanbanCardProps) {
             </button>
             <Link
               href={`/tasks/${task.id}`}
-              className="flex-1 px-2 py-1 text-[10px] font-medium text-center bg-gray-800 hover:bg-gray-700 rounded transition-colors"
+              className="flex-1 px-2 py-1 text-[10px] font-medium text-center rounded transition-colors hover:opacity-80"
+              style={{ background: 'var(--bg-card)', color: 'var(--text-primary)' }}
               onClick={(e) => e.stopPropagation()}
             >
               Edit
@@ -140,7 +141,8 @@ export default function KanbanCard({ task, column }: KanbanCardProps) {
         {column === 'failed' && (
           <button
             onClick={handleRetry}
-            className="mt-2 w-full px-2 py-1 text-[10px] font-medium bg-gray-800 hover:bg-gray-700 text-red-400 rounded transition-colors"
+            className="mt-2 w-full px-2 py-1 text-[10px] font-medium text-red-400 rounded transition-colors hover:opacity-80"
+            style={{ background: 'var(--bg-card)' }}
           >
             Retry
           </button>

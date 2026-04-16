@@ -34,7 +34,7 @@ function getBorderColor(status: string): string {
   if (['plan_review', 'interview'].includes(status)) return 'border-amber-500/20';
   if (status === 'completed') return 'border-emerald-500/20';
   if (['failed', 'escalated'].includes(status)) return 'border-red-500/20';
-  return 'border-gray-800';
+  return '';
 }
 
 function getStatusDot(status: string): { color: string; pulse: boolean; label: string } {
@@ -76,9 +76,9 @@ export default function GridTile({ task }: { task: Task }) {
 
   return (
     <Link href={`/tasks/${task.id}`}>
-      <div className={`relative bg-gray-900 rounded-lg border ${getBorderColor(task.status)} hover:border-gray-600 transition-colors cursor-pointer overflow-hidden ${task.status === 'completed' ? 'opacity-70' : ''}`}>
+      <div className={`relative rounded-lg border ${getBorderColor(task.status)} hover:border-gray-600 transition-colors cursor-pointer overflow-hidden ${task.status === 'completed' ? 'opacity-70' : ''}`} style={{ background: 'var(--bg-card)', borderColor: getBorderColor(task.status) ? undefined : 'var(--border-color)' }}>
         {/* Top progress bar */}
-        <div className="h-[3px] w-full bg-gray-800">
+        <div className="h-[3px] w-full" style={{ background: 'var(--border-color)' }}>
           <div
             className={`h-full ${getAccentColor(task.status)} transition-all duration-500`}
             style={{ width: `${progress}%` }}
@@ -87,29 +87,29 @@ export default function GridTile({ task }: { task: Task }) {
 
         <div className="p-4">
           <div className="flex items-start justify-between gap-2 mb-1">
-            <p className="text-sm text-gray-200 line-clamp-2 leading-tight flex-1">{task.prompt}</p>
+            <p className="text-sm line-clamp-2 leading-tight flex-1" style={{ color: 'var(--text-primary)' }}>{task.prompt}</p>
             <span className="flex items-center gap-1 shrink-0">
               <span className={`w-1.5 h-1.5 rounded-full ${dot.color} ${dot.pulse ? 'animate-pulse' : ''}`} />
-              <span className="text-[10px] text-gray-500">{dot.label}</span>
+              <span className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>{dot.label}</span>
             </span>
           </div>
 
           {projectName && (
-            <p className="text-[10px] text-gray-600 font-mono truncate mb-3">{projectName}</p>
+            <p className="text-[10px] font-mono truncate mb-3" style={{ color: 'var(--text-secondary)' }}>{projectName}</p>
           )}
 
           <div className="grid grid-cols-3 gap-2 text-[10px]">
             <div>
-              <p className="text-gray-600">Agent</p>
-              <p className="text-gray-400 truncate">{task.agentId || '-'}</p>
+              <p style={{ color: 'var(--text-secondary)' }}>Agent</p>
+              <p style={{ color: 'var(--text-primary)' }} className="truncate">{task.agentId || '-'}</p>
             </div>
             <div>
-              <p className="text-gray-600">Cost</p>
-              <p className="text-gray-400">{cost != null ? `$${Number(cost).toFixed(2)}` : '-'}</p>
+              <p style={{ color: 'var(--text-secondary)' }}>Cost</p>
+              <p style={{ color: 'var(--text-primary)' }}>{cost != null ? `$${Number(cost).toFixed(2)}` : '-'}</p>
             </div>
             <div>
-              <p className="text-gray-600">Time</p>
-              <p className="text-gray-400">{duration && duration > 0 ? formatDuration(duration) : '-'}</p>
+              <p style={{ color: 'var(--text-secondary)' }}>Time</p>
+              <p style={{ color: 'var(--text-primary)' }}>{duration && duration > 0 ? formatDuration(duration) : '-'}</p>
             </div>
           </div>
 

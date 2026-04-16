@@ -14,10 +14,10 @@ interface KpiBarProps {
 
 function KpiCard({ label, value, sub }: { label: string; value: string | number; sub: string }) {
   return (
-    <div className="bg-gray-900 rounded-lg border border-gray-800 p-3">
-      <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">{label}</p>
-      <p className="text-lg font-bold text-gray-200">{value}</p>
-      <p className="text-[10px] text-gray-600 mt-0.5">{sub}</p>
+    <div className="rounded-lg border p-3" style={{ background: 'var(--bg-secondary)', borderColor: 'var(--border-color)' }}>
+      <p className="text-[10px] uppercase tracking-wider mb-1" style={{ color: 'var(--text-secondary)' }}>{label}</p>
+      <p className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{value}</p>
+      <p className="text-[10px] mt-0.5" style={{ color: 'var(--text-secondary)' }}>{sub}</p>
     </div>
   );
 }
@@ -26,7 +26,7 @@ export default function KpiBar({ todayTotal, completedToday, successRate, totalC
   const t = useTranslations('kpi');
 
   return (
-    <div data-tour="kpi-bar" className="grid grid-cols-4 gap-3 px-5 py-4 border-t border-gray-800">
+    <div data-tour="kpi-bar" className="grid grid-cols-4 gap-3 px-5 py-4 border-t" style={{ borderColor: 'var(--border-color)' }}>
       <KpiCard
         label={t('todayTasks')}
         value={todayTotal}

@@ -41,7 +41,7 @@ export default function UsagePage() {
 
   if (!data) {
     return (
-      <div className="min-h-screen p-8 max-w-6xl mx-auto text-gray-400">
+      <div className="min-h-screen p-8 max-w-6xl mx-auto" style={{ color: 'var(--text-secondary)' }}>
         <div className="flex items-center justify-between mb-6">
           <Link href="/" className="text-indigo-400 hover:text-indigo-300 text-sm">← Back</Link>
           <h1 className="text-xl font-bold">Cost Dashboard</h1>
@@ -85,15 +85,15 @@ export default function UsagePage() {
       </div>
 
       {isEmpty && (
-        <div className="bg-gray-900/50 rounded-xl border border-gray-800 p-12 text-center text-gray-500">
+        <div className="rounded-xl border p-12 text-center" style={{ background: 'var(--bg-secondary)', borderColor: 'var(--border-color)', color: 'var(--text-secondary)' }}>
           No usage data yet. Run a task from the dashboard to start tracking costs.
         </div>
       )}
 
       {/* Daily trend (SVG sparkline) */}
       {hasDaily && (
-        <div className="bg-gray-900/50 rounded-xl border border-gray-800 p-4 mb-6">
-          <h2 className="text-sm font-semibold mb-3 text-gray-300">Daily Cost Trend</h2>
+        <div className="rounded-xl border p-4 mb-6" style={{ background: 'var(--bg-secondary)', borderColor: 'var(--border-color)' }}>
+          <h2 className="text-sm font-semibold mb-3" style={{ color: 'var(--text-primary)' }}>Daily Cost Trend</h2>
           <DailyTrendChart data={dailyData} />
         </div>
       )}
@@ -102,17 +102,17 @@ export default function UsagePage() {
       {(hasAgents || hasPhases) && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
           {hasAgents && (
-            <div className="bg-gray-900/50 rounded-xl border border-gray-800 p-4">
-              <h2 className="text-sm font-semibold mb-3 text-gray-300">By Agent</h2>
+            <div className="rounded-xl border p-4" style={{ background: 'var(--bg-secondary)', borderColor: 'var(--border-color)' }}>
+              <h2 className="text-sm font-semibold mb-3" style={{ color: 'var(--text-primary)' }}>By Agent</h2>
               <div className="space-y-2">
                 {sortedAgents.map((agent, i) => {
                   const width = maxAgentCost > 0 ? (agent.totalCost / maxAgentCost) * 100 : 0;
                   return (
                     <div key={agent.agentId} className="flex items-center gap-2">
-                      <span className="text-[11px] text-gray-400 w-32 truncate" title={agent.agentId}>
+                      <span className="text-[11px] w-32 truncate" title={agent.agentId} style={{ color: 'var(--text-secondary)' }}>
                         {agent.agentId}
                       </span>
-                      <div className="flex-1 bg-gray-800 rounded-full h-3 overflow-hidden">
+                      <div className="flex-1 rounded-full h-3 overflow-hidden" style={{ background: 'var(--bg-card)' }}>
                         <div
                           className="h-full rounded-full transition-all"
                           style={{
@@ -121,7 +121,7 @@ export default function UsagePage() {
                           }}
                         />
                       </div>
-                      <span className="text-[11px] text-gray-500 w-28 text-right tabular-nums">
+                      <span className="text-[11px] w-28 text-right tabular-nums" style={{ color: 'var(--text-secondary)' }}>
                         ${agent.totalCost.toFixed(4)} ({agent.attemptCount})
                       </span>
                     </div>
@@ -132,8 +132,8 @@ export default function UsagePage() {
           )}
 
           {hasPhases && (
-            <div className="bg-gray-900/50 rounded-xl border border-gray-800 p-4">
-              <h2 className="text-sm font-semibold mb-3 text-gray-300">By Phase</h2>
+            <div className="rounded-xl border p-4" style={{ background: 'var(--bg-secondary)', borderColor: 'var(--border-color)' }}>
+              <h2 className="text-sm font-semibold mb-3" style={{ color: 'var(--text-primary)' }}>By Phase</h2>
               <PhaseBreakdown data={data.byPhase} total={phaseTotal} />
             </div>
           )}
@@ -142,12 +142,12 @@ export default function UsagePage() {
 
       {/* Recent attempts table */}
       {hasAttempts && (
-        <div className="bg-gray-900/50 rounded-xl border border-gray-800 p-4">
-          <h2 className="text-sm font-semibold mb-3 text-gray-300">Recent Attempts</h2>
+        <div className="rounded-xl border p-4" style={{ background: 'var(--bg-secondary)', borderColor: 'var(--border-color)' }}>
+          <h2 className="text-sm font-semibold mb-3" style={{ color: 'var(--text-primary)' }}>Recent Attempts</h2>
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
-                <tr className="text-gray-500 border-b border-gray-800">
+                <tr className="border-b" style={{ color: 'var(--text-secondary)', borderColor: 'var(--border-color)' }}>
                   <th className="text-left py-2 px-2">Date</th>
                   <th className="text-left py-2 px-2">Agent</th>
                   <th className="text-left py-2 px-2">Phase</th>
@@ -159,11 +159,11 @@ export default function UsagePage() {
               </thead>
               <tbody>
                 {recentAttempts.map((a) => (
-                  <tr key={a.id} className="border-b border-gray-800/50 hover:bg-gray-800/30">
-                    <td className="py-1.5 px-2 text-gray-400 whitespace-nowrap">
+                  <tr key={a.id} className="border-b hover:opacity-80" style={{ borderColor: 'var(--border-color)' }}>
+                    <td className="py-1.5 px-2 whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>
                       {new Date(a.createdAt).toLocaleString()}
                     </td>
-                    <td className="py-1.5 px-2 text-gray-300">{a.agentId}</td>
+                    <td className="py-1.5 px-2" style={{ color: 'var(--text-primary)' }}>{a.agentId}</td>
                     <td className="py-1.5 px-2">
                       <span className={`px-1.5 py-0.5 rounded text-[10px] ${
                         a.phase === 'planning' ? 'bg-amber-900/30 text-amber-400' :
@@ -180,13 +180,13 @@ export default function UsagePage() {
                         {a.status}
                       </span>
                     </td>
-                    <td className="py-1.5 px-2 text-right text-gray-300 tabular-nums">
+                    <td className="py-1.5 px-2 text-right tabular-nums" style={{ color: 'var(--text-primary)' }}>
                       ${(a.costUsd ?? 0).toFixed(4)}
                     </td>
-                    <td className="py-1.5 px-2 text-right text-gray-400 tabular-nums">
+                    <td className="py-1.5 px-2 text-right tabular-nums" style={{ color: 'var(--text-secondary)' }}>
                       {(a.tokenCount ?? 0).toLocaleString()}
                     </td>
-                    <td className="py-1.5 px-2 text-right text-gray-400 tabular-nums">
+                    <td className="py-1.5 px-2 text-right tabular-nums" style={{ color: 'var(--text-secondary)' }}>
                       {a.durationMs ? `${(a.durationMs / 1000).toFixed(1)}s` : '-'}
                     </td>
                   </tr>
@@ -202,9 +202,9 @@ export default function UsagePage() {
 
 function SummaryCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="bg-gray-900/50 rounded-xl border border-gray-800 p-4 text-center">
-      <p className="text-[10px] text-gray-500 uppercase tracking-wider">{label}</p>
-      <p className="text-xl font-bold text-gray-200 mt-1 tabular-nums">{value}</p>
+    <div className="rounded-xl border p-4 text-center" style={{ background: 'var(--bg-secondary)', borderColor: 'var(--border-color)' }}>
+      <p className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>{label}</p>
+      <p className="text-xl font-bold mt-1 tabular-nums" style={{ color: 'var(--text-primary)' }}>{value}</p>
     </div>
   );
 }
@@ -292,11 +292,11 @@ function PhaseBreakdown({
   total: number;
 }) {
   if (total <= 0) {
-    return <p className="text-xs text-gray-500">No phase data</p>;
+    return <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>No phase data</p>;
   }
   return (
     <div>
-      <div className="flex h-6 rounded-full overflow-hidden bg-gray-800 mb-3">
+      <div className="flex h-6 rounded-full overflow-hidden mb-3" style={{ background: 'var(--bg-card)' }}>
         {data.map((p) => {
           const pct = (p.totalCost / total) * 100;
           return (
@@ -321,10 +321,10 @@ function PhaseBreakdown({
                 className="w-3 h-3 rounded-sm flex-shrink-0"
                 style={{ backgroundColor: PHASE_COLORS[p.phase] ?? '#6b7280' }}
               />
-              <span className="text-gray-300 capitalize w-20">{p.phase}</span>
-              <span className="text-gray-500 flex-1 tabular-nums">${p.totalCost.toFixed(4)}</span>
-              <span className="text-gray-500 tabular-nums w-12 text-right">{pct.toFixed(1)}%</span>
-              <span className="text-gray-600 tabular-nums w-12 text-right">({p.count})</span>
+              <span className="capitalize w-20" style={{ color: 'var(--text-primary)' }}>{p.phase}</span>
+              <span className="flex-1 tabular-nums" style={{ color: 'var(--text-secondary)' }}>${p.totalCost.toFixed(4)}</span>
+              <span className="tabular-nums w-12 text-right" style={{ color: 'var(--text-secondary)' }}>{pct.toFixed(1)}%</span>
+              <span className="tabular-nums w-12 text-right" style={{ color: 'var(--text-secondary)' }}>({p.count})</span>
             </div>
           );
         })}

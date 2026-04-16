@@ -404,7 +404,7 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
       <div className="min-h-screen bg-[var(--bg-primary)] flex items-center justify-center">
         <div className="flex items-center gap-3">
           <div className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
-          <span className="text-sm text-gray-500">Loading task...</span>
+          <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>Loading task...</span>
         </div>
       </div>
     );
@@ -423,17 +423,18 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
       {/* Split panel: 7:3 on md+, stacked on mobile */}
       <div className="flex-1 flex flex-col md:grid md:grid-cols-[7fr_3fr] md:h-[calc(100vh-48px)]">
         {/* Left panel — Tabs */}
-        <div className="border-b md:border-b-0 md:border-r border-gray-800 flex flex-col min-h-0">
-          <div className="flex border-b border-gray-800 flex-shrink-0">
+        <div className="border-b md:border-b-0 md:border-r flex flex-col min-h-0" style={{ borderColor: 'var(--border-color)' }}>
+          <div className="flex border-b flex-shrink-0" style={{ borderColor: 'var(--border-color)' }}>
             {(['timeline', 'diff', 'artifacts'] as const).map(tab => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
                 className={`flex-1 py-2.5 text-xs font-medium border-b-2 transition-colors ${
                   activeTab === tab
-                    ? 'border-indigo-500 text-indigo-400 bg-gray-900/50'
-                    : 'border-transparent text-gray-500 hover:text-gray-400'
+                    ? 'border-indigo-500 text-indigo-400'
+                    : 'border-transparent hover:opacity-80'
                 }`}
+                style={activeTab !== tab ? { color: 'var(--text-secondary)' } : undefined}
               >
                 {tab === 'timeline' ? 'Timeline' : tab === 'diff' ? 'Diff' : 'Artifacts'}
               </button>

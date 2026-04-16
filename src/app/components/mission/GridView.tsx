@@ -17,9 +17,9 @@ export default function GridView({ tasks, onNewTask }: { tasks: Task[]; onNewTas
   if (tasks.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-20 text-center">
-        <div className="text-4xl mb-4 text-gray-600">&#9881;</div>
-        <h3 className="text-lg font-medium text-gray-300 mb-2">No tasks yet</h3>
-        <p className="text-sm text-gray-500 mb-6 max-w-md">
+        <div className="text-4xl mb-4" style={{ color: 'var(--text-secondary)' }}>&#9881;</div>
+        <h3 className="text-lg font-medium mb-2" style={{ color: 'var(--text-primary)' }}>No tasks yet</h3>
+        <p className="text-sm mb-6 max-w-md" style={{ color: 'var(--text-secondary)' }}>
           Create your first task and AutoDev will automatically plan, code, and verify it.
         </p>
         {onNewTask && (

@@ -24,8 +24,8 @@ export default function MissionHeader({ activeView, onViewChange, activeTasks, t
   return (
     <div className="flex items-center justify-between px-5 py-3 border-b border-[var(--border-color)]">
       <div className="flex items-center gap-5">
-        <Link href="/" className="text-lg font-bold text-gray-100 hover:text-indigo-400 transition-colors">AutoDev</Link>
-        <div data-tour="view-tabs" role="tablist" aria-label="View mode" className="flex gap-1 bg-gray-900 rounded-lg p-0.5">
+        <Link href="/" className="text-lg font-bold hover:text-indigo-400 transition-colors" style={{ color: 'var(--text-primary)' }}>AutoDev</Link>
+        <div data-tour="view-tabs" role="tablist" aria-label="View mode" className="flex gap-1 rounded-lg p-0.5" style={{ background: 'var(--bg-secondary)' }}>
           {VIEW_IDS.map((id) => (
             <button
               key={id}
@@ -36,8 +36,9 @@ export default function MissionHeader({ activeView, onViewChange, activeTasks, t
               className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
                 activeView === id
                   ? 'bg-indigo-500/15 text-indigo-400'
-                  : 'text-gray-500 hover:text-gray-300'
+                  : 'hover:opacity-80'
               }`}
+              style={activeView !== id ? { color: 'var(--text-secondary)' } : undefined}
             >
               {tv(id)}
             </button>
@@ -46,7 +47,7 @@ export default function MissionHeader({ activeView, onViewChange, activeTasks, t
       </div>
       <div className="flex items-center gap-4">
         {activeTasks > 0 && (
-          <span data-tour="active-count" className="flex items-center gap-1.5 text-xs text-gray-400">
+          <span data-tour="active-count" className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--text-secondary)' }}>
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
             {th('active', { count: activeTasks })}
           </span>
@@ -58,13 +59,15 @@ export default function MissionHeader({ activeView, onViewChange, activeTasks, t
         )}
         <Link
           href="/usage"
-          className="px-2.5 py-1.5 text-xs text-gray-500 hover:text-gray-300 bg-gray-900 hover:bg-gray-800 rounded-lg transition-colors"
+          className="px-2.5 py-1.5 text-xs rounded-lg transition-colors hover:opacity-80"
+          style={{ color: 'var(--text-secondary)', background: 'var(--bg-secondary)' }}
         >
           {th('usage')}
         </Link>
         <Link
           href="/harness"
-          className="px-2.5 py-1.5 text-xs text-gray-500 hover:text-gray-300 bg-gray-900 hover:bg-gray-800 rounded-lg transition-colors"
+          className="px-2.5 py-1.5 text-xs rounded-lg transition-colors hover:opacity-80"
+          style={{ color: 'var(--text-secondary)', background: 'var(--bg-secondary)' }}
         >
           {th('harness')}
         </Link>
@@ -79,7 +82,8 @@ export default function MissionHeader({ activeView, onViewChange, activeTasks, t
             localStorage.removeItem('autodev-onboarding-done');
             window.location.reload();
           }}
-          className="px-2 py-1 text-[10px] text-gray-600 hover:text-gray-400 transition-colors"
+          className="px-2 py-1 text-[10px] hover:opacity-80 transition-colors"
+          style={{ color: 'var(--text-secondary)' }}
           title="Reset all UI preferences"
         >
           {th('resetPrefs')}

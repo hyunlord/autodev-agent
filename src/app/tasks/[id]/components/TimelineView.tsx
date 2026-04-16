@@ -112,7 +112,7 @@ export function TimelineView({
               </button>
             )}
           </div>
-          <div className="w-full bg-gray-800 rounded-full h-1.5 mb-2">
+          <div className="w-full rounded-full h-1.5 mb-2" style={{ background: 'var(--bg-card)' }}>
             <div
               className="bg-amber-500 h-1.5 rounded-full transition-all"
               style={{ width: `${(cycleInfo.current / cycleInfo.max) * 100}%` }}
@@ -121,7 +121,7 @@ export function TimelineView({
           {cycleInfo.steps.length > 0 && (
             <div className="space-y-1 mt-2">
               {cycleInfo.steps.map((step, i) => (
-                <p key={i} className="text-xs text-gray-400">{step}</p>
+                <p key={i} className="text-xs" style={{ color: 'var(--text-secondary)' }}>{step}</p>
               ))}
             </div>
           )}
@@ -147,12 +147,12 @@ export function TimelineView({
 
       {/* Live Events 로그 (접을 수 있음) */}
       <details className="mt-4">
-        <summary className="text-xs text-gray-500 cursor-pointer hover:text-gray-400 transition-colors">
+        <summary className="text-xs cursor-pointer hover:opacity-80 transition-colors" style={{ color: 'var(--text-secondary)' }}>
           Live events ({liveEvents.length})
         </summary>
-        <div className="mt-2 bg-gray-900 rounded-lg border border-gray-800 p-3 max-h-64 overflow-y-auto space-y-1">
+        <div className="mt-2 rounded-lg border p-3 max-h-64 overflow-y-auto space-y-1" style={{ background: 'var(--bg-secondary)', borderColor: 'var(--border-color)' }}>
           {liveEvents.length === 0 ? (
-            <p className="text-gray-600 text-xs">Waiting for events...</p>
+            <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>Waiting for events...</p>
           ) : (
             liveEvents.map((event, i) => (
               <div key={i} className="text-xs font-mono">
@@ -160,7 +160,7 @@ export function TimelineView({
                   <span className="text-blue-400">[{event.status}] {event.message}</span>
                 )}
                 {event.type === 'log' && (
-                  <span className={event.level === 'error' ? 'text-red-400' : event.level === 'warn' ? 'text-yellow-400' : 'text-gray-500'}>
+                  <span className={event.level === 'error' ? 'text-red-400' : event.level === 'warn' ? 'text-yellow-400' : ''} style={event.level !== 'error' && event.level !== 'warn' ? { color: 'var(--text-secondary)' } : undefined}>
                     [{event.level}] {event.message}
                   </span>
                 )}
@@ -181,7 +181,7 @@ export function TimelineView({
                   </span>
                 )}
                 {event.type === 'verification_result' && (
-                  <span className={event.status === 'pass' ? 'text-green-400' : event.status === 'fail' ? 'text-red-400' : 'text-gray-500'}>
+                  <span className={event.status === 'pass' ? 'text-green-400' : event.status === 'fail' ? 'text-red-400' : ''} style={event.status !== 'pass' && event.status !== 'fail' ? { color: 'var(--text-secondary)' } : undefined}>
                     [{event.status === 'pass' ? '\u2713' : event.status === 'fail' ? '\u2717' : '\u25CB'}] {event.detail}
                   </span>
                 )}
@@ -215,7 +215,7 @@ export function TimelineView({
                 {!['status_change', 'log', 'task_complete', 'attempt_start', 'attempt_complete',
                   'verification_result', 'screenshot', 'escalation', 'cycle_start', 'cycle_complete',
                   'auto_cycle_complete', 'cost_update', 'interview_questions', 'plan_ready', 'agent_switch'].includes(event.type) && (
-                  <span className="text-gray-600">[{event.type}] {JSON.stringify(event)}</span>
+                  <span style={{ color: 'var(--text-secondary)' }}>[{event.type}] {JSON.stringify(event)}</span>
                 )}
               </div>
             ))
