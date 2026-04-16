@@ -12,10 +12,12 @@ function AiEditBar({ editContent, editingRole, onApply }: {
 }) {
   const [instruction, setInstruction] = useState('');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
   const handleAiEdit = async () => {
     if (!instruction.trim()) return;
     setLoading(true);
+    setError('');
     try {
       const res = await fetch('/api/harness/ai-edit', {
         method: 'POST',
@@ -23,29 +25,41 @@ function AiEditBar({ editContent, editingRole, onApply }: {
         body: JSON.stringify({ currentPrompt: editContent, instruction, role: editingRole }),
       });
       const data = await res.json();
-      if (data.editedPrompt) onApply(data.editedPrompt);
-    } catch { /* ignore */ }
+      if (!res.ok) {
+        setError(data.error ?? '수정 실패');
+        setLoading(false);
+        return;
+      }
+      if (data.editedPrompt) {
+        onApply(data.editedPrompt);
+        setInstruction('');
+      }
+    } catch {
+      setError('네트워크 오류 — 다시 시도해주세요');
+    }
     setLoading(false);
-    setInstruction('');
   };
 
   return (
-    <div className="flex items-center gap-2 px-4 py-2.5 border-t border-gray-800 bg-gray-900/80">
-      <span className="text-[10px] text-gray-500 whitespace-nowrap">AI 수정:</span>
-      <input
-        value={instruction}
-        onChange={e => setInstruction(e.target.value)}
-        onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleAiEdit(); } }}
-        placeholder="예: 더 엄격하게, 한국어로 변환, 보안 체크 추가..."
-        className="flex-1 px-3 py-1.5 text-xs bg-gray-950 border border-gray-700 rounded-lg text-gray-300 placeholder-gray-600 outline-none focus:border-indigo-500"
-      />
-      <button
-        onClick={handleAiEdit}
-        disabled={!instruction.trim() || loading}
-        className="px-3 py-1.5 text-xs bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg disabled:opacity-40 transition-colors whitespace-nowrap"
-      >
-        {loading ? '수정 중...' : '적용'}
-      </button>
+    <div className="px-4 py-2.5 border-t border-gray-800 bg-gray-900/80">
+      <div className="flex items-center gap-2">
+        <span className="text-[10px] text-gray-500 whitespace-nowrap">AI 수정:</span>
+        <input
+          value={instruction}
+          onChange={e => { setInstruction(e.target.value); setError(''); }}
+          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleAiEdit(); } }}
+          placeholder="예: 더 엄격하게, 한국어로 변환, 보안 체크 추가..."
+          className="flex-1 px-3 py-1.5 text-xs bg-gray-950 border border-gray-700 rounded-lg text-gray-300 placeholder-gray-600 outline-none focus:border-indigo-500"
+        />
+        <button
+          onClick={handleAiEdit}
+          disabled={!instruction.trim() || loading}
+          className="px-3 py-1.5 text-xs bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg disabled:opacity-40 transition-colors whitespace-nowrap"
+        >
+          {loading ? '수정 중...' : '적용'}
+        </button>
+      </div>
+      {error && <p className="text-[10px] text-red-400 mt-1">{error}</p>}
     </div>
   );
 }

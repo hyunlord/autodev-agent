@@ -332,14 +332,14 @@ export default function NewTaskModal({ onClose, onCreated, initialProjectDir, ch
           </label>
           <div className="flex gap-2">
             {([
-              { id: 'single' as const, label: 'Single run', color: 'indigo' },
-              { id: 'auto-cycle' as const, label: 'Auto-cycle', color: 'amber' },
-              { id: 'interview' as const, label: 'Interview', color: 'teal' },
-              { id: 'arena' as const, label: 'Arena', color: 'rose' },
+              { id: 'single' as const, label: 'Single run', active: 'bg-indigo-600 text-white' },
+              { id: 'auto-cycle' as const, label: 'Auto-cycle', active: 'bg-amber-600 text-white' },
+              { id: 'interview' as const, label: 'Interview', active: 'bg-teal-600 text-white' },
+              { id: 'arena' as const, label: 'Arena', active: 'bg-rose-600 text-white' },
             ]).map(mode => (
               <Tooltip key={mode.id} text={TOOLTIPS.executionMode[mode.id] ?? ''} position="bottom">
                 <button type="button" onClick={() => setExecutionMode(mode.id)}
-                  className={`px-3 py-1 text-xs rounded-lg transition-colors ${executionMode === mode.id ? `bg-${mode.color}-600 text-white` : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}>
+                  className={`px-3 py-1 text-xs rounded-lg transition-colors ${executionMode === mode.id ? mode.active : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}>
                   {mode.label}
                 </button>
               </Tooltip>
