@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { BUILT_IN_PRESETS } from '@/lib/prompts/presets';
 import Tooltip from '../Tooltip';
 import { TOOLTIPS } from '../tooltips';
-import { useTranslations } from '@/i18n/context';
+import { useTranslations, useLocale } from '@/i18n/context';
 
 interface NewTaskModalProps {
   onClose: () => void;
@@ -17,6 +17,7 @@ interface NewTaskModalProps {
 export default function NewTaskModal({ onClose, onCreated, initialProjectDir, chainTask: initialChain }: NewTaskModalProps) {
   const router = useRouter();
   const t = useTranslations('newTask');
+  const { locale } = useLocale();
   const [prompt, setPrompt] = useState('');
   const [projectDir, setProjectDir] = useState(initialProjectDir ?? '');
   const [submitting, setSubmitting] = useState(false);
@@ -80,6 +81,7 @@ export default function NewTaskModal({ onClose, onCreated, initialProjectDir, ch
           agentId: selectedAgent,
           autoApprove,
           costPreference: costPref,
+          locale,
           systemPrompt: systemPrompt || undefined,
           executionMode,
           maxCycles: executionMode === 'auto-cycle' ? maxCycles : 1,

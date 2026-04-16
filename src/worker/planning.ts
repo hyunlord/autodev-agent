@@ -5,6 +5,13 @@ import { resolveCli } from '../lib/cli-resolver';
 import { loadPrompt } from '../lib/harness/prompt-loader';
 import { extractJson } from '../lib/utils/json-extractor';
 
+function getLocaleInstruction(locale?: string): string {
+  if (locale === 'ko') {
+    return '\n\nIMPORTANT: Write the plan summary, file descriptions, and coding prompt instructions in Korean (한국어). Technical terms and file paths remain in English.';
+  }
+  return '';
+}
+
 // ─── Schemas (unchanged) ──────────────────────────────────────
 
 export const VerificationStepSchema = z.object({
@@ -92,6 +99,7 @@ async function planViaCliAgent(
   workspaceDir?: string,
   systemPrompt?: string | null,
   timeoutMs?: number,
+  locale?: string,
 ): Promise<PlanResult> {
   onProgress?.('Generating plan via coding agent CLI...');
 
@@ -107,7 +115,8 @@ async function planViaCliAgent(
   });
   onProgress?.(`Planner prompt: ${plannerPrompt.source}${plannerPrompt.filePath ? ` (${plannerPrompt.filePath})` : ' (built-in)'}`);
 
-  const planPrompt = systemPrompt ? `${systemPrompt}\n\n${plannerPrompt.content}` : plannerPrompt.content;
+  const basePlanPrompt = systemPrompt ? `${systemPrompt}\n\n${plannerPrompt.content}` : plannerPrompt.content;
+  const planPrompt = basePlanPrompt + getLocaleInstruction(locale);
 
   const { getExeca } = await import('../lib/execa');
   const execa = await getExeca();
@@ -168,6 +177,7 @@ async function planViaGeminiCli(
   workspaceContext?: string,
   workspaceDir?: string,
   systemPrompt?: string | null,
+  locale?: string,
 ): Promise<PlanResult> {
   onProgress?.('Generating plan via Gemini CLI...');
 
@@ -183,7 +193,8 @@ async function planViaGeminiCli(
   });
   onProgress?.(`Planner prompt: ${plannerPrompt.source}${plannerPrompt.filePath ? ` (${plannerPrompt.filePath})` : ' (built-in)'}`);
 
-  const planPrompt = systemPrompt ? `${systemPrompt}\n\n${plannerPrompt.content}` : plannerPrompt.content;
+  const basePlanPrompt = systemPrompt ? `${systemPrompt}\n\n${plannerPrompt.content}` : plannerPrompt.content;
+  const planPrompt = basePlanPrompt + getLocaleInstruction(locale);
 
   const { getExeca } = await import('../lib/execa');
   const execa = await getExeca();
@@ -239,6 +250,7 @@ async function planViaCodexCli(
   workspaceContext?: string,
   workspaceDir?: string,
   systemPrompt?: string | null,
+  locale?: string,
 ): Promise<PlanResult> {
   onProgress?.('Generating plan via Codex CLI...');
 
@@ -254,7 +266,8 @@ async function planViaCodexCli(
   });
   onProgress?.(`Planner prompt: ${plannerPrompt.source}${plannerPrompt.filePath ? ` (${plannerPrompt.filePath})` : ' (built-in)'}`);
 
-  const planPrompt = systemPrompt ? `${systemPrompt}\n\n${plannerPrompt.content}` : plannerPrompt.content;
+  const basePlanPrompt = systemPrompt ? `${systemPrompt}\n\n${plannerPrompt.content}` : plannerPrompt.content;
+  const planPrompt = basePlanPrompt + getLocaleInstruction(locale);
 
   const { getExeca } = await import('../lib/execa');
   const execa = await getExeca();
@@ -413,18 +426,19 @@ export async function generatePlan(
   workspaceDir?: string,
   systemPrompt?: string | null,
   timeoutMs?: number,
+  locale?: string,
 ): Promise<PlanResult> {
   switch (mode) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     case 'auto' as any:  // backward compat — treat as claude-cli
     case 'claude-cli':
-      return planViaCliAgent(userPrompt, projectConfig, onProgress, workspaceContext, workspaceDir, systemPrompt, timeoutMs);
+      return planViaCliAgent(userPrompt, projectConfig, onProgress, workspaceContext, workspaceDir, systemPrompt, timeoutMs, locale);
 
     case 'gemini-cli':
-      return planViaGeminiCli(userPrompt, projectConfig, onProgress, workspaceContext, workspaceDir, systemPrompt);
+      return planViaGeminiCli(userPrompt, projectConfig, onProgress, workspaceContext, workspaceDir, systemPrompt, locale);
 
     case 'codex-cli':
-      return planViaCodexCli(userPrompt, projectConfig, onProgress, workspaceContext, workspaceDir, systemPrompt);
+      return planViaCodexCli(userPrompt, projectConfig, onProgress, workspaceContext, workspaceDir, systemPrompt, locale);
 
     case 'manual':
       if (!manualInput?.codingPrompt) {

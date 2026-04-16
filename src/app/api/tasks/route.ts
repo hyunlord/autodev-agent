@@ -107,6 +107,7 @@ export async function POST(req: Request) {
       autoApprove,
       ...(costPreference ? { costPreference } : {}),
       ...(cfgObj.debateDrafterMode ? { debateDrafterMode: cfgObj.debateDrafterMode } : {}),
+      ...(body.locale ? { locale: body.locale } : {}),
     }),
     result: null,
     parentTaskId,

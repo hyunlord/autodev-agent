@@ -303,6 +303,9 @@ ${currentPlan.codingPrompt}`;
     if (workspaceContext) {
       codingPrompt = codingPrompt + `\n\n${workspaceContext}`;
     }
+    if (_codeTaskCfg.locale === 'ko') {
+      codingPrompt += '\n\nIMPORTANT: Write all code comments, console.log messages, and inline documentation in Korean (한국어). Variable names and function names must remain in English.';
+    }
     if (_codeDevPreset) {
       codingPrompt += `\n\n## Dev Mode: ${_codeDevPreset.name}\n${_codeDevPreset.codingHints}`;
     }

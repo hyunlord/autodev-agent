@@ -123,7 +123,7 @@ export async function executePlanning(params: {
     try {
       planResult = await generatePlan(
         task.prompt, projectConfig, planMode, planOpts, logFn,
-        effectiveWorkspaceContext, projectDir, systemPrompt,
+        effectiveWorkspaceContext, projectDir, systemPrompt, undefined, taskConfig.locale,
       );
     } catch (planErr) {
       const errMsg = String(planErr);
@@ -135,7 +135,7 @@ export async function executePlanning(params: {
         emit({ type: 'log', level: 'warn', message: `[Planning] ${planMode} credit exhausted, falling back to gemini-cli` });
         planResult = await generatePlan(
           task.prompt, projectConfig, 'gemini-cli' as PlanningMode, planOpts, logFn,
-          effectiveWorkspaceContext, projectDir, systemPrompt,
+          effectiveWorkspaceContext, projectDir, systemPrompt, undefined, taskConfig.locale,
         );
       } else {
         throw planErr;
