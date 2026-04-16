@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import ClientShell from './components/ClientShell';
+import { LocaleProvider } from '@/i18n/context';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -9,9 +10,11 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className="dark" suppressHydrationWarning>
+    <html lang="ko" className="dark" suppressHydrationWarning>
       <body className="bg-[var(--bg-primary)] text-[var(--text-primary)] antialiased">
-        {children}
+        <LocaleProvider>
+          {children}
+        </LocaleProvider>
         <ClientShell />
       </body>
     </html>

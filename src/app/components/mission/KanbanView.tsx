@@ -1,6 +1,7 @@
 'use client';
 
 import KanbanCard from './KanbanCard';
+import { useTranslations } from '@/i18n/context';
 
 interface Task {
   id: string;
@@ -14,23 +15,25 @@ interface Task {
 }
 
 const KANBAN_COLUMNS = [
-  { id: 'queued', label: 'Queued', statuses: ['pending'], dotColor: 'bg-gray-500', textColor: 'text-gray-400', pulse: false },
-  { id: 'running', label: 'Running', statuses: ['planning', 'coding', 'verifying', 'retrying'], dotColor: 'bg-blue-500', textColor: 'text-blue-400', pulse: true },
-  { id: 'review', label: 'Review', statuses: ['plan_review', 'interview'], dotColor: 'bg-amber-500', textColor: 'text-amber-400', pulse: false },
-  { id: 'done', label: 'Done', statuses: ['completed'], dotColor: 'bg-emerald-500', textColor: 'text-emerald-400', pulse: false },
-  { id: 'failed', label: 'Failed', statuses: ['failed', 'escalated'], dotColor: 'bg-red-500', textColor: 'text-red-400', pulse: false },
+  { id: 'queued', key: 'queued', statuses: ['pending'], dotColor: 'bg-gray-500', textColor: 'text-gray-400', pulse: false },
+  { id: 'running', key: 'running', statuses: ['planning', 'coding', 'verifying', 'retrying'], dotColor: 'bg-blue-500', textColor: 'text-blue-400', pulse: true },
+  { id: 'review', key: 'review', statuses: ['plan_review', 'interview'], dotColor: 'bg-amber-500', textColor: 'text-amber-400', pulse: false },
+  { id: 'done', key: 'done', statuses: ['completed'], dotColor: 'bg-emerald-500', textColor: 'text-emerald-400', pulse: false },
+  { id: 'failed', key: 'failed', statuses: ['failed', 'escalated'], dotColor: 'bg-red-500', textColor: 'text-red-400', pulse: false },
 ];
 
 export default function KanbanView({ tasks }: { tasks: Task[] }) {
+  const t = useTranslations('kanban');
+
   return (
     <div className="grid grid-cols-5 gap-3 min-w-[900px]">
       {KANBAN_COLUMNS.map((col) => {
         const colTasks = tasks.filter((t) => col.statuses.includes(t.status));
         return (
-          <div key={col.id} role="region" aria-label={`${col.label} tasks: ${colTasks.length}`}>
+          <div key={col.id} role="region" aria-label={`${col.key} tasks: ${colTasks.length}`}>
             <div className="flex items-center gap-2 mb-3">
               <span className={`w-2 h-2 rounded-full ${col.dotColor} ${col.pulse ? 'animate-pulse' : ''}`} />
-              <span className={`text-xs font-medium ${col.textColor}`}>{col.label}</span>
+              <span className={`text-xs font-medium ${col.textColor}`}>{t(col.key)}</span>
               <span className="text-[10px] text-gray-600 bg-gray-800 px-1.5 py-0.5 rounded">
                 {colTasks.length}
               </span>

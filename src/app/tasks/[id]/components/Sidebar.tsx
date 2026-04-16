@@ -7,6 +7,7 @@ import dynamic from 'next/dynamic';
 import { CostBreakdown } from './CostBreakdown';
 import { PlanCardView } from './PlanCardView';
 import { planToMermaid } from '@/lib/utils/plan-to-mermaid';
+import { useTranslations } from '@/i18n/context';
 
 const MermaidDiagram = dynamic(() => import('./MermaidDiagram'), {
   ssr: false,
@@ -64,6 +65,7 @@ export function Sidebar({
   attempts, projectTasks, parsedResult, escalationReport,
 }: Props) {
   const router = useRouter();
+  const t = useTranslations('taskDetail');
   const taskConfig = (() => {
     try {
       return typeof task.config === 'string' ? JSON.parse(task.config) : task.config;
@@ -74,7 +76,7 @@ export function Sidebar({
     <div className="bg-[var(--bg-secondary)] flex flex-col h-full overflow-y-auto">
       {/* Task 정보 */}
       <section className="p-4 border-b border-gray-800">
-        <h3 className="text-xs text-gray-500 uppercase tracking-wider mb-2">Task</h3>
+        <h3 className="text-xs text-gray-500 uppercase tracking-wider mb-2">{t('task')}</h3>
         <p className="text-xs text-gray-300 leading-relaxed">{task.prompt}</p>
         {task.projectDir && (
           <div className="mt-2 flex items-center gap-2">
@@ -158,7 +160,7 @@ export function Sidebar({
         <section className="p-4 border-b border-gray-800">
           <div className="flex items-center justify-between mb-2.5">
             <div className="flex items-center gap-2">
-              <h3 className="text-xs text-indigo-400 uppercase tracking-wider">Plan</h3>
+              <h3 className="text-xs text-indigo-400 uppercase tracking-wider">{t('plan')}</h3>
               <div className="flex gap-0.5">
                 {(['json', 'cards', 'diagram'] as const).map(tab => (
                   <button
@@ -166,7 +168,7 @@ export function Sidebar({
                     onClick={() => onSetPlanTab(tab)}
                     className={`px-1.5 py-0.5 text-[10px] rounded transition-colors ${planTab === tab ? 'bg-indigo-700 text-white' : 'bg-gray-800 text-gray-500 hover:bg-gray-700'}`}
                   >
-                    {tab === 'json' ? 'Detail' : tab === 'cards' ? 'Cards' : 'Diagram'}
+                    {tab === 'json' ? t('detail') : tab === 'cards' ? t('cards') : t('diagram')}
                   </button>
                 ))}
               </div>
@@ -196,7 +198,7 @@ export function Sidebar({
           {planTab === 'json' && (
             <div className="space-y-2.5">
               <div>
-                <p className="text-[10px] text-gray-600 mb-0.5">Summary</p>
+                <p className="text-[10px] text-gray-600 mb-0.5">{t('summary')}</p>
                 <p className="text-xs text-gray-300">{planData.summary}</p>
               </div>
 
@@ -216,7 +218,7 @@ export function Sidebar({
               )}
 
               <div>
-                <p className="text-[10px] text-gray-600 mb-0.5">Files</p>
+                <p className="text-[10px] text-gray-600 mb-0.5">{t('files')}</p>
                 <div className="flex flex-wrap gap-1">
                   {planData.estimatedFiles.map((f, i) => (
                     <code key={i} className="text-[10px] bg-gray-800 text-gray-400 px-1 py-0.5 rounded">{f}</code>
@@ -225,7 +227,7 @@ export function Sidebar({
               </div>
 
               <div>
-                <p className="text-[10px] text-gray-600 mb-0.5">Coding prompt</p>
+                <p className="text-[10px] text-gray-600 mb-0.5">{t('codingPrompt')}</p>
                 {editingPlan && currentStatus === 'plan_review' ? (
                   <textarea
                     value={editedCodingPrompt}
@@ -284,11 +286,11 @@ export function Sidebar({
 
       {/* Verification */}
       <section className="p-4 border-b border-gray-800">
-        <h3 className="text-xs text-gray-500 uppercase tracking-wider mb-2">Verification</h3>
+        <h3 className="text-xs text-gray-500 uppercase tracking-wider mb-2">{t('verification')}</h3>
         {verifyResult && verifyResult.score != null ? (
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <span className="text-xs text-gray-600">Score</span>
+              <span className="text-xs text-gray-600">{t('score')}</span>
               <div className="flex items-center gap-2">
                 <span className={`text-sm font-medium ${
                   verifyResult.score >= 80 ? 'text-emerald-400' :
@@ -308,31 +310,31 @@ export function Sidebar({
             </div>
             {verifyResult.issues && verifyResult.issues.length > 0 && (
               <div className="flex items-center justify-between">
-                <span className="text-xs text-gray-600">Issues</span>
+                <span className="text-xs text-gray-600">{t('issues')}</span>
                 <span className="text-xs text-amber-400">{verifyResult.issues.length} found</span>
               </div>
             )}
             {verifyResult.designScore != null && (
               <div className="flex items-center justify-between">
-                <span className="text-xs text-gray-600">Design (VLM)</span>
+                <span className="text-xs text-gray-600">{t('designVlm')}</span>
                 <span className="text-xs text-violet-400">{verifyResult.designScore}/15</span>
               </div>
             )}
             {verifyResult.agentId && (
               <div className="flex items-center justify-between">
-                <span className="text-xs text-gray-600">Reviewer</span>
+                <span className="text-xs text-gray-600">{t('reviewer')}</span>
                 <span className="text-xs text-gray-400">{verifyResult.agentId}</span>
               </div>
             )}
           </div>
         ) : (
-          <p className="text-xs text-gray-600">Not verified yet</p>
+          <p className="text-xs text-gray-600">{t('notVerified')}</p>
         )}
       </section>
 
       {/* Configuration */}
       <section className="p-4 border-b border-gray-800">
-        <h3 className="text-xs text-gray-500 uppercase tracking-wider mb-2">Configuration</h3>
+        <h3 className="text-xs text-gray-500 uppercase tracking-wider mb-2">{t('configuration')}</h3>
         <div className="space-y-1.5 text-xs">
           {([
             ['Planning', (task as any).planningMode ?? 'auto'],
@@ -350,7 +352,7 @@ export function Sidebar({
 
       {/* Cost breakdown */}
       <section className="p-4 border-b border-gray-800">
-        <h3 className="text-xs text-gray-500 uppercase tracking-wider mb-2">Cost breakdown</h3>
+        <h3 className="text-xs text-gray-500 uppercase tracking-wider mb-2">{t('costBreakdown')}</h3>
         <CostBreakdown costs={liveUsage.agentCosts} />
         <div className="mt-2 flex justify-between text-[10px] text-gray-600">
           <span>{(liveUsage.totalInputTokens + liveUsage.totalOutputTokens).toLocaleString()} tokens</span>

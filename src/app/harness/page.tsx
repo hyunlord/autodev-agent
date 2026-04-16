@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import Tooltip from '../components/Tooltip';
 import { TOOLTIPS } from '../components/tooltips';
+import { useTranslations } from '@/i18n/context';
 
 // --- AI Edit Bar for Agent Prompts ---
 function AiEditBar({ editContent, editingRole, onApply }: {
@@ -10,6 +11,7 @@ function AiEditBar({ editContent, editingRole, onApply }: {
   editingRole: string;
   onApply: (newContent: string) => void;
 }) {
+  const t = useTranslations('harness');
   const [instruction, setInstruction] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -43,12 +45,12 @@ function AiEditBar({ editContent, editingRole, onApply }: {
   return (
     <div className="px-4 py-2.5 border-t border-gray-800 bg-gray-900/80">
       <div className="flex items-center gap-2">
-        <span className="text-[10px] text-gray-500 whitespace-nowrap">AI 수정:</span>
+        <span className="text-[10px] text-gray-500 whitespace-nowrap">{t('aiEdit')}:</span>
         <input
           value={instruction}
           onChange={e => { setInstruction(e.target.value); setError(''); }}
           onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleAiEdit(); } }}
-          placeholder="예: 더 엄격하게, 한국어로 변환, 보안 체크 추가..."
+          placeholder={t('aiEditPlaceholder')}
           className="flex-1 px-3 py-1.5 text-xs bg-gray-950 border border-gray-700 rounded-lg text-gray-300 placeholder-gray-600 outline-none focus:border-indigo-500"
         />
         <button
@@ -56,7 +58,7 @@ function AiEditBar({ editContent, editingRole, onApply }: {
           disabled={!instruction.trim() || loading}
           className="px-3 py-1.5 text-xs bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg disabled:opacity-40 transition-colors whitespace-nowrap"
         >
-          {loading ? '수정 중...' : '적용'}
+          {loading ? t('editing') : t('apply')}
         </button>
       </div>
       {error && <p className="text-[10px] text-red-400 mt-1">{error}</p>}
@@ -311,6 +313,7 @@ function AgentsTab({ agents, sourceColor, onEdit, onReset }: {
 }
 
 export default function HarnessPage() {
+  const t = useTranslations('harness');
   const [tab, setTab] = useState<'pipeline' | 'agents' | 'mcp' | 'presets'>('pipeline');
   const [selectedStage, setSelectedStage] = useState<string | null>(null);
   const [agents, setAgents] = useState<AgentFile[]>([]);
@@ -502,8 +505,8 @@ export default function HarnessPage() {
 
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold">Harness Editor</h1>
-          <p className="text-sm text-gray-500 mt-1">에이전트 프롬프트, MCP 설정, 프리셋 관리</p>
+          <h1 className="text-2xl font-bold">{t('title')}</h1>
+          <p className="text-sm text-gray-500 mt-1">{t('subtitle')}</p>
         </div>
       </div>
 
@@ -515,13 +518,13 @@ export default function HarnessPage() {
 
       {/* Scope Selector */}
       <div className="flex items-center gap-3 mb-4">
-        <label className="text-xs text-gray-500">Scope:</label>
+        <label className="text-xs text-gray-500">{t('scope')}:</label>
         <select
           value={selectedScope}
           onChange={e => setSelectedScope(e.target.value)}
           className="px-3 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-300 focus:outline-none focus:border-indigo-500"
         >
-          <option value="global">Global (~/.autodev/)</option>
+          <option value="global">{t('global')}</option>
           {projects.map(p => (
             <option key={p.projectDir} value={p.projectDir}>
               {p.projectDir.split('/').slice(-2).join('/')} ({p.taskCount} tasks)
@@ -532,15 +535,15 @@ export default function HarnessPage() {
 
       {/* Tabs */}
       <div className="flex gap-1 mb-6">
-        {(['pipeline', 'agents', 'mcp', 'presets'] as const).map(t => (
+        {(['pipeline', 'agents', 'mcp', 'presets'] as const).map(tabKey => (
           <button
-            key={t}
-            onClick={() => setTab(t)}
+            key={tabKey}
+            onClick={() => setTab(tabKey)}
             className={`px-4 py-2 text-sm rounded-lg transition-colors ${
-              tab === t ? 'bg-gray-800 text-white' : 'text-gray-500 hover:text-gray-300'
+              tab === tabKey ? 'bg-gray-800 text-white' : 'text-gray-500 hover:text-gray-300'
             }`}
           >
-            {t === 'pipeline' ? 'Pipeline' : t === 'agents' ? 'Agents' : t === 'mcp' ? 'MCP Servers' : 'Presets'}
+            {tabKey === 'pipeline' ? t('pipeline') : tabKey === 'agents' ? t('agents') : tabKey === 'mcp' ? t('mcpServers') : t('presets')}
           </button>
         ))}
       </div>

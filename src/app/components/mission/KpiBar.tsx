@@ -1,5 +1,7 @@
 'use client';
 
+import { useTranslations } from '@/i18n/context';
+
 interface KpiBarProps {
   todayTotal: number;
   completedToday: number;
@@ -21,27 +23,29 @@ function KpiCard({ label, value, sub }: { label: string; value: string | number;
 }
 
 export default function KpiBar({ todayTotal, completedToday, successRate, totalCost, avgCost, avgScore, scoredTasks }: KpiBarProps) {
+  const t = useTranslations('kpi');
+
   return (
     <div data-tour="kpi-bar" className="grid grid-cols-4 gap-3 px-5 py-4 border-t border-gray-800">
       <KpiCard
-        label="Today's tasks"
+        label={t('todayTasks')}
         value={todayTotal}
-        sub={`${completedToday} completed`}
+        sub={`${completedToday} ${t('completed')}`}
       />
       <KpiCard
-        label="Success rate"
+        label={t('successRate')}
         value={`${successRate}%`}
-        sub={todayTotal > 0 ? `of ${todayTotal} tasks` : 'no tasks today'}
+        sub={todayTotal > 0 ? t('ofTasks', { count: todayTotal }) : t('noTasks')}
       />
       <KpiCard
-        label="Total cost"
+        label={t('totalCost')}
         value={`$${totalCost.toFixed(2)}`}
-        sub={avgCost > 0 ? `avg $${avgCost.toFixed(2)}/task` : 'no cost data'}
+        sub={avgCost > 0 ? t('avgPerTask', { amount: avgCost.toFixed(2) }) : t('noCost')}
       />
       <KpiCard
-        label="Avg verify score"
+        label={t('avgScore')}
         value={avgScore > 0 ? avgScore.toFixed(1) : '-'}
-        sub={scoredTasks > 0 ? `across ${scoredTasks} tasks` : 'no scored tasks'}
+        sub={scoredTasks > 0 ? t('acrossTasks', { count: scoredTasks }) : t('noScored')}
       />
     </div>
   );

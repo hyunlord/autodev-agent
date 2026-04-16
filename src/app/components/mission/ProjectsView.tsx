@@ -1,5 +1,6 @@
 'use client';
 import Link from 'next/link';
+import { useTranslations } from '@/i18n/context';
 
 interface ProjectCardData {
   projectDir: string;
@@ -19,17 +20,19 @@ interface ProjectsViewProps {
 }
 
 export default function ProjectsView({ projects, onNewProject }: ProjectsViewProps) {
+  const t = useTranslations('projects');
+
   if (projects.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-20 text-center">
         <div className="text-4xl mb-4" style={{ color: 'var(--text-secondary)' }}>📁</div>
-        <h3 className="text-lg font-medium mb-2" style={{ color: 'var(--text-primary)' }}>No projects yet</h3>
+        <h3 className="text-lg font-medium mb-2" style={{ color: 'var(--text-primary)' }}>{t('noProjects')}</h3>
         <p className="text-sm mb-6 max-w-md" style={{ color: 'var(--text-secondary)' }}>
-          Create your first task with a project directory and it will appear here.
+          {t('noProjectsDesc')}
         </p>
         <button onClick={onNewProject}
           className="px-4 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-500 transition-colors">
-          Create your first project
+          {t('createFirst')}
         </button>
       </div>
     );
@@ -38,13 +41,13 @@ export default function ProjectsView({ projects, onNewProject }: ProjectsViewPro
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
       {projects.map(project => (
-        <ProjectCard key={project.projectDir} project={project} />
+        <ProjectCard key={project.projectDir} project={project} t={t} />
       ))}
     </div>
   );
 }
 
-function ProjectCard({ project }: { project: ProjectCardData }) {
+function ProjectCard({ project, t }: { project: ProjectCardData; t: (key: string, params?: Record<string, string | number>) => string }) {
   const dirName = project.projectDir.split('/').filter(Boolean).pop() ?? project.projectDir;
   // Prefer dirName over projectName if projectName looks like a task prompt (too long)
   const displayName = (project.projectName && project.projectName.length <= 30)
@@ -86,19 +89,19 @@ function ProjectCard({ project }: { project: ProjectCardData }) {
             <div className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
               {project.taskCount}
             </div>
-            <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>Tasks</div>
+            <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>{t('tasks')}</div>
           </div>
           <div className="text-center">
             <div className={`text-lg font-semibold ${successRate >= 80 ? 'text-emerald-400' : successRate >= 50 ? 'text-amber-400' : 'text-red-400'}`}>
               {successRate}%
             </div>
-            <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>Success</div>
+            <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>{t('success')}</div>
           </div>
           <div className="text-center">
             <div className="text-lg font-semibold text-violet-400">
               ${project.totalCost.toFixed(2)}
             </div>
-            <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>Cost</div>
+            <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>{t('cost')}</div>
           </div>
         </div>
 
@@ -108,14 +111,14 @@ function ProjectCard({ project }: { project: ProjectCardData }) {
             {project.runningCount > 0 && (
               <>
                 <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
-                <span className="text-blue-400">{project.runningCount} running</span>
+                <span className="text-blue-400">{project.runningCount} {t('running')}</span>
               </>
             )}
             {project.runningCount === 0 && project.failedCount > 0 && (
-              <span className="text-red-400">{project.failedCount} failed</span>
+              <span className="text-red-400">{project.failedCount} {t('failed')}</span>
             )}
             {project.runningCount === 0 && project.failedCount === 0 && (
-              <span className="text-emerald-400">idle</span>
+              <span className="text-emerald-400">{t('idle')}</span>
             )}
           </div>
           <span>{formatRelativeTime(project.latestTask)}</span>
