@@ -28,7 +28,7 @@ export function CostBreakdown({ costs }: Props) {
           </div>
           <div className="h-1 rounded" style={{ background: 'var(--bg-card)' }}>
             <div
-              className={`h-full rounded transition-all duration-500 ${stageColors[stage] ?? 'bg-gray-600'}`}
+              className={`h-full rounded transition-all duration-500 ${stageColors[stage] ?? 'bg-[var(--border-color)]'}`}
               style={{ width: `${total > 0 ? (cost / total) * 100 : 0}%` }}
             />
           </div>

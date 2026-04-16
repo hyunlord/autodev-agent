@@ -52,14 +52,15 @@ export function ScreenshotCompare({
   return (
     <div
       ref={containerRef}
-      className="relative overflow-hidden rounded-lg border border-gray-800 select-none"
-      style={{ height }}
+      className="relative overflow-hidden rounded-lg border select-none"
+      style={{ height, borderColor: 'var(--border-color)' }}
     >
       {/* After image (full background) */}
       <img
         src={afterUrl}
         alt={afterLabel}
-        className="absolute inset-0 w-full h-full object-contain bg-gray-950"
+        className="absolute inset-0 w-full h-full object-contain"
+        style={{ background: 'var(--bg-primary)' }}
         draggable={false}
       />
 
@@ -71,7 +72,8 @@ export function ScreenshotCompare({
         <img
           src={beforeUrl}
           alt={beforeLabel}
-          className="w-full h-full object-contain bg-gray-950"
+          className="w-full h-full object-contain"
+          style={{ background: 'var(--bg-primary)' }}
           draggable={false}
         />
       </div>

@@ -15,7 +15,7 @@ interface Task {
 }
 
 const KANBAN_COLUMNS = [
-  { id: 'queued', key: 'queued', statuses: ['pending'], dotColor: 'bg-gray-500', textColor: 'text-gray-400', pulse: false },
+  { id: 'queued', key: 'queued', statuses: ['pending'], dotColor: 'bg-[var(--border-color)]', textColor: 'text-[var(--text-secondary)]', pulse: false },
   { id: 'running', key: 'running', statuses: ['planning', 'coding', 'verifying', 'retrying'], dotColor: 'bg-blue-500', textColor: 'text-blue-400', pulse: true },
   { id: 'review', key: 'review', statuses: ['plan_review', 'interview'], dotColor: 'bg-amber-500', textColor: 'text-amber-400', pulse: false },
   { id: 'done', key: 'done', statuses: ['completed'], dotColor: 'bg-emerald-500', textColor: 'text-emerald-400', pulse: false },

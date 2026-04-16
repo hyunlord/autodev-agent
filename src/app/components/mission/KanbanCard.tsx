@@ -31,7 +31,7 @@ function getBorderColor(column: string): string {
 
 function getStatusBadge(status: string): { label: string; className: string } {
   const map: Record<string, { label: string; className: string }> = {
-    pending: { label: 'Queued', className: 'text-gray-400' },
+    pending: { label: 'Queued', className: 'text-[var(--text-secondary)]' },
     planning: { label: 'Planning', className: 'bg-blue-900/50 text-blue-400' },
     coding: { label: 'Coding', className: 'bg-blue-900/50 text-blue-400' },
     verifying: { label: 'Verifying', className: 'bg-blue-900/50 text-blue-400' },
@@ -42,7 +42,7 @@ function getStatusBadge(status: string): { label: string; className: string } {
     failed: { label: 'Failed', className: 'bg-red-900/50 text-red-400' },
     escalated: { label: 'Escalated', className: 'bg-red-900/50 text-red-400' },
   };
-  return map[status] ?? { label: status, className: 'text-gray-400' };
+  return map[status] ?? { label: status, className: 'text-[var(--text-secondary)]' };
 }
 
 function parseResult(result: unknown): Record<string, unknown> | null {

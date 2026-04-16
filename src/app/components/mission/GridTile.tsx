@@ -26,7 +26,7 @@ function getAccentColor(status: string): string {
   if (['plan_review', 'interview'].includes(status)) return 'bg-amber-500';
   if (status === 'completed') return 'bg-emerald-500';
   if (['failed', 'escalated'].includes(status)) return 'bg-red-500';
-  return 'bg-gray-600';
+  return 'bg-[var(--border-color)]';
 }
 
 function getBorderColor(status: string): string {
@@ -46,7 +46,7 @@ function getStatusDot(status: string): { color: string; pulse: boolean; label: s
     return { color: 'bg-emerald-500', pulse: false, label: 'done' };
   if (['failed', 'escalated'].includes(status))
     return { color: 'bg-red-500', pulse: false, label: 'failed' };
-  return { color: 'bg-gray-500', pulse: false, label: status };
+  return { color: 'bg-[var(--border-color)]', pulse: false, label: status };
 }
 
 function parseResult(result: unknown): Record<string, unknown> | null {

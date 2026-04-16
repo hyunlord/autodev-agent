@@ -47,7 +47,7 @@ function getStageColor(status: 'done' | 'active' | 'pending', stage: string): st
   if (stage === 'failed' || stage === 'escalated') return 'bg-red-500';
   if (status === 'done') return 'bg-emerald-500';
   if (status === 'active') return 'bg-indigo-500 animate-pulse';
-  return 'bg-gray-700';
+  return 'bg-[var(--border-color)]';
 }
 
 export function StageNode({
@@ -60,7 +60,7 @@ export function StageNode({
     <div className="flex gap-4">
       {/* 좌측: 점 + 선 */}
       <div className="flex flex-col items-center w-7 flex-shrink-0">
-        <div className={`w-3 h-3 rounded-full border-2 border-gray-950 ${getStageColor(status, stage)}`} />
+        <div className={`w-3 h-3 rounded-full border-2 ${getStageColor(status, stage)}`} style={{ borderColor: 'var(--bg-primary)' }} />
         {!isLast && <div className="w-0.5 flex-1" style={{ background: 'var(--border-color)' }} />}
       </div>
 

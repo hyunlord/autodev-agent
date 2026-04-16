@@ -47,7 +47,7 @@ export default function TimelineView({ tasks, events }: { tasks: Task[]; events:
       {/* Time axis header */}
       <div className="flex items-center gap-3 mb-2">
         <div className="w-48 shrink-0" />
-        <div className="flex-1 flex justify-between text-[10px] text-gray-600">
+        <div className="flex-1 flex justify-between text-[10px]" style={{ color: 'var(--text-secondary)' }}>
           {labels.map((label, i) => (
             <span key={i}>{label}</span>
           ))}
@@ -57,7 +57,7 @@ export default function TimelineView({ tasks, events }: { tasks: Task[]; events:
       {/* Task rows */}
       <div aria-live="polite" aria-label="Pipeline events">
       {tasks.length === 0 ? (
-        <p className="text-center text-gray-600 py-12">No tasks yet</p>
+        <p className="text-center py-12" style={{ color: 'var(--text-secondary)' }}>No tasks yet</p>
       ) : (
         tasks.map((task) => (
           <TimelineRow
@@ -71,11 +71,11 @@ export default function TimelineView({ tasks, events }: { tasks: Task[]; events:
       </div>
 
       {/* Legend */}
-      <div className="flex items-center gap-4 mt-4 pt-3 border-t border-gray-800">
+      <div className="flex items-center gap-4 mt-4 pt-3 border-t" style={{ borderColor: 'var(--border-color)' }}>
         {LEGEND.map((l) => (
           <div key={l.label} className="flex items-center gap-1.5">
             <span className={`w-3 h-2 rounded-sm ${l.color}`} />
-            <span className="text-[10px] text-gray-500">{l.label}</span>
+            <span className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>{l.label}</span>
           </div>
         ))}
       </div>

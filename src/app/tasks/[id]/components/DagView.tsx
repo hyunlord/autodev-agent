@@ -91,14 +91,14 @@ export default function DagView({ subTasks }: DagViewProps) {
 
   if (subTasks.length === 0) {
     return (
-      <div className="text-center text-gray-500 text-sm py-12">
+      <div className="text-center text-sm py-12" style={{ color: 'var(--text-secondary)' }}>
         No sub-tasks in this plan (single task mode)
       </div>
     );
   }
 
   return (
-    <div className="w-full h-[400px] rounded-lg overflow-hidden border border-gray-800">
+    <div className="w-full h-[400px] rounded-lg overflow-hidden border" style={{ borderColor: 'var(--border-color)' }}>
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -107,7 +107,8 @@ export default function DagView({ subTasks }: DagViewProps) {
         proOptions={{ hideAttribution: true }}
       >
         <Controls
-          className="!bg-gray-900 !border-gray-700 !shadow-none [&>button]:!bg-gray-800 [&>button]:!border-gray-700 [&>button]:!text-gray-400 [&>button:hover]:!bg-gray-700"
+          className="!shadow-none"
+          style={{ background: 'var(--bg-secondary)', borderColor: 'var(--border-color)' }}
         />
         <Background color="#374151" gap={20} size={1} />
       </ReactFlow>

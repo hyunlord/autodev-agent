@@ -83,7 +83,7 @@ export function getStatusColor(status: string): string {
     case 'planning': case 'plan_review': return 'bg-amber-500';
     case 'coding': return 'bg-indigo-500';
     case 'verifying': return 'bg-violet-500';
-    default: return 'bg-gray-500';
+    default: return 'bg-[var(--border-color)]';
   }
 }
 
@@ -94,7 +94,7 @@ export function getStatusTextColor(status: string): string {
     case 'planning': case 'plan_review': return 'text-amber-400';
     case 'coding': return 'text-indigo-400';
     case 'verifying': return 'text-violet-400';
-    default: return 'text-gray-400';
+    default: return 'text-[var(--text-secondary)]';
   }
 }
 

@@ -119,9 +119,9 @@ export default function NewTaskModal({ onClose, onCreated, initialProjectDir, ch
           <div className="mb-4 px-3 py-2.5 bg-indigo-950/40 border border-indigo-800/60 rounded-lg flex items-center justify-between">
             <div className="text-xs text-indigo-300">
               <span className="font-medium">{t('chainFrom')}</span>{' '}
-              <span className="text-gray-400">{chainTask.prompt.slice(0, 80)}{chainTask.prompt.length > 80 ? '...' : ''}</span>
+              <span style={{ color: 'var(--text-secondary)' }}>{chainTask.prompt.slice(0, 80)}{chainTask.prompt.length > 80 ? '...' : ''}</span>
             </div>
-            <button onClick={() => setChainTask(null)} className="ml-2 text-gray-600 hover:text-gray-400 text-xs">
+            <button onClick={() => setChainTask(null)} className="ml-2 hover:text-gray-400 text-xs" style={{ color: 'var(--text-secondary)' }}>
               &times;
             </button>
           </div>
@@ -183,7 +183,7 @@ export default function NewTaskModal({ onClose, onCreated, initialProjectDir, ch
           <div className="mt-2 space-y-2">
             <p className="text-xs text-purple-400">Drafter &rarr; Challenger &rarr; QC</p>
             <div className="flex items-center gap-2">
-              <label className="text-xs text-gray-500">Drafter:</label>
+              <label className="text-xs" style={{ color: 'var(--text-secondary)' }}>Drafter:</label>
               <div className="flex gap-1">
                 {([
                   { id: 'claude-cli', label: 'Claude CLI' },
@@ -262,13 +262,13 @@ export default function NewTaskModal({ onClose, onCreated, initialProjectDir, ch
         {/* Harness preview */}
         {harnessPreview && (
           <div className="flex items-center gap-2 mt-2">
-            <span className="text-xs text-gray-500">Harness:</span>
+            <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>Harness:</span>
             {harnessPreview.map(h => (
               <span key={h.role} className={`text-[10px] px-1.5 py-0.5 rounded ${
                 h.source === 'project' ? 'bg-teal-900/30 text-teal-400' :
                 h.source === 'global' ? 'bg-purple-900/30 text-purple-400' :
-                'bg-gray-800 text-gray-500'
-              }`}>
+                ''
+              }`} style={h.source !== 'project' && h.source !== 'global' ? { background: 'var(--bg-card)', color: 'var(--text-secondary)' } : undefined}>
                 {h.role}: {h.source}
               </span>
             ))}
@@ -291,7 +291,8 @@ export default function NewTaskModal({ onClose, onCreated, initialProjectDir, ch
               type="checkbox"
               checked={autoApprove}
               onChange={(e) => setAutoApprove(e.target.checked)}
-              className="rounded border-gray-700 bg-gray-800 text-indigo-600 focus:ring-indigo-500"
+              className="rounded text-indigo-600 focus:ring-indigo-500"
+              style={{ borderColor: 'var(--border-color)', background: 'var(--bg-card)' }}
             />
             <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>{t('autoApprove')}</span>
             <Tooltip text={TOOLTIPS.autoApprove} position="bottom" />

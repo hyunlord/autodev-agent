@@ -22,7 +22,7 @@ interface Task {
 }
 
 const STAGE_COLORS: Record<string, string> = {
-  pending: 'bg-gray-700/40 text-gray-400',
+  pending: 'bg-gray-700/40 text-[var(--text-secondary)]',
   planning: 'bg-amber-500/25 text-amber-400',
   plan_review: 'bg-amber-500/15 text-amber-300',
   interview: 'bg-amber-500/15 text-amber-300',
@@ -78,16 +78,16 @@ export default function TimelineRow({ task, events, timeRange }: TimelineRowProp
   if (totalRange <= 0) return null;
 
   return (
-    <div className="flex items-center gap-3 py-2 border-b border-gray-800/50">
+    <div className="flex items-center gap-3 py-2 border-b" style={{ borderColor: 'var(--border-color)' }}>
       <div className="w-48 shrink-0">
-        <p className="text-xs text-gray-300 truncate">{task.prompt}</p>
-        <p className="text-[10px] text-gray-600">{task.agentId}</p>
+        <p className="text-xs truncate" style={{ color: 'var(--text-primary)' }}>{task.prompt}</p>
+        <p className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>{task.agentId}</p>
       </div>
-      <div className="flex-1 relative h-6 bg-gray-900/50 rounded overflow-hidden">
+      <div className="flex-1 relative h-6 rounded overflow-hidden" style={{ background: 'var(--bg-secondary)' }}>
         {stages.map((s, i) => {
           const left = ((s.start - timeRange.start) / totalRange) * 100;
           const width = ((s.end - s.start) / totalRange) * 100;
-          const colors = STAGE_COLORS[s.stage] ?? 'bg-gray-700 text-gray-400';
+          const colors = STAGE_COLORS[s.stage] ?? 'bg-gray-700/40 text-[var(--text-secondary)]';
           return (
             <div
               key={i}
