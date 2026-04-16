@@ -20,7 +20,7 @@ export function VlmCard({ score, maxScore = 15, details, issues, vlmModel }: Pro
   const dashArray = `${(pct / 100) * circumference} ${circumference}`;
 
   return (
-    <div className="bg-gray-900 rounded-lg p-3.5 border border-violet-500/30">
+    <div className="rounded-lg p-3.5 border border-violet-500/30" style={{ background: 'var(--bg-card)' }}>
       <div className="flex items-center gap-2 mb-2.5">
         <span className="text-xs font-medium text-violet-400">VLM design analysis</span>
         {vlmModel && (
@@ -43,8 +43,8 @@ export function VlmCard({ score, maxScore = 15, details, issues, vlmModel }: Pro
           <div className="flex-1 grid grid-cols-2 gap-1.5">
             {details.map(d => (
               <div key={d.label} className="flex justify-between text-xs">
-                <span className="text-gray-600">{d.label}</span>
-                <span className="text-gray-300">{d.score}/{d.max}</span>
+                <span style={{ color: 'var(--text-secondary)' }}>{d.label}</span>
+                <span style={{ color: 'var(--text-primary)' }}>{d.score}/{d.max}</span>
               </div>
             ))}
           </div>

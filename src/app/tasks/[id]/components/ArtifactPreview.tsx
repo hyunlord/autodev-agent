@@ -57,9 +57,9 @@ export function ArtifactPreview({ files }: ArtifactPreviewProps) {
   const canPreview = !!previewHtml;
 
   return (
-    <div className="rounded-xl overflow-hidden border border-gray-800">
+    <div className="rounded-xl overflow-hidden border" style={{ borderColor: 'var(--border-color)' }}>
       {/* Header: view mode tabs */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-gray-800 bg-gray-900/80">
+      <div className="flex items-center justify-between px-3 py-2 border-b" style={{ borderColor: 'var(--border-color)', background: 'var(--bg-secondary)' }}>
         <div className="flex gap-1">
           {(['code', 'preview', 'split'] as const).map(mode => (
             <button
@@ -69,8 +69,9 @@ export function ArtifactPreview({ files }: ArtifactPreviewProps) {
               className={`px-2.5 py-1 text-xs rounded-md transition-colors capitalize ${
                 viewMode === mode
                   ? 'bg-indigo-500/20 text-indigo-400'
-                  : 'text-gray-500 hover:text-gray-300'
+                  : 'hover:opacity-80'
               } ${mode !== 'code' && !canPreview ? 'opacity-30 cursor-not-allowed' : ''}`}
+              style={viewMode !== mode ? { color: 'var(--text-secondary)' } : undefined}
             >
               {mode}
             </button>
@@ -82,7 +83,8 @@ export function ArtifactPreview({ files }: ArtifactPreviewProps) {
               const w = window.open('', '_blank');
               if (w) { w.document.write(previewHtml!); w.document.close(); }
             }}
-            className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+            className="text-xs hover:opacity-80 transition-colors"
+            style={{ color: 'var(--text-secondary)' }}
           >
             Open in new tab ↗
           </button>
@@ -93,9 +95,9 @@ export function ArtifactPreview({ files }: ArtifactPreviewProps) {
       <div className={viewMode === 'split' ? 'grid grid-cols-2' : ''} style={{ minHeight: 400 }}>
         {/* Code panel */}
         {(viewMode === 'code' || viewMode === 'split') && (
-          <div className={viewMode === 'split' ? 'border-r border-gray-800' : ''}>
+          <div className={viewMode === 'split' ? 'border-r' : ''} style={viewMode === 'split' ? { borderColor: 'var(--border-color)' } : undefined}>
             {/* File tabs */}
-            <div className="flex border-b border-gray-800 overflow-x-auto">
+            <div className="flex border-b overflow-x-auto" style={{ borderColor: 'var(--border-color)' }}>
               {fileNames.map(name => (
                 <button
                   key={name}
@@ -103,8 +105,9 @@ export function ArtifactPreview({ files }: ArtifactPreviewProps) {
                   className={`px-3 py-1.5 text-xs font-mono whitespace-nowrap transition-colors ${
                     selectedFile === name
                       ? 'bg-indigo-500/10 text-indigo-400 border-b-2 border-indigo-500'
-                      : 'text-gray-500 hover:text-gray-400'
+                      : 'hover:opacity-80'
                   }`}
+                  style={selectedFile !== name ? { color: 'var(--text-secondary)' } : undefined}
                 >
                   {name}
                 </button>
@@ -133,13 +136,13 @@ export function ArtifactPreview({ files }: ArtifactPreviewProps) {
 
         {/* No preview available */}
         {(viewMode === 'preview' || viewMode === 'split') && !canPreview && (
-          <div className="flex items-center justify-center bg-gray-950" style={{ height: 500 }}>
+          <div className="flex items-center justify-center" style={{ height: 500, background: 'var(--bg-primary)' }}>
             <div className="text-center">
               <p className="text-2xl mb-2">📄</p>
-              <p className="text-sm text-gray-500">
+              <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
                 No HTML file found — preview requires an .html file
               </p>
-              <p className="text-xs mt-1 text-gray-600">
+              <p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>
                 For server apps, run the server and open in browser
               </p>
             </div>

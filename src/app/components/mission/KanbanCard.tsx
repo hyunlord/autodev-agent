@@ -31,7 +31,7 @@ function getBorderColor(column: string): string {
 
 function getStatusBadge(status: string): { label: string; className: string } {
   const map: Record<string, { label: string; className: string }> = {
-    pending: { label: 'Queued', className: 'bg-gray-700 text-gray-400' },
+    pending: { label: 'Queued', className: 'text-gray-400' },
     planning: { label: 'Planning', className: 'bg-blue-900/50 text-blue-400' },
     coding: { label: 'Coding', className: 'bg-blue-900/50 text-blue-400' },
     verifying: { label: 'Verifying', className: 'bg-blue-900/50 text-blue-400' },
@@ -42,7 +42,7 @@ function getStatusBadge(status: string): { label: string; className: string } {
     failed: { label: 'Failed', className: 'bg-red-900/50 text-red-400' },
     escalated: { label: 'Escalated', className: 'bg-red-900/50 text-red-400' },
   };
-  return map[status] ?? { label: status, className: 'bg-gray-700 text-gray-400' };
+  return map[status] ?? { label: status, className: 'text-gray-400' };
 }
 
 function parseResult(result: unknown): Record<string, unknown> | null {
@@ -90,7 +90,7 @@ export default function KanbanCard({ task, column }: KanbanCardProps) {
       <div role="article" aria-label={`Task: ${task.prompt.slice(0, 50)}`} className={`p-3 rounded-lg border ${getBorderColor(column)} hover:border-gray-600 transition-colors cursor-pointer ${column === 'done' ? 'opacity-70' : ''}`} style={{ background: 'var(--bg-card)', borderColor: getBorderColor(column) ? undefined : 'var(--border-color)' }}>
         <div className="flex items-start justify-between gap-2 mb-1.5">
           <p className="text-sm line-clamp-2 leading-tight" style={{ color: 'var(--text-primary)' }}>{task.prompt}</p>
-          <span aria-label={`Status: ${badge.label}`} role="status" className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium ${badge.className}`}>
+          <span aria-label={`Status: ${badge.label}`} role="status" className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium ${badge.className}`} style={!badge.className.includes('bg-') ? { background: 'var(--bg-card-hover)' } : undefined}>
             {badge.label}
           </span>
         </div>

@@ -14,13 +14,13 @@ export function TaskHeader({ task, currentStatus, liveUsage, attemptCount }: Pro
   const isRunning = !['completed', 'failed', 'escalated'].includes(currentStatus);
 
   return (
-    <div className="flex items-center justify-between px-5 py-3 bg-gray-900 border-b border-gray-800">
+    <div className="flex items-center justify-between px-5 py-3 border-b" style={{ background: 'var(--bg-secondary)', borderColor: 'var(--border-color)' }}>
       <div className="flex items-center gap-3">
-        <Link href="/" className="text-gray-500 hover:text-gray-300 text-sm transition-colors">
+        <Link href="/" className="hover:opacity-80 text-sm transition-colors" style={{ color: 'var(--text-secondary)' }}>
           &larr; Dashboard
         </Link>
-        <span className="text-gray-700">/</span>
-        <span className="text-sm font-medium text-gray-200">Task #{task.id.slice(0, 6)}</span>
+        <span style={{ color: 'var(--border-color)' }}>/</span>
+        <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>Task #{task.id.slice(0, 6)}</span>
         {attemptCount > 1 && (
           <span className="text-xs px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400">
             Attempt {attemptCount}/3
@@ -44,7 +44,7 @@ export function TaskHeader({ task, currentStatus, liveUsage, attemptCount }: Pro
             </span>
           </>
         )}
-        <span className="text-xs text-gray-500">
+        <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
           {formatElapsed(task.createdAt, ['completed', 'failed', 'escalated'].includes(currentStatus) ? task.updatedAt : undefined)}
         </span>
       </div>

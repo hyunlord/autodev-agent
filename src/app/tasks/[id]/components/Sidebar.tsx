@@ -11,7 +11,7 @@ import { useTranslations } from '@/i18n/context';
 
 const MermaidDiagram = dynamic(() => import('./MermaidDiagram'), {
   ssr: false,
-  loading: () => <div className="text-gray-600 text-sm p-4">Loading diagram...</div>,
+  loading: () => <div className="text-sm p-4" style={{ color: 'var(--text-secondary)' }}>Loading diagram...</div>,
 });
 import type { TaskDetail, PlanData, LiveUsage, CycleInfo } from './types';
 
@@ -252,7 +252,7 @@ export function Sidebar({
                   {planData.verificationSpec.steps.map((s: any, i: number) => (
                     <div key={i} className="text-[10px] flex items-center gap-1.5" style={{ color: 'var(--text-secondary)' }}>
                       <span className="text-indigo-400 font-mono">{s.id}</span>
-                      <span className="text-gray-700">&middot;</span>
+                      <span style={{ color: 'var(--border-color)' }}>&middot;</span>
                       <span>{s.description}</span>
                     </div>
                   ))}
@@ -373,25 +373,25 @@ export function Sidebar({
           <div className="grid grid-cols-2 gap-2">
             {parsedResult.attempts !== undefined && (
               <div className="rounded-lg p-2.5" style={{ background: 'var(--bg-card)' }}>
-                <p className="text-[10px] text-gray-600">Attempts</p>
+                <p className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>Attempts</p>
                 <p className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>{parsedResult.attempts}</p>
               </div>
             )}
             {parsedResult.costUsd !== undefined && (
               <div className="rounded-lg p-2.5" style={{ background: 'var(--bg-card)' }}>
-                <p className="text-[10px] text-gray-600">Cost</p>
+                <p className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>Cost</p>
                 <p className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>${Number(parsedResult.costUsd).toFixed(4)}</p>
               </div>
             )}
             {parsedResult.modifiedFiles && (
               <div className="rounded-lg p-2.5" style={{ background: 'var(--bg-card)' }}>
-                <p className="text-[10px] text-gray-600">Files</p>
+                <p className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>Files</p>
                 <p className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>{parsedResult.modifiedFiles.length}</p>
               </div>
             )}
             {task.updatedAt && task.createdAt && (
               <div className="rounded-lg p-2.5" style={{ background: 'var(--bg-card)' }}>
-                <p className="text-[10px] text-gray-600">Duration</p>
+                <p className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>Duration</p>
                 <p className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>
                   {Math.round((new Date(task.updatedAt).getTime() - new Date(task.createdAt).getTime()) / 1000)}s
                 </p>

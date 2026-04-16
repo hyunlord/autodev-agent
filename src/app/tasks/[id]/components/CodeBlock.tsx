@@ -62,7 +62,7 @@ export function CodeBlock({ code, language, showLineNumbers = true, maxHeight = 
         {lines.map((line, i) => (
           <div key={i} className="flex hover:bg-gray-800/40 leading-5">
             {showLineNumbers && (
-              <span className="w-10 text-right pr-3 select-none text-gray-600 border-r border-gray-800 flex-shrink-0">
+              <span className="w-10 text-right pr-3 select-none border-r flex-shrink-0" style={{ color: 'var(--text-secondary)', borderColor: 'var(--border-color)' }}>
                 {i + 1}
               </span>
             )}
