@@ -4,6 +4,7 @@ import Link from 'next/link';
 import Tooltip from '../components/Tooltip';
 import { TOOLTIPS } from '../components/tooltips';
 import { useTranslations } from '@/i18n/context';
+import EvolveModal from '../components/EvolveModal';
 
 // --- AI Edit Bar for Agent Prompts ---
 function AiEditBar({ editContent, editingRole, onApply }: {
@@ -244,11 +245,12 @@ interface Project {
   taskCount: number;
 }
 
-function AgentsTab({ agents, sourceColor, onEdit, onReset }: {
+function AgentsTab({ agents, sourceColor, onEdit, onReset, onEvolve }: {
   agents: AgentFile[];
   sourceColor: (s: string) => string;
   onEdit: (role: string, content: string) => void;
   onReset: (role: string) => void;
+  onEvolve: (role: string) => void;
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const toggle = (role: string) => {
@@ -274,6 +276,12 @@ function AgentsTab({ agents, sourceColor, onEdit, onReset }: {
                 </span>
               </div>
               <div className="flex gap-2">
+                <button
+                  onClick={() => onEvolve(agent.role)}
+                  className="px-3 py-1 text-xs border border-indigo-600 text-indigo-400 hover:bg-indigo-600 hover:text-white rounded-lg transition-colors"
+                >
+                  🧬 Evolve
+                </button>
                 <button
                   onClick={() => onEdit(agent.role, agent.content)}
                   className="px-3 py-1 text-xs bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition-colors"
@@ -325,6 +333,7 @@ export default function HarnessPage() {
   const [editContent, setEditContent] = useState('');
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
+  const [evolveRole, setEvolveRole] = useState<string | null>(null);
 
   // Harness Command state
   const [harnessCommand, setHarnessCommand] = useState('');
@@ -865,6 +874,7 @@ export default function HarnessPage() {
           sourceColor={sourceColor}
           onEdit={handleEdit}
           onReset={handleReset}
+          onEvolve={setEvolveRole}
         />
       )}
 
@@ -971,6 +981,15 @@ export default function HarnessPage() {
             />
           </div>
         </div>
+      )}
+
+      {/* Evolve Modal */}
+      {evolveRole && (
+        <EvolveModal
+          role={evolveRole}
+          projectDir={selectedScope !== 'global' ? selectedScope : undefined}
+          onClose={() => setEvolveRole(null)}
+        />
       )}
     </div>
   );
