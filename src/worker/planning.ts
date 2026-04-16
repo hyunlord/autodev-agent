@@ -12,6 +12,72 @@ function getLocaleInstruction(locale?: string): string {
   return '';
 }
 
+/**
+ * JSON 출력 형식 강제 접미사.
+ * Custom prompt가 JSON 형식 지시를 포함하지 않을 때 자동 추가.
+ */
+const PLAN_JSON_SUFFIX = `
+
+## OUTPUT FORMAT (MANDATORY)
+You MUST respond with ONLY valid JSON. No prose before or after. No markdown fences.
+Start your response with { and end with }.
+Required fields: "summary", "codingPrompt", "estimatedFiles", "verificationSpec".
+Schema:
+{
+  "summary": "one-line plan description",
+  "taskCategory": "frontend|backend|fullstack|fix|refactor|test|docs",
+  "codingPrompt": "detailed coding instructions for the implementation agent",
+  "estimatedFiles": ["file1.ts", "file2.tsx"],
+  "verificationSpec": { "steps": [{ "id": "v1", "type": "build_check|file_check|dom_check|http_check|port_check|vlm_check|desktop_check|cli_output_check", "description": "what to verify" }] }
+}`;
+
+/**
+ * Planner 프롬프트 완성도 보장.
+ * Custom prompt가 {{userPrompt}} 등 template 변수를 사용하지 않아도
+ * 유저 작업, 프로젝트 컨텍스트, JSON 형식 지시가 반드시 포함되도록 보장.
+ */
+function completePlanPrompt(
+  loadedContent: string,
+  userPrompt: string,
+  projectContext: string,
+  workspaceContext: string,
+  systemPrompt: string | null | undefined,
+  locale?: string,
+): string {
+  let prompt = loadedContent;
+
+  // 유저 작업이 prompt에 포함됐는지 확인 (template 치환 또는 직접 포함)
+  const taskSnippet = userPrompt.slice(0, Math.min(40, userPrompt.length));
+  if (!prompt.includes(taskSnippet)) {
+    prompt += `\n\n## Task\n${userPrompt}`;
+  }
+
+  // 프로젝트 컨텍스트 확인
+  if (projectContext && !prompt.includes(projectContext.slice(0, 20))) {
+    prompt += `\n\n## Project Info\n${projectContext}`;
+  }
+
+  // 워크스페이스 컨텍스트 확인
+  if (workspaceContext && !prompt.includes(workspaceContext.slice(0, 15))) {
+    prompt += `\n\n## Current Workspace\n${workspaceContext}`;
+  }
+
+  // JSON 출력 형식 지시 확인
+  if (!/respond with .*json/i.test(prompt) && !/OUTPUT FORMAT/i.test(prompt)) {
+    prompt += PLAN_JSON_SUFFIX;
+  }
+
+  // System prompt 적용
+  if (systemPrompt) {
+    prompt = `${systemPrompt}\n\n${prompt}`;
+  }
+
+  // Locale 지시 적용
+  prompt += getLocaleInstruction(locale);
+
+  return prompt;
+}
+
 // ─── Schemas (unchanged) ──────────────────────────────────────
 
 export const VerificationStepSchema = z.object({
@@ -115,8 +181,11 @@ async function planViaCliAgent(
   });
   onProgress?.(`Planner prompt: ${plannerPrompt.source}${plannerPrompt.filePath ? ` (${plannerPrompt.filePath})` : ' (built-in)'}`);
 
-  const basePlanPrompt = systemPrompt ? `${systemPrompt}\n\n${plannerPrompt.content}` : plannerPrompt.content;
-  const planPrompt = basePlanPrompt + getLocaleInstruction(locale);
+  const planPrompt = completePlanPrompt(
+    plannerPrompt.content, userPrompt, projectContext,
+    workspaceContext ?? 'No files yet (empty workspace).',
+    systemPrompt, locale,
+  );
 
   const { getExeca } = await import('../lib/execa');
   const execa = await getExeca();
@@ -168,6 +237,42 @@ async function planViaCliAgent(
   };
 }
 
+// ─── Gemini CLI helpers ──────────────────────────────────────
+
+async function runGeminiCli(
+  execa: Awaited<ReturnType<typeof import('../lib/execa').getExeca>>,
+  geminiPath: string,
+  prompt: string,
+  workspaceDir?: string,
+  onProgress?: (msg: string) => void,
+): Promise<string> {
+  const result = await execa(geminiPath, [
+    '--output-format', 'json',
+    '-y',
+  ], {
+    cwd: workspaceDir,
+    timeout: 120_000,
+    reject: false,
+    input: prompt,
+    env: { ...process.env },
+  });
+
+  if (result.exitCode !== 0) {
+    throw new Error(`Gemini CLI planning failed (exit ${result.exitCode}): ${result.stderr?.slice(0, 500)}`);
+  }
+
+  return result.stdout;
+}
+
+function unwrapGeminiEnvelope(stdout: string): string {
+  try {
+    const envelope = JSON.parse(stdout);
+    return (envelope.response ?? envelope.result ?? envelope.text ?? stdout) as string;
+  } catch {
+    return stdout;
+  }
+}
+
 // ─── Mode A2: Planning via Gemini CLI ────────────────────────
 
 async function planViaGeminiCli(
@@ -193,8 +298,11 @@ async function planViaGeminiCli(
   });
   onProgress?.(`Planner prompt: ${plannerPrompt.source}${plannerPrompt.filePath ? ` (${plannerPrompt.filePath})` : ' (built-in)'}`);
 
-  const basePlanPrompt = systemPrompt ? `${systemPrompt}\n\n${plannerPrompt.content}` : plannerPrompt.content;
-  const planPrompt = basePlanPrompt + getLocaleInstruction(locale);
+  const planPrompt = completePlanPrompt(
+    plannerPrompt.content, userPrompt, projectContext,
+    workspaceContext ?? 'No files yet (empty workspace).',
+    systemPrompt, locale,
+  );
 
   const { getExeca } = await import('../lib/execa');
   const execa = await getExeca();
@@ -203,31 +311,28 @@ async function planViaGeminiCli(
     throw new Error('Gemini CLI not found. Install with: npm install -g @google/generative-ai or equivalent');
   }
 
-  const result = await execa(geminiPath, [
-    '--output-format', 'json',
-    '-y',
-  ], {
-    cwd: workspaceDir,
-    timeout: 120_000,
-    reject: false,
-    input: planPrompt,
-    env: { ...process.env },
-  });
+  // 1차 시도
+  let stdout = await runGeminiCli(execa, geminiPath, planPrompt, workspaceDir, onProgress);
 
-  if (result.exitCode !== 0) {
-    throw new Error(`Gemini CLI planning failed (exit ${result.exitCode}): ${result.stderr?.slice(0, 500)}`);
-  }
-
-  // Gemini may wrap output in a JSON envelope with a `response` field
-  let stdout = result.stdout;
+  // JSON 파싱 시도 — 실패 시 짧은 JSON 강제 프롬프트로 1회 재시도
+  let parsed: any;
   try {
-    const envelope = JSON.parse(stdout);
-    stdout = envelope.response ?? envelope.result ?? envelope.text ?? stdout;
-  } catch {
-    // Not a JSON envelope, use raw output
+    stdout = unwrapGeminiEnvelope(stdout);
+    parsed = extractJson(stdout, 'summary');
+  } catch (firstError) {
+    onProgress?.(`[Gemini] JSON extraction failed, retrying with JSON-only prompt...`);
+    const retryPrompt = `The previous response was not valid JSON. You MUST output ONLY a JSON object.
+
+Task: ${userPrompt}
+${projectContext}
+
+Respond with ONLY valid JSON (no prose, no fences). Required: "summary", "codingPrompt", "estimatedFiles", "verificationSpec".`;
+
+    stdout = await runGeminiCli(execa, geminiPath, retryPrompt, workspaceDir, onProgress);
+    stdout = unwrapGeminiEnvelope(stdout);
+    parsed = extractJson(stdout, 'summary');
   }
 
-  const parsed = extractJson(stdout, 'summary');
   const plan = PlanSchema.parse(parsed);
   onProgress?.(`Planning output: ${stdout.length} chars, parsed successfully`);
   onProgress?.(`Plan ready: ${plan.summary}`);
@@ -266,8 +371,11 @@ async function planViaCodexCli(
   });
   onProgress?.(`Planner prompt: ${plannerPrompt.source}${plannerPrompt.filePath ? ` (${plannerPrompt.filePath})` : ' (built-in)'}`);
 
-  const basePlanPrompt = systemPrompt ? `${systemPrompt}\n\n${plannerPrompt.content}` : plannerPrompt.content;
-  const planPrompt = basePlanPrompt + getLocaleInstruction(locale);
+  const planPrompt = completePlanPrompt(
+    plannerPrompt.content, userPrompt, projectContext,
+    workspaceContext ?? 'No files yet (empty workspace).',
+    systemPrompt, locale,
+  );
 
   const { getExeca } = await import('../lib/execa');
   const execa = await getExeca();
