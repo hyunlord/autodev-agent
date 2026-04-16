@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
-import { join } from 'path';
+import { join, resolve } from 'path';
 import { homedir } from 'os';
+
+const ALLOWED_ROLES = ['planner', 'coder', 'verifier', 'evaluator', 'debate-drafter', 'debate-challenger'];
 
 interface Suggestion {
   id: string;
@@ -19,17 +21,27 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'role and suggestions are required' }, { status: 400 });
     }
 
+    // Validate role against allowlist to prevent path traversal
+    if (!ALLOWED_ROLES.includes(role)) {
+      return NextResponse.json({ error: `Invalid role: ${role}` }, { status: 400 });
+    }
+
     const selected = (suggestions as Suggestion[]).filter(s => s.selected);
     if (selected.length === 0) {
       return NextResponse.json({ error: '선택된 제안이 없습니다.' }, { status: 400 });
     }
 
-    // Determine file path
+    // Determine file path with path traversal protection
     const baseDir = projectDir
-      ? join(projectDir, '.autodev')
+      ? join(resolve(projectDir), '.autodev')
       : join(homedir(), '.autodev');
     const agentsDir = join(baseDir, 'agents');
     const filePath = join(agentsDir, `${role}.md`);
+
+    // Verify resolved path stays within .autodev/agents/
+    if (!filePath.startsWith(agentsDir)) {
+      return NextResponse.json({ error: 'Invalid path' }, { status: 400 });
+    }
 
     // Load existing content or start empty
     let content = '';
