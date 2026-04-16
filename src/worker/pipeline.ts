@@ -492,9 +492,37 @@ async function runSingleCycle(
   const taskCategory = plan.taskCategory ?? 'unknown';
   emit({ type: 'log', level: 'info', message: `Task category: ${taskCategory}` });
 
+  // E6: 스코어링 기반 에이전트 선택 (agentId가 'auto'이거나 미지정일 때)
+  let taskAgentId = (task as any).agentId as string | undefined;
+  if (!taskAgentId || taskAgentId === 'auto') {
+    try {
+      const { AgentScorer } = await import('../agents/agent-scorer');
+      const { estimateComplexity } = await import('../agents/tags-extractor');
+
+      const scores = await AgentScorer.scoreAll({
+        taskPrompt: task.prompt,
+        costPreference: taskConfig.costPreference ?? undefined,
+        estimatedComplexity: estimateComplexity(task.prompt),
+        projectDir: task.projectDir ?? undefined,
+      });
+
+      if (scores.length > 0) {
+        const best = scores[0];
+        emit({ type: 'log', level: 'info', message: `🎯 Scored agents: ${scores.map(s => `${s.agentId}(${s.score})`).join(', ')}` });
+        taskAgentId = best.agentId;
+        // fallback용 2등 기록
+        if (scores[1]) {
+          taskConfig.fallbackAgentId = scores[1].agentId;
+        }
+      }
+    } catch (err) {
+      emit({ type: 'log', level: 'warn', message: `Agent scoring failed, falling back to default selection: ${err}` });
+    }
+  }
+
   let { agent, agentId, autoSelected } = await selectAgent(
     plan.recommendedAgent,
-    (task as any).agentId,
+    taskAgentId,
     taskConfig.costPreference ?? undefined,
   );
   emit({ type: 'log', level: 'info', message: `${autoSelected ? 'Auto-selected' : 'Using'} agent: ${agent.name} (${taskCategory})` });

@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import ThemeToggle from '../ThemeToggle';
 import LanguageToggle from '../LanguageToggle';
+import AgentHealthBar from '../AgentHealthBar';
 import { useTranslations } from '@/i18n/context';
 
 const VIEW_IDS = ['kanban', 'grid', 'timeline', 'projects'] as const;
@@ -71,6 +72,7 @@ export default function MissionHeader({ activeView, onViewChange, activeTasks, t
         >
           {th('harness')}
         </Link>
+        <AgentHealthBar />
         <LanguageToggle />
         <ThemeToggle />
         <button
