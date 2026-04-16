@@ -32,6 +32,25 @@ Schema:
 }`;
 
 /**
+ * Planning retry prefix.
+ * 1차 응답이 JSON이 아닐 때, 전체 프롬프트 앞에 붙여서 재시도.
+ * few-shot 예시 1개 포함으로 모델이 형식을 학습하도록 유도.
+ */
+const PLAN_RETRY_PREFIX = `⚠️ CRITICAL: Your previous response was NOT valid JSON and caused a parsing failure.
+You MUST output ONLY a valid JSON object — starting with { and ending with }.
+No markdown code fences. No explanation before or after. No prose.
+
+Example of a valid response (follow this exact shape):
+{"summary":"Add counter buttons","taskCategory":"frontend","codingPrompt":"Create index.html with +/- buttons and a display element...","estimatedFiles":["index.html"],"verificationSpec":{"steps":[{"id":"v1","type":"file_check","description":"index.html exists","filePath":"index.html"}]}}
+
+Now respond to the ORIGINAL task below with ONLY JSON in the same schema.
+Do NOT repeat these instructions — output ONLY the JSON object.
+
+---
+
+`;
+
+/**
  * Planner 프롬프트 완성도 보장.
  * Custom prompt가 {{userPrompt}} 등 template 변수를 사용하지 않아도
  * 유저 작업, 프로젝트 컨텍스트, JSON 형식 지시가 반드시 포함되도록 보장.
@@ -223,12 +242,38 @@ async function planViaCliAgent(
     throw new Error(`CLI planning failed (${exitReason}):\n${debugOutput}`);
   }
 
-  const parsed = extractJson(result.stdout, 'summary');
+  let stdout = result.stdout;
+  let parsed: any;
+  try {
+    parsed = extractJson(stdout, 'summary');
+  } catch (firstError) {
+    onProgress?.(`[Claude] JSON extraction failed (${stdout.length} chars), retrying with full context + JSON emphasis...`);
+    const retryPrompt = PLAN_RETRY_PREFIX + planPrompt;
+
+    const retryResult = await execa(claudePath, [
+      '--output-format', 'text',
+      '--max-turns', '5',
+      '--dangerously-skip-permissions',
+    ], {
+      cwd: workspaceDir,
+      timeout: effectiveTimeout,
+      reject: false,
+      input: retryPrompt,
+      env: { ...process.env },
+    });
+
+    if (retryResult.exitCode !== 0) {
+      throw firstError; // retry도 실패 → 원래 에러 throw
+    }
+    stdout = retryResult.stdout;
+    parsed = extractJson(stdout, 'summary');
+  }
+
   const plan = PlanSchema.parse(parsed);
-  onProgress?.(`Planning output: ${result.stdout.length} chars, parsed successfully`);
+  onProgress?.(`Planning output: ${stdout.length} chars, parsed successfully`);
   onProgress?.(`Plan ready: ${plan.summary}`);
   const estimatedInputTokens = Math.ceil(planPrompt.length / 4);
-  const estimatedOutputTokens = Math.ceil(result.stdout.length / 4);
+  const estimatedOutputTokens = Math.ceil(stdout.length / 4);
   return {
     plan,
     costUsd: (estimatedInputTokens / 1_000_000) * 3.0 + (estimatedOutputTokens / 1_000_000) * 15.0,
@@ -320,13 +365,8 @@ async function planViaGeminiCli(
     stdout = unwrapGeminiEnvelope(stdout);
     parsed = extractJson(stdout, 'summary');
   } catch (firstError) {
-    onProgress?.(`[Gemini] JSON extraction failed, retrying with JSON-only prompt...`);
-    const retryPrompt = `The previous response was not valid JSON. You MUST output ONLY a JSON object.
-
-Task: ${userPrompt}
-${projectContext}
-
-Respond with ONLY valid JSON (no prose, no fences). Required: "summary", "codingPrompt", "estimatedFiles", "verificationSpec".`;
+    onProgress?.(`[Gemini] JSON extraction failed (${stdout.length} chars), retrying with full context + JSON emphasis...`);
+    const retryPrompt = PLAN_RETRY_PREFIX + planPrompt;
 
     stdout = await runGeminiCli(execa, geminiPath, retryPrompt, workspaceDir, onProgress);
     stdout = unwrapGeminiEnvelope(stdout);
@@ -402,9 +442,35 @@ async function planViaCodexCli(
     throw new Error(`Codex CLI planning failed (exit ${result.exitCode}): ${result.stderr?.slice(0, 500)}`);
   }
 
-  const parsed = extractJson(result.stdout, 'summary');
+  let stdout = result.stdout;
+  let parsed: any;
+  try {
+    parsed = extractJson(stdout, 'summary');
+  } catch (firstError) {
+    onProgress?.(`[Codex] JSON extraction failed (${stdout.length} chars), retrying with full context + JSON emphasis...`);
+    const retryFullPrompt = PLAN_RETRY_PREFIX + planPrompt;
+    const retryCodexPrompt = retryFullPrompt.length > MAX_CODEX_PROMPT
+      ? retryFullPrompt.slice(0, MAX_CODEX_PROMPT) + '\n\n[PROMPT TRUNCATED FOR CLI LIMITS]'
+      : retryFullPrompt;
+
+    const retryResult = await execa(codexPath, [
+      'exec', retryCodexPrompt, '--full-auto', '--json',
+    ], {
+      cwd: workspaceDir,
+      timeout: 120_000,
+      reject: false,
+      env: { ...process.env },
+    });
+
+    if (retryResult.exitCode !== 0) {
+      throw firstError;
+    }
+    stdout = retryResult.stdout;
+    parsed = extractJson(stdout, 'summary');
+  }
+
   const plan = PlanSchema.parse(parsed);
-  onProgress?.(`Planning output: ${result.stdout.length} chars, parsed successfully`);
+  onProgress?.(`Planning output: ${stdout.length} chars, parsed successfully`);
   onProgress?.(`Plan ready: ${plan.summary}`);
   const estimatedInputTokens = Math.ceil(planPrompt.length / 4);
   const estimatedOutputTokens = Math.ceil(result.stdout.length / 4);
