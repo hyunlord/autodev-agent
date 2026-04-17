@@ -243,10 +243,12 @@ async function planViaCliAgent(
   }
 
   let stdout = result.stdout;
+  let retryOccurred = false;
   let parsed: any;
   try {
     parsed = extractJson(stdout, 'summary');
   } catch (firstError) {
+    retryOccurred = true;
     onProgress?.(`[Claude] JSON extraction failed (${stdout.length} chars), retrying with full context + JSON emphasis...`);
     const retryPrompt = PLAN_RETRY_PREFIX + planPrompt;
 
@@ -272,7 +274,9 @@ async function planViaCliAgent(
   const plan = PlanSchema.parse(parsed);
   onProgress?.(`Planning output: ${stdout.length} chars, parsed successfully`);
   onProgress?.(`Plan ready: ${plan.summary}`);
-  const estimatedInputTokens = Math.ceil(planPrompt.length / 4);
+  const firstInputChars = planPrompt.length;
+  const retryInputChars = retryOccurred ? PLAN_RETRY_PREFIX.length + planPrompt.length : 0;
+  const estimatedInputTokens = Math.ceil((firstInputChars + retryInputChars) / 4);
   const estimatedOutputTokens = Math.ceil(stdout.length / 4);
   return {
     plan,
@@ -358,6 +362,7 @@ async function planViaGeminiCli(
 
   // 1차 시도
   let stdout = await runGeminiCli(execa, geminiPath, planPrompt, workspaceDir, onProgress);
+  let retryOccurred = false;
 
   // JSON 파싱 시도 — 실패 시 짧은 JSON 강제 프롬프트로 1회 재시도
   let parsed: any;
@@ -365,6 +370,7 @@ async function planViaGeminiCli(
     stdout = unwrapGeminiEnvelope(stdout);
     parsed = extractJson(stdout, 'summary');
   } catch (firstError) {
+    retryOccurred = true;
     onProgress?.(`[Gemini] JSON extraction failed (${stdout.length} chars), retrying with full context + JSON emphasis...`);
     const retryPrompt = PLAN_RETRY_PREFIX + planPrompt;
 
@@ -376,7 +382,9 @@ async function planViaGeminiCli(
   const plan = PlanSchema.parse(parsed);
   onProgress?.(`Planning output: ${stdout.length} chars, parsed successfully`);
   onProgress?.(`Plan ready: ${plan.summary}`);
-  const estimatedInputTokens = Math.ceil(planPrompt.length / 4);
+  const firstInputChars = planPrompt.length;
+  const retryInputChars = retryOccurred ? PLAN_RETRY_PREFIX.length + planPrompt.length : 0;
+  const estimatedInputTokens = Math.ceil((firstInputChars + retryInputChars) / 4);
   const estimatedOutputTokens = Math.ceil(stdout.length / 4);
   return {
     plan,
@@ -443,15 +451,19 @@ async function planViaCodexCli(
   }
 
   let stdout = result.stdout;
+  let retryOccurred = false;
+  let retryCodexPromptLength = 0;
   let parsed: any;
   try {
     parsed = extractJson(stdout, 'summary');
   } catch (firstError) {
+    retryOccurred = true;
     onProgress?.(`[Codex] JSON extraction failed (${stdout.length} chars), retrying with full context + JSON emphasis...`);
     const retryFullPrompt = PLAN_RETRY_PREFIX + planPrompt;
     const retryCodexPrompt = retryFullPrompt.length > MAX_CODEX_PROMPT
       ? retryFullPrompt.slice(0, MAX_CODEX_PROMPT) + '\n\n[PROMPT TRUNCATED FOR CLI LIMITS]'
       : retryFullPrompt;
+    retryCodexPromptLength = retryCodexPrompt.length;
 
     const retryResult = await execa(codexPath, [
       'exec', retryCodexPrompt, '--full-auto', '--json',
@@ -472,8 +484,10 @@ async function planViaCodexCli(
   const plan = PlanSchema.parse(parsed);
   onProgress?.(`Planning output: ${stdout.length} chars, parsed successfully`);
   onProgress?.(`Plan ready: ${plan.summary}`);
-  const estimatedInputTokens = Math.ceil(planPrompt.length / 4);
-  const estimatedOutputTokens = Math.ceil(result.stdout.length / 4);
+  const firstInputChars = codexPrompt.length;
+  const retryInputChars = retryOccurred ? retryCodexPromptLength : 0;
+  const estimatedInputTokens = Math.ceil((firstInputChars + retryInputChars) / 4);
+  const estimatedOutputTokens = Math.ceil(stdout.length / 4);
   return {
     plan,
     costUsd: (estimatedInputTokens / 1_000_000) * 1.10 + (estimatedOutputTokens / 1_000_000) * 4.40,
