@@ -6,6 +6,10 @@ import { TOOLTIPS } from '../components/tooltips';
 import { useTranslations } from '@/i18n/context';
 import EvolveModal from '../components/EvolveModal';
 
+// 예약된 에이전트 역할 — 아직 파이프라인에 통합되지 않아 Evolve 불가.
+// 통합 시 Set에서 제거하면 자동 활성화. evolve/route.ts의 RESERVED_ROLES와 동기화 필요.
+const RESERVED_EVOLVE_ROLES = new Set(['evaluator']);
+
 // --- AI Edit Bar for Agent Prompts ---
 function AiEditBar({ editContent, editingRole, onApply }: {
   editContent: string;
@@ -252,6 +256,7 @@ function AgentsTab({ agents, sourceColor, onEdit, onReset, onEvolve }: {
   onReset: (role: string) => void;
   onEvolve: (role: string) => void;
 }) {
+  const t = useTranslations('harness');
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const toggle = (role: string) => {
     setExpanded(prev => {
@@ -276,12 +281,22 @@ function AgentsTab({ agents, sourceColor, onEdit, onReset, onEvolve }: {
                 </span>
               </div>
               <div className="flex gap-2">
-                <button
-                  onClick={() => onEvolve(agent.role)}
-                  className="px-3 py-1 text-xs border border-indigo-600 text-indigo-400 hover:bg-indigo-600 hover:text-white rounded-lg transition-colors"
-                >
-                  🧬 Evolve
-                </button>
+                {RESERVED_EVOLVE_ROLES.has(agent.role) ? (
+                  <button
+                    disabled
+                    title={t('evolveReservedTooltip')}
+                    className="px-3 py-1 text-xs border border-gray-600 text-gray-500 rounded-lg opacity-40 cursor-not-allowed"
+                  >
+                    🧬 Evolve (reserved)
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => onEvolve(agent.role)}
+                    className="px-3 py-1 text-xs border border-indigo-600 text-indigo-400 hover:bg-indigo-600 hover:text-white rounded-lg transition-colors"
+                  >
+                    🧬 Evolve
+                  </button>
+                )}
                 <button
                   onClick={() => onEdit(agent.role, agent.content)}
                   className="px-3 py-1 text-xs bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition-colors"

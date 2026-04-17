@@ -117,7 +117,8 @@
     "aiEdit": "Edit with AI",
     "aiEditPlaceholder": "e.g., Make this prompt stricter",
     "apply": "Apply",
-    "editing": "Editing..."
+    "editing": "Editing...",
+    "evolveReservedTooltip": "Reserved role. Not yet integrated into the pipeline — Evolve is disabled. Will be enabled when LLM-based evaluation is implemented."
   },
   "kpi": {
     "todayTasks": "Today's tasks",

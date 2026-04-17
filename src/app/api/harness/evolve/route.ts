@@ -5,6 +5,54 @@ import { desc, eq, gte, and } from 'drizzle-orm';
 import { loadPrompt, type PromptRole } from '@/lib/harness/prompt-loader';
 import { resolveCli } from '@/lib/cli-resolver';
 import { getExeca } from '@/lib/execa';
+import { extractJson } from '@/lib/utils/json-extractor';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+
+// Reserved roles: 예약된 에이전트 역할. 아직 파이프라인에 통합되지 않음.
+// 통합 시점에 Set에서 제거하면 자동 활성화.
+const RESERVED_ROLES = new Set(['evaluator']);
+
+type EvolveOutput = {
+  analysis?: string;
+  confidence?: number;
+  suggestions?: Array<Record<string, unknown>>;
+};
+
+// JSON 강제 재시도용 prefix. planning.ts의 PLAN_RETRY_PREFIX와 동일 패턴이지만
+// Evolve 응답 스키마(analysis/confidence/suggestions)에 맞춰 별도 정의.
+const EVOLVE_RETRY_PREFIX = `⚠️ CRITICAL: Your previous response was NOT valid JSON.
+You must output ONLY a JSON object — starting with { and ending with }.
+No markdown code fences. No explanation before or after. No prose.
+
+Valid example format:
+{"analysis":"brief summary","confidence":0.8,"suggestions":[{"id":"s1","title":"Short title","description":"Why","ruleText":"Concrete rule","priority":"high"}]}
+
+Now respond to the original request below with ONLY JSON in the same shape:
+
+---
+
+`;
+
+async function dumpEvolveDebug(
+  role: string,
+  rawStdout: string,
+  phase: 'first' | 'retry',
+): Promise<void> {
+  try {
+    const debugDir = path.join(os.homedir(), '.autodev', 'debug');
+    await fs.mkdir(debugDir, { recursive: true });
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    await fs.writeFile(
+      path.join(debugDir, `evolve-${role}-${phase}-${ts}.txt`),
+      rawStdout,
+      'utf-8',
+    );
+  } catch {
+    /* debug dump 실패는 비본질 — 무시 */
+  }
+}
 
 interface EvolveSuggestion {
   id: string;
@@ -36,6 +84,13 @@ export async function POST(req: Request) {
 
     if (!role) {
       return NextResponse.json({ error: 'role is required' }, { status: 400 });
+    }
+
+    if (RESERVED_ROLES.has(role)) {
+      return NextResponse.json(
+        { error: `Role "${role}" is reserved and not yet integrated into the pipeline.` },
+        { status: 400 },
+      );
     }
 
     // 1. Query recent tasks
@@ -169,40 +224,71 @@ Respond with ONLY valid JSON:
       env: { ...process.env },
     });
 
-    // Parse Gemini response
+    // Debug dump: 모든 응답을 postmortem용으로 저장 (비본질 — 실패 시 무시)
+    await dumpEvolveDebug(role, stdout, 'first');
+
+    // Parse Gemini response — extractJson 5-stage fallback 사용
     let analysis = '';
     let suggestions: EvolveSuggestion[] = [];
     let confidence = 0;
+    let parsed: EvolveOutput | null = null;
+    let parseError: Error | null = null;
+    let rawForPreview = stdout;
 
     try {
-      // Extract JSON from response (may be wrapped in markdown code fences)
-      const jsonMatch = stdout.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0]);
-        analysis = parsed.analysis ?? '';
-        confidence = parsed.confidence ?? 0;
-        suggestions = (parsed.suggestions ?? []).map((s: Record<string, unknown>) => ({
-          id: s.id ?? `s${Math.random().toString(36).slice(2, 6)}`,
-          title: s.title ?? '',
-          description: s.description ?? '',
-          ruleText: s.ruleText ?? '',
-          priority: s.priority ?? 'medium',
-          selected: s.priority === 'high',
-        }));
-      } else {
-        analysis = '분석 결과를 파싱할 수 없습니다. 원본 응답을 확인하세요.';
-      }
-    } catch {
-      analysis = '분석 결과를 파싱할 수 없습니다.';
+      parsed = extractJson<EvolveOutput>(stdout, 'analysis');
+    } catch (err) {
+      parseError = err instanceof Error ? err : new Error(String(err));
     }
 
-    const response: EvolveResponse = {
+    // 1차 실패 → JSON 강제 prefix 붙여 1회 retry
+    if (!parsed) {
+      const retryPrompt = EVOLVE_RETRY_PREFIX + analysisPrompt;
+      const retryResult = await execa(geminiPath, ['-p', retryPrompt], {
+        timeout: 120_000,
+        reject: false,
+        env: { ...process.env },
+      });
+      await dumpEvolveDebug(role, retryResult.stdout, 'retry');
+      try {
+        parsed = extractJson<EvolveOutput>(retryResult.stdout, 'analysis');
+        parseError = null;
+        rawForPreview = retryResult.stdout;
+      } catch (err) {
+        parseError = err instanceof Error ? err : new Error(String(err));
+        rawForPreview = retryResult.stdout;
+      }
+    }
+
+    if (parsed) {
+      analysis = parsed.analysis ?? '';
+      confidence = parsed.confidence ?? 0;
+      suggestions = (parsed.suggestions ?? []).map((s: Record<string, unknown>) => ({
+        id: (s.id as string) ?? `s${Math.random().toString(36).slice(2, 6)}`,
+        title: (s.title as string) ?? '',
+        description: (s.description as string) ?? '',
+        ruleText: (s.ruleText as string) ?? '',
+        priority: ((s.priority as 'high' | 'medium' | 'low') ?? 'medium'),
+        selected: s.priority === 'high',
+      }));
+    } else {
+      const rawPreview = rawForPreview.slice(0, 500).replace(/\s+/g, ' ');
+      analysis = `파싱 실패: ${parseError?.message ?? 'unknown'}\n원본 미리보기: ${rawPreview}`;
+    }
+
+    const response: EvolveResponse & { debug?: { parseError?: string; rawPreview?: string } } = {
       stats,
       analysis,
       suggestions,
       confidence,
       currentPrompt: loaded.rawContent,
       role,
+      ...(parsed ? {} : {
+        debug: {
+          parseError: parseError?.message,
+          rawPreview: rawForPreview.slice(0, 500),
+        },
+      }),
     };
 
     return NextResponse.json(response);

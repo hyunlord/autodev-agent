@@ -117,7 +117,8 @@
     "aiEdit": "AI로 수정",
     "aiEditPlaceholder": "예: 이 프롬프트를 더 엄격하게 만들어줘",
     "apply": "적용",
-    "editing": "수정 중..."
+    "editing": "수정 중...",
+    "evolveReservedTooltip": "예약된 역할입니다. 아직 파이프라인에 통합되지 않아 Evolve를 실행할 수 없습니다. LLM 기반 평가 구현 시 활성화됩니다."
   },
   "kpi": {
     "todayTasks": "오늘 작업",
