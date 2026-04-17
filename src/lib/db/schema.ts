@@ -77,3 +77,15 @@ export const events = sqliteTable('events', {
   index('idx_events_task_id').on(table.taskId),
   index('idx_events_created_at').on(table.createdAt),
 ]);
+
+export const webhooks = sqliteTable('webhooks', {
+  id:              text('id').primaryKey(),
+  name:            text('name').notNull(),
+  url:             text('url').notNull(),
+  platform:        text('platform', { enum: ['slack', 'discord'] }).notNull(),
+  events:          text('events', { mode: 'json' }).$type<Array<'completed' | 'failed' | 'low_score'>>().notNull(),
+  enabled:         integer('enabled', { mode: 'boolean' }).notNull().default(true),
+  lastTriggeredAt: text('last_triggered_at'),
+  lastError:       text('last_error'),
+  createdAt:       text('created_at').notNull(),
+});

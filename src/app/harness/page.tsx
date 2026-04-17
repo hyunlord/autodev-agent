@@ -5,6 +5,7 @@ import Tooltip from '../components/Tooltip';
 import { TOOLTIPS } from '../components/tooltips';
 import { useTranslations } from '@/i18n/context';
 import EvolveModal from '../components/EvolveModal';
+import WebhooksTab from '../components/WebhooksTab';
 
 // 예약된 에이전트 역할 — 아직 파이프라인에 통합되지 않아 Evolve 불가.
 // 통합 시 Set에서 제거하면 자동 활성화. evolve/route.ts의 RESERVED_ROLES와 동기화 필요.
@@ -338,7 +339,7 @@ function AgentsTab({ agents, sourceColor, onEdit, onReset, onEvolve }: {
 
 export default function HarnessPage() {
   const t = useTranslations('harness');
-  const [tab, setTab] = useState<'pipeline' | 'agents' | 'mcp' | 'presets'>('pipeline');
+  const [tab, setTab] = useState<'pipeline' | 'agents' | 'mcp' | 'presets' | 'webhooks'>('pipeline');
   const [selectedStage, setSelectedStage] = useState<string | null>(null);
   const [agents, setAgents] = useState<AgentFile[]>([]);
   const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
@@ -561,7 +562,7 @@ export default function HarnessPage() {
 
       {/* Tabs */}
       <div className="flex gap-1 mb-6">
-        {(['pipeline', 'agents', 'mcp', 'presets'] as const).map(tabKey => (
+        {(['pipeline', 'agents', 'mcp', 'presets', 'webhooks'] as const).map(tabKey => (
           <button
             key={tabKey}
             onClick={() => setTab(tabKey)}
@@ -570,7 +571,11 @@ export default function HarnessPage() {
             }`}
             style={tab === tabKey ? { background: 'var(--bg-card)' } : { color: 'var(--text-secondary)' }}
           >
-            {tabKey === 'pipeline' ? t('pipeline') : tabKey === 'agents' ? t('agents') : tabKey === 'mcp' ? t('mcpServers') : t('presets')}
+            {tabKey === 'pipeline' ? t('pipeline')
+             : tabKey === 'agents' ? t('agents')
+             : tabKey === 'mcp' ? t('mcpServers')
+             : tabKey === 'presets' ? t('presets')
+             : t('webhooksTab')}
           </button>
         ))}
       </div>
@@ -950,6 +955,9 @@ export default function HarnessPage() {
           </p>
         </div>
       )}
+
+      {/* Webhooks Tab */}
+      {tab === 'webhooks' && <WebhooksTab />}
 
       {/* Edit Modal */}
       {editingRole && (

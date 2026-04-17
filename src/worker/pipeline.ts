@@ -1192,6 +1192,58 @@ function updateTaskStatus(taskId: string, status: TaskStatus, result?: Record<st
   const update: Record<string, unknown> = { status, updatedAt: new Date().toISOString() };
   if (result) update.result = JSON.stringify(result);
   db.update(tasks).set(update).where(eq(tasks.id, taskId)).run();
+
+  // Webhook 알림 — 터미널 상태에서만 fire-and-forget (파이프라인 무해성 보장)
+  if (status === 'completed' || status === 'failed' || status === 'escalated') {
+    dispatchTerminalWebhook(taskId, status, result).catch(() => { /* silent */ });
+  }
+}
+
+async function dispatchTerminalWebhook(
+  taskId: string,
+  status: 'completed' | 'failed' | 'escalated',
+  result: Record<string, unknown> | undefined,
+): Promise<void> {
+  try {
+    const task = db.select().from(tasks).where(eq(tasks.id, taskId)).get();
+    if (!task) return;
+
+    // verifyScore: result 우선 → 없으면 DB 최근 verifying attempt의 output.score
+    let verifyScore: number | null = (result as { verifyScore?: number | null })?.verifyScore ?? null;
+    if (verifyScore == null) {
+      const lastVerify = db.select({ output: attempts.output })
+        .from(attempts)
+        .where(and(eq(attempts.taskId, taskId), eq(attempts.phase, 'verifying')))
+        .orderBy(desc(attempts.createdAt))
+        .limit(1)
+        .get();
+      if (lastVerify?.output) {
+        try {
+          const parsed = typeof lastVerify.output === 'string' ? JSON.parse(lastVerify.output) : lastVerify.output;
+          if (typeof parsed?.score === 'number') verifyScore = parsed.score;
+        } catch { /* ignore */ }
+      }
+    }
+
+    const costUsd = (result as { costUsd?: number })?.costUsd ?? 0;
+    const title = (task.prompt ?? '').slice(0, 80);
+    const event: 'completed' | 'failed' = status === 'completed' ? 'completed' : 'failed';
+
+    const { dispatchWebhooks } = await import('../lib/webhooks/sender');
+    await dispatchWebhooks({
+      event,
+      task: { id: task.id, title, status, costUsd, verifyScore },
+    });
+
+    if (status === 'completed' && verifyScore != null && verifyScore < 70) {
+      await dispatchWebhooks({
+        event: 'low_score',
+        task: { id: task.id, title, status, costUsd, verifyScore },
+      });
+    }
+  } catch {
+    /* silent — 파이프라인 무해성 */
+  }
 }
 
 async function waitForApproval(taskId: string, timeoutMs: number = 600_000): Promise<boolean> {
