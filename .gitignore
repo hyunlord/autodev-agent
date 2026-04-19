@@ -3,6 +3,7 @@ node_modules/
 .autodev/*.env
 .autodev/*.db
 .omc/
+.claude/
 *.db
 *.db-wal
 *.db-shm
