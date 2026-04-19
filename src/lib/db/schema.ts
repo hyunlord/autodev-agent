@@ -24,6 +24,9 @@ export const tasks = sqliteTable('tasks', {
   config:      text('config', { mode: 'json' }),
   result:      text('result', { mode: 'json' }),
   parentTaskId: text('parent_task_id'),
+  pipelineMode: text('pipeline_mode').notNull().default('legacy'),
+  pipelineVersionId: text('pipeline_version_id').references(() => pipelineVersions.id),
+  projectId:   text('project_id').references(() => projects.id),
   createdAt:   text('created_at').notNull(),
   updatedAt:   text('updated_at').notNull(),
 }, (table) => [
