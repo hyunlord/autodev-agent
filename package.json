@@ -65,7 +65,8 @@
     "db:backup": "tsx scripts/db-backup.ts",
     "db:restore": "tsx scripts/db-restore.ts",
     "db:verify": "tsx scripts/db-verify.ts",
-    "publish:npm": "bash scripts/publish.sh"
+    "publish:npm": "bash scripts/publish.sh",
+    "test": "vitest run"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.86",
@@ -115,6 +116,7 @@
     "@types/wait-on": "^5.3.4",
     "drizzle-kit": "^0.30.6",
     "tsx": "^4.21.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.4"
   }
 }
