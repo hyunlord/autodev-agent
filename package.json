@@ -62,6 +62,9 @@
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
+    "db:backup": "tsx scripts/db-backup.ts",
+    "db:restore": "tsx scripts/db-restore.ts",
+    "db:verify": "tsx scripts/db-verify.ts",
     "publish:npm": "bash scripts/publish.sh"
   },
   "dependencies": {
