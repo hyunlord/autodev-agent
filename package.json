@@ -60,7 +60,7 @@
     "hook:install": "bash scripts/install-hooks.sh install",
     "hook:uninstall": "bash scripts/install-hooks.sh uninstall",
     "db:generate": "drizzle-kit generate",
-    "db:push": "drizzle-kit push",
+    "db:push": "tsx scripts/db-push.ts",
     "db:studio": "drizzle-kit studio",
     "db:backup": "tsx scripts/db-backup.ts",
     "db:restore": "tsx scripts/db-restore.ts",

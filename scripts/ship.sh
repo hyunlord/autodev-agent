@@ -164,10 +164,28 @@ BRANCH=$(git branch --show-current)
 UPSTREAM=$(git rev-parse --abbrev-ref "@{upstream}" 2>/dev/null || echo "")
 
 if [ -n "$UPSTREAM" ]; then
-  git push --no-verify
+  if ! git push --no-verify; then
+    echo ""
+    echo "❌ Push failed — commit exists locally"
+    echo "   Commit: $(git rev-parse --short HEAD)"
+    echo "   Branch: $BRANCH"
+    echo ""
+    echo "   수동 push: git push"
+    echo "   상태 확인: git remote -v && git status"
+    exit 1
+  fi
   echo "✅ Pushed to $UPSTREAM"
 else
-  git push -u origin "$BRANCH" --no-verify
+  if ! git push -u origin "$BRANCH" --no-verify; then
+    echo ""
+    echo "❌ Push failed — commit exists locally"
+    echo "   Commit: $(git rev-parse --short HEAD)"
+    echo "   Branch: $BRANCH"
+    echo ""
+    echo "   수동 push: git push -u origin $BRANCH"
+    echo "   상태 확인: git remote -v && git status"
+    exit 1
+  fi
   echo "✅ Pushed to origin/$BRANCH (upstream set)"
 fi
 
