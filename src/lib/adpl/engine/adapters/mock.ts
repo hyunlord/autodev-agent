@@ -87,8 +87,11 @@ export class MockAdapter implements NodeAdapter {
 
   private async sleep(ms: number, options: ExecutionOptions): Promise<void> {
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(resolve, ms);
-      options.cancellationToken.onCancelled(() => {
+      const timer = setTimeout(() => {
+        unsub();
+        resolve();
+      }, ms);
+      const unsub = options.cancellationToken.onCancel(() => {
         clearTimeout(timer);
         reject(new Error('cancelled'));
       });

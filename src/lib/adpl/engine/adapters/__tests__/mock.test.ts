@@ -1,15 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { MockAdapter } from '../mock';
 import type { ExecutionContext, ExecutionOptions } from '../types';
+import { CancellationToken } from '../../cancel/token';
 import { EventBus } from '../../events/bus';
 
 function makeOptions(): ExecutionOptions {
   return {
-    cancellationToken: {
-      isCancelled: () => false,
-      onCancelled: () => {},
-      throwIfCancelled: () => {},
-    },
+    cancellationToken: new CancellationToken(),
     eventBus: new EventBus(),
     timeoutMs: 5000,
   };

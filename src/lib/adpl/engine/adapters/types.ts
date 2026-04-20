@@ -43,14 +43,8 @@ export interface ValidationResult {
   errors?: ValidationError[];
 }
 
-/**
- * B4-4 에서 실제 구현. 여기서는 interface 만.
- */
-export interface CancellationToken {
-  isCancelled(): boolean;
-  onCancelled(callback: () => void): void;
-  throwIfCancelled(): void;
-}
+import type { CancellationToken } from '../cancel/token';
+export type { CancellationToken, CancellationError } from '../cancel/token';
 
 export type { EngineEvent, EngineEventType, EventHandler, EventOfType } from '../events/types';
 export type { EventBus as IEventBus } from '../events/bus';
