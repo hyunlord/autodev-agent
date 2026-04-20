@@ -25,6 +25,15 @@ Task 생성 → Planning (CLI/API) → Plan Review (사용자 승인) → Agent 
 - `events` — SSE 이벤트 (type, data, timestamp)
 - `webhooks` — 알림 훅 (platform, url, events, enabled)
 
+Phase P 추가 테이블 (Stage 1):
+- `pipelines` — ADPL 파이프라인 정의 (yaml, version, status)
+- `pipeline_runs` — 실행 인스턴스 (pipelineId, status, startedAt)
+- `pipeline_nodes` — 노드 실행 상태 (runId, nodeId, status, output)
+- `pipeline_events` — 파이프라인 이벤트 스트림
+- `pipeline_triggers` — 트리거 설정 (schedule, webhook)
+- `pipeline_templates` — 재사용 템플릿
+- `pipeline_variables` — 실행 변수 스토어
+
 ## 파일 수정 주의
 - `src/lib/db/schema.ts` 수정 → `pnpm db:push` (현재 push 방식만 사용, generate 아님)
 - `src/worker/pipeline.ts` 수정 → Worker 재시작 필요 (IPC)
@@ -59,3 +68,54 @@ Claude Code 응답은 4블록 구조:
 - `docs/mcp-guide.md` — 6개 MCP 서버 사용법
 - `docs/harness-config.md` — Harness 자연어 설정 매핑
 - `.autodev/agents/*.md` — 에이전트별 지시문 (coder, planner, verifier, evaluator, debate-drafter)
+
+## Phase P (ADPL Pipeline Language)
+
+### 주요 경로
+- `docs/adpl-spec/v1.0.md` — 공식 스펙 (4,900줄)
+- `src/lib/adpl/types/` — TypeScript 타입 (25 파일)
+- `src/lib/adpl/schemas/` — Zod 런타임 검증 (29 파일)
+- `src/cli/commands/adpl-validate.ts` — YAML 검증 CLI
+- `examples/adpl/` — 샘플 파이프라인 10개
+- `docs/phase-p/` — Phase P 진행 문서:
+  - `design-updates-needed.md` — 설계 반영 권고 (블로커 6건)
+  - `stage-1-integration-report.md` — 통합 테스트
+  - `stage-1-retro.md` — Stage 1 회고
+  - `known-issues-fixed.md` — 수정된 이슈 기록
+- `AutoDev_로드맵_v7.md` — 현재 유효 로드맵 (Phase P 전체 궤적)
+
+### 추가된 명령
+- `pnpm db:backup` — DB 전체 백업 → `~/.autodev/backups/`
+- `pnpm db:restore <timestamp>` — 백업 복원 (`--latest`, `--list` 지원)
+- `pnpm db:verify` — 테이블/FK/integrity 체크
+- `pnpm adpl:validate <path>` — YAML 파일 검증 (glob 지원, `--format=json` CI 용)
+
+## 현재 상태 (2026-04-19)
+
+- 총 커밋: ~218 (Pre-Phase P 204 + Phase P Stage 1 13 + Stage 1-post 1)
+- 소스 파일: ~217 TS/TSX
+- Phase P 산출물: ~70 파일
+
+Stage 1 결산: 13 커밋, 평균 verify:cross 97.5 A등급, ADPL v1.0 스펙 4,900줄, 블로커 6건 발견·문서화.
+
+## 다음 작업
+
+**Stage 2 Engine Core** (설계 4C1 기반, 3-4주 예상):
+- Compiler: YAML → ExecutionPlan AST
+- Scheduler: Ready queue + concurrency
+- Worker: NodeAdapter 호출 + retry
+- StateStore: In-memory
+- EventBus: In-process
+- PipelineExecutor: 최상위 API
+
+Deliverable: Mock adapter 로 linear 5 노드 chain 실행 가능.
+
+## 알려진 이슈
+
+**해결됨 (Stage 1-post, baa8a69)**:
+- Drizzle db:push 인덱스 중복 → pre-drop + retry 래퍼로 해결
+- pnpm ship push 실패 silent skip → exit code 체크로 해결
+
+**진행 중**:
+- 블로커 6건 설계 반영 대기 (`docs/phase-p/design-updates-needed.md`)
+- Playwright MCP timeout (Pre-Phase P 이슈, Stage 2+ 에서 재평가)
