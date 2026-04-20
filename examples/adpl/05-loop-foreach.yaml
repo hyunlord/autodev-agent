@@ -1,0 +1,32 @@
+# Verify 결과의 이슈 목록을 순회하며 Linear 티켓 자동 생성
+# loop forEach + parallelism: 3 으로 병렬 처리
+# continueOnIterFailure: true — 일부 이슈 생성 실패 시에도 나머지 계속 진행
+# 사전 조건: ~/.autodev/mcp.json 에 linear 서버 등록 필요
+adplVersion: 1
+name: issue-to-ticket
+
+triggers:
+  - id: task
+    type: task_created
+
+pipeline:
+  - id: verify
+    type: agent
+    role: verifier
+
+  - id: create-tickets
+    type: loop
+    mode: forEach
+    over: "${$nodes.verify.output.data.issues}"
+    as: issue
+    parallelism: 3
+    continueOnIterFailure: true
+    do:
+      - id: ticket
+        type: mcp
+        server: linear
+        tool: create_issue
+        args:
+          title: "${$loop.issue.title}"
+          description: "${$loop.issue.description}"
+          priority: "${$loop.issue.severity}"

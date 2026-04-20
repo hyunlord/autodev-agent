@@ -1,0 +1,32 @@
+# 매일 오전 9시 의존성 취약점 자동 스캔 (Asia/Seoul 기준)
+# schedule trigger cron 모드 — overlap: skip 으로 중복 실행 방지
+# failOnNonZero: false — 취약점 발견(exit 1)이어도 파이프라인 계속 진행 후 보고
+adplVersion: 1
+name: daily-security-audit
+
+triggers:
+  - id: every-morning
+    type: schedule
+    mode: cron
+    cron: "0 9 * * *"
+    timezone: Asia/Seoul
+    overlap: skip
+
+pipeline:
+  - id: audit
+    type: shell
+    command: "pnpm audit --json"
+    outputFormat: json
+    failOnNonZero: false
+
+  - id: report
+    type: webhook_out
+    provider: slack
+    url: "${$env.SECURITY_SLACK_WEBHOOK}"
+    body:
+      text: "🔒 일일 보안 감사 완료"
+      vulnerabilities: "${$nodes.audit.output.data.metadata.vulnerabilities.total ?? 0}"
+
+settings:
+  allowedEnvKeys:
+    - SECURITY_SLACK_WEBHOOK

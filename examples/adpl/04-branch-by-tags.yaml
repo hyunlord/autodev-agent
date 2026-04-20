@@ -1,0 +1,52 @@
+# Task tags 에 따라 다른 리뷰어 할당
+# ui → UI/UX 리뷰어, security → 보안 리뷰어, 나머지 → 표준 리뷰어
+# branch evaluationMode: first_match — 첫 번째 조건 매칭 시 중단
+adplVersion: 1
+name: tag-based-review
+
+triggers:
+  - id: task
+    type: task_created
+
+pipeline:
+  - id: plan
+    type: agent
+    role: planner
+
+  - id: code
+    type: agent
+    role: coder
+    inputs:
+      plan: "${$nodes.plan.output.data}"
+
+  - id: route
+    type: branch
+    evaluationMode: first_match
+    cases:
+      - when:
+          field: "$task.tags"
+          contains: "ui"
+        then:
+          - id: ui-review
+            type: agent
+            role: custom
+            prompt: "UI/UX 관점에서 코드를 리뷰해주세요. 접근성(a11y), 반응형, 디자인 일관성을 체크해주세요."
+            inputs:
+              code: "${$nodes.code.output.data}"
+      - when:
+          field: "$task.tags"
+          contains: "security"
+        then:
+          - id: security-review
+            type: agent
+            role: custom
+            prompt: "보안 관점에서 코드를 리뷰해주세요. OWASP Top 10, SQL injection, auth bypass 를 반드시 체크해주세요."
+            inputs:
+              code: "${$nodes.code.output.data}"
+      - default: true
+        then:
+          - id: standard-review
+            type: agent
+            role: reviewer
+            inputs:
+              code: "${$nodes.code.output.data}"

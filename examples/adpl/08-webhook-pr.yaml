@@ -1,0 +1,46 @@
+# 외부 webhook 수신으로 GitHub PR 자동 리뷰
+# webhook_in trigger — GitHub 저장소 webhook 설정에서 이 경로로 POST 발송
+# hmac 인증으로 payload 위변조 방지
+# 에이전트 리뷰 완료 후 GitHub API 로 PR 댓글 자동 게시
+adplVersion: 1
+name: pr-auto-review
+
+triggers:
+  - id: github-webhook
+    type: webhook_in
+    path: /hooks/github-pr
+    method: POST
+    auth: hmac
+    secret: "${$env.GITHUB_WEBHOOK_SECRET}"
+    responseMode: immediate
+    filter:
+      field: "$trigger.payload.action"
+      in:
+        - opened
+        - synchronize
+        - reopened
+
+pipeline:
+  - id: review
+    type: agent
+    role: reviewer
+    inputs:
+      pr_title: "${$trigger.payload.pull_request.title}"
+      pr_body: "${$trigger.payload.pull_request.body ?? ''}"
+      repo: "${$trigger.payload.repository.full_name}"
+
+  - id: post-comment
+    type: http
+    method: POST
+    url: "https://api.github.com/repos/${$trigger.payload.repository.full_name}/issues/${$trigger.payload.pull_request.number}/comments"
+    headers:
+      Authorization: "Bearer ${$env.GITHUB_TOKEN}"
+      Content-Type: "application/json"
+    body:
+      body: "${$nodes.review.output.data}"
+    idempotencyKey: "pr-${$trigger.payload.pull_request.number}-review"
+
+settings:
+  allowedEnvKeys:
+    - GITHUB_WEBHOOK_SECRET
+    - GITHUB_TOKEN

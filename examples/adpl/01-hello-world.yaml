@@ -1,0 +1,14 @@
+# 가장 단순한 ADPL 파이프라인
+# task 생성 시 echo 명령 실행 — 최소 필수 구조만 포함
+# 학습 시작점: adplVersion, name, triggers, pipeline 4개 필드만 사용
+adplVersion: 1
+name: hello-world
+
+triggers:
+  - id: on-task
+    type: task_created
+
+pipeline:
+  - id: greet
+    type: shell
+    command: "echo 'Hello from ADPL!'"

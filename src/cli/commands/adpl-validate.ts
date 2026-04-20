@@ -1,3 +1,4 @@
+import { glob } from 'node:fs/promises';
 import { AdplPipelineSchema } from '@/lib/adpl/schemas';
 import type { z } from 'zod';
 import { readYamlFile } from '../utils/file-reader';
@@ -162,9 +163,25 @@ function printMulti(results: ValidationResult[], quiet: boolean): void {
   console.log(`결과: ${validStr}, ${invalidStr}`);
 }
 
+async function expandGlobs(patterns: string[]): Promise<string[]> {
+  const expanded: string[] = [];
+  for (const p of patterns) {
+    if (p.includes('*') || p.includes('?') || p.includes('{')) {
+      const matches: string[] = [];
+      for await (const m of glob(p)) matches.push(m);
+      // 매칭 없으면 원본 패턴 유지 — validateFile 이 "파일 없음" 에러를 표시
+      expanded.push(...(matches.length > 0 ? matches.sort() : [p]));
+    } else {
+      expanded.push(p);
+    }
+  }
+  return expanded;
+}
+
 export async function validateCommand(paths: string[], options: ValidateOptions): Promise<void> {
-  const results = await Promise.all(paths.map(validateFile));
-  const multi = paths.length > 1;
+  const expanded = await expandGlobs(paths);
+  const results = await Promise.all(expanded.map(validateFile));
+  const multi = expanded.length > 1;
 
   if (options.format === 'json') {
     const validCount = results.filter((r) => r.valid).length;

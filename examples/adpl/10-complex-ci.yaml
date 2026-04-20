@@ -1,0 +1,125 @@
+# 복합 CI/CD 파이프라인 — 여러 ADPL 기능 조합 예시
+# git_event (PR) + manual 두 가지 trigger 동시 지원
+# 1) 병렬 품질 체크 (onFailure: continue 로 실패해도 다음 단계 진행)
+# 2) 체크 실패 시 Linear 이슈 자동 생성
+# 3) 수동 실행(manual)일 경우에만 staging → gate 승인 → production 배포 플로우 실행
+# 4) 최종 Slack 알림 (어떤 경로든 항상 실행)
+adplVersion: 1
+name: complex-ci-cd
+description: "PR 이벤트와 수동 실행 모두 지원하는 복합 CI/CD 파이프라인"
+
+triggers:
+  - id: pr
+    type: git_event
+    source: webhook
+    webhookConfig:
+      provider: github
+      secret: "${$env.GITHUB_WEBHOOK_SECRET}"
+    events:
+      - pr_opened
+      - pr_updated
+    filter:
+      branches:
+        - main
+      paths:
+        - "src/**"
+      ignorePaths:
+        - "src/**/*.test.ts"
+
+  - id: manual-deploy
+    type: manual
+
+pipeline:
+  # 1단계: 병렬 품질 체크
+  # onFailure: continue — 실패해도 2단계(failure-route)에서 처리
+  - id: quality-checks
+    type: parallel
+    onFailure: continue
+    mergeStrategy: all_must_pass
+    branches:
+      - id: lint-branch
+        nodes:
+          - id: lint
+            type: shell
+            command: "pnpm lint"
+      - id: test-branch
+        nodes:
+          - id: test
+            type: shell
+            command: "pnpm test"
+            retryPolicy:
+              maxAttempts: 2
+              backoff: exponential
+      - id: build-branch
+        nodes:
+          - id: build
+            type: shell
+            command: "pnpm build"
+
+  # 2단계: 품질 체크 실패 시 Linear 이슈 생성
+  - id: failure-route
+    type: branch
+    cases:
+      - when:
+          field: "$nodes.quality-checks.output.status"
+          eq: "failure"
+        then:
+          - id: report-failures
+            type: mcp
+            server: linear
+            tool: create_issue
+            args:
+              title: "CI 실패: ${$task.prompt}"
+              priority: "high"
+      - default: true
+        then: []
+
+  # 3단계: 수동 실행인 경우에만 배포 플로우 진행
+  - id: deploy-flow
+    type: branch
+    cases:
+      - when:
+          field: "$trigger.type"
+          eq: "manual"
+        then:
+          - id: staging-deploy
+            type: shell
+            command: "./deploy.sh staging"
+          - id: approval
+            type: gate
+            prompt: "Staging 확인 후 프로덕션 배포를 승인하시겠습니까?"
+            options:
+              - approve
+              - reject
+            defaultOption: reject
+            timeout: 3600
+          - id: prod-route
+            type: branch
+            cases:
+              - when:
+                  field: "$nodes.approval.output.data.decision"
+                  eq: "approve"
+                then:
+                  - id: prod-deploy
+                    type: shell
+                    command: "./deploy.sh production"
+              - default: true
+                then: []
+      - default: true
+        then: []
+
+  # 4단계: 최종 Slack 알림
+  - id: final-notify
+    type: webhook_out
+    provider: slack
+    url: "${$env.SLACK_WEBHOOK_URL}"
+    body:
+      text: "파이프라인 완료 (trigger: ${$trigger.type})"
+
+settings:
+  maxParallel: 3
+  totalTimeout: 3600
+  totalCostLimit: 5.00
+  allowedEnvKeys:
+    - GITHUB_WEBHOOK_SECRET
+    - SLACK_WEBHOOK_URL

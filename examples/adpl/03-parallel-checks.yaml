@@ -1,0 +1,41 @@
+# CI 품질 체크를 병렬 실행
+# lint / test / typecheck 동시 실행 — all_must_pass 로 모두 성공해야 다음 단계 진행
+# 완료 후 Slack 알림 발송 (SLACK_WEBHOOK_URL 환경 변수 필요)
+adplVersion: 1
+name: ci-parallel-checks
+
+triggers:
+  - id: task
+    type: task_created
+
+pipeline:
+  - id: checks
+    type: parallel
+    mergeStrategy: all_must_pass
+    branches:
+      - id: lint
+        nodes:
+          - id: lint-run
+            type: shell
+            command: "pnpm lint"
+      - id: test
+        nodes:
+          - id: test-run
+            type: shell
+            command: "pnpm test"
+      - id: typecheck
+        nodes:
+          - id: tsc-run
+            type: shell
+            command: "pnpm tsc --noEmit"
+
+  - id: notify
+    type: webhook_out
+    provider: slack
+    url: "${$env.SLACK_WEBHOOK_URL}"
+    body:
+      text: "✅ 모든 CI 체크 통과"
+
+settings:
+  allowedEnvKeys:
+    - SLACK_WEBHOOK_URL

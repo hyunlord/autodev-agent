@@ -1,0 +1,56 @@
+# 프로덕션 배포 전 사람 승인 대기 (human-in-the-loop)
+# Staging 배포 → gate 대기 → approve 시 프로덕션 배포, 그 외 취소
+# defaultOption: reject — 1시간 무응답 시 자동 취소 (안전 기본값)
+# reminderAfter: 1800 — 30분 후 Slack reminder 발송
+adplVersion: 1
+name: deploy-with-approval
+
+triggers:
+  - id: manual
+    type: manual
+
+pipeline:
+  - id: build
+    type: shell
+    command: "pnpm build"
+
+  - id: staging-deploy
+    type: shell
+    command: "./deploy.sh staging"
+
+  - id: approval
+    type: gate
+    prompt: "Staging 확인 완료. 프로덕션 배포를 승인하시겠습니까?"
+    options:
+      - approve
+      - reject
+      - retry-staging
+    defaultOption: reject
+    timeout: 3600
+    notifyConfig:
+      channels:
+        - slack
+      reminderAfter: 1800
+
+  - id: route-approval
+    type: branch
+    cases:
+      - when:
+          field: "$nodes.approval.output.data.decision"
+          eq: "approve"
+        then:
+          - id: prod-deploy
+            type: shell
+            command: "./deploy.sh production"
+      - default: true
+        then:
+          - id: notify-reject
+            type: webhook_out
+            provider: slack
+            url: "${$env.SLACK_WEBHOOK_URL}"
+            body:
+              text: "배포 취소됨: ${$nodes.approval.output.data.decision}"
+
+settings:
+  allowedEnvKeys:
+    - SLACK_WEBHOOK_URL

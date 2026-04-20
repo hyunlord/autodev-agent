@@ -1,0 +1,36 @@
+# Legacy AutoDev 파이프라인의 ADPL 재현
+# Planning (gemini-cli) → Coding (claude-code) → Verify (gemini-cli)
+# Verify 는 Coding 과 다른 모델 사용 — 자기 합리화(self-rationalization) 방지
+# inputs 표현식으로 이전 노드 출력 전달, useMemory 로 컨텍스트 유지
+adplVersion: 1
+name: legacy-dev-pipeline
+description: "Legacy-equivalent Plan → Code → Verify 파이프라인"
+
+triggers:
+  - id: task
+    type: task_created
+
+pipeline:
+  - id: plan
+    type: agent
+    role: planner
+    model: gemini-cli
+    useMemory: true
+
+  - id: code
+    type: agent
+    role: coder
+    model: claude-code
+    inputs:
+      plan: "${$nodes.plan.output.data}"
+    useMemory: true
+
+  - id: verify
+    type: agent
+    role: verifier
+    model: gemini-cli
+    inputs:
+      code: "${$nodes.code.output.data}"
+
+settings:
+  maxParallel: 1

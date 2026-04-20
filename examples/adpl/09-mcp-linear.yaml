@@ -1,0 +1,49 @@
+# 버그 리포트 task 를 Linear 이슈로 자동 변환
+# task_created trigger 에 tags 필터 — bug 태그가 있는 task 만 처리
+# AI 트리아지 → MCP Linear 이슈 생성 → Slack 알림
+# 사전 조건: ~/.autodev/mcp.json 에 linear 서버 등록 필요
+adplVersion: 1
+name: bug-to-linear
+
+triggers:
+  - id: bug-report
+    type: task_created
+    tags:
+      - bug
+
+pipeline:
+  - id: triage
+    type: agent
+    role: custom
+    prompt: |
+      다음 버그 리포트를 분석하고 JSON 으로 구조화해주세요:
+      - severity: critical | high | medium | low
+      - category: ui | api | data | security | performance
+      - summary: 1-2 문장 요약
+    output:
+      parseAs: json
+
+  - id: create-issue
+    type: mcp
+    server: linear
+    tool: create_issue
+    sessionMode: per_task
+    args:
+      title: "[${$nodes.triage.output.data.severity}] ${$nodes.triage.output.data.summary}"
+      description: "${$task.prompt}"
+      projectId: "${$env.LINEAR_PROJECT_ID}"
+      labels:
+        - "${$nodes.triage.output.data.category}"
+        - "auto-created"
+
+  - id: acknowledge
+    type: webhook_out
+    provider: slack
+    url: "${$env.SLACK_WEBHOOK_URL}"
+    body:
+      text: "🎫 Linear 이슈 생성: ${$nodes.create-issue.output.data.url}"
+
+settings:
+  allowedEnvKeys:
+    - LINEAR_PROJECT_ID
+    - SLACK_WEBHOOK_URL
