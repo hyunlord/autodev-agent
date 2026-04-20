@@ -1,5 +1,6 @@
 import type { NodeSpec, NodeOutput, TaskContext, ProjectContext, TriggerContext } from '@/lib/adpl/types';
 import type { CompiledNode } from '../compiler/types';
+import type { EventBus } from '../events/bus';
 
 export interface LoopContext {
   index: number;
@@ -51,20 +52,8 @@ export interface CancellationToken {
   throwIfCancelled(): void;
 }
 
-export interface EngineEvent {
-  type: string;
-  timestamp: Date;
-  nodeId?: string;
-  data?: unknown;
-}
-
-/**
- * B4-3 에서 실제 구현. 여기서는 interface 만.
- */
-export interface EventBus {
-  emit(event: EngineEvent): void;
-  on(type: string, handler: (event: EngineEvent) => void): void;
-}
+export type { EngineEvent, EngineEventType, EventHandler, EventOfType } from '../events/types';
+export type { EventBus as IEventBus } from '../events/bus';
 
 export interface ExecutionOptions {
   cancellationToken: CancellationToken;

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { MockAdapter } from '../mock';
 import type { ExecutionContext, ExecutionOptions } from '../types';
+import { EventBus } from '../../events/bus';
 
 function makeOptions(): ExecutionOptions {
   return {
@@ -9,7 +10,7 @@ function makeOptions(): ExecutionOptions {
       onCancelled: () => {},
       throwIfCancelled: () => {},
     },
-    eventBus: { emit: () => {}, on: () => {} },
+    eventBus: new EventBus(),
     timeoutMs: 5000,
   };
 }
