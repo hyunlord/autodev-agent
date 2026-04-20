@@ -1,0 +1,86 @@
+import type { NodeSpec, NodeOutput, TaskContext, ProjectContext, TriggerContext } from '@/lib/adpl/types';
+import type { CompiledNode } from '../compiler/types';
+
+export interface LoopContext {
+  index: number;
+  total: number;
+  isFirst: boolean;
+  isLast: boolean;
+  [as: string]: unknown;
+}
+
+export interface FlowContext {
+  parentUserId: string;
+  parentType: string;
+}
+
+/**
+ * Adapter 실행 시 주입되는 런타임 컨텍스트.
+ * Worker 가 Compiler 결과 + runtime 상태를 조합하여 조립.
+ */
+export interface ExecutionContext {
+  $task: TaskContext;
+  $project: ProjectContext;
+  $trigger: TriggerContext;
+  $env: Record<string, string>;
+  $now: Date;
+  $self: CompiledNode;
+  $nodes: Record<string, NodeOutput>;
+  $prev: NodeOutput | null;
+  $loop: LoopContext | null;
+  $flow: FlowContext | null;
+  $variables: Record<string, unknown>;
+}
+
+export interface ValidationError {
+  field?: string;
+  message: string;
+}
+
+export interface ValidationResult {
+  valid: boolean;
+  errors?: ValidationError[];
+}
+
+/**
+ * B4-4 에서 실제 구현. 여기서는 interface 만.
+ */
+export interface CancellationToken {
+  isCancelled(): boolean;
+  onCancelled(callback: () => void): void;
+  throwIfCancelled(): void;
+}
+
+export interface EngineEvent {
+  type: string;
+  timestamp: Date;
+  nodeId?: string;
+  data?: unknown;
+}
+
+/**
+ * B4-3 에서 실제 구현. 여기서는 interface 만.
+ */
+export interface EventBus {
+  emit(event: EngineEvent): void;
+  on(type: string, handler: (event: EngineEvent) => void): void;
+}
+
+export interface ExecutionOptions {
+  cancellationToken: CancellationToken;
+  eventBus: EventBus;
+  /** Timeout (ms). 0 = 제한 없음 */
+  timeoutMs: number;
+  /** 재귀 depth (flow adapter 가 내부 실행 시) */
+  depth?: number;
+}
+
+/**
+ * 모든 노드 타입이 구현하는 계약.
+ */
+export interface NodeAdapter<Spec extends NodeSpec = NodeSpec> {
+  readonly type: string;
+  defaultTimeout(): number;
+  validate(spec: Spec): ValidationResult;
+  execute(spec: Spec, context: ExecutionContext, options: ExecutionOptions): Promise<NodeOutput>;
+}
