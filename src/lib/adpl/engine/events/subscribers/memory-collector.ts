@@ -6,6 +6,7 @@ export class MemoryEventCollector {
   private unsubscribe: (() => void) | null = null;
 
   attach(bus: EventBus): this {
+    this.detach();
     this.unsubscribe = bus.on('*', (event) => {
       this.events.push(event);
     });

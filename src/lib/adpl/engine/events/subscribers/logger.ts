@@ -13,6 +13,7 @@ export class LoggingSubscriber {
   constructor(private options: LoggingSubscriberOptions = {}) {}
 
   attach(bus: EventBus): this {
+    this.detach();
     this.unsubscribe = bus.on('*', (event) => {
       if (!this.shouldLog(event)) return;
       const line = this.format(event);

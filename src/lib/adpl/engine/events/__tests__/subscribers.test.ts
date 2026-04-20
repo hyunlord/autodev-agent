@@ -53,6 +53,15 @@ describe('MemoryEventCollector', () => {
     collector.clear();
     expect(collector.count()).toBe(0);
   });
+
+  it('attach() 두 번 호출 시 이전 구독 해제', () => {
+    const bus = new EventBus();
+    const collector = new MemoryEventCollector();
+    collector.attach(bus);
+    collector.attach(bus);
+    bus.emit(makeRunStarted('r1'));
+    expect(collector.count()).toBe(1);
+  });
 });
 
 describe('LoggingSubscriber', () => {
@@ -75,6 +84,16 @@ describe('LoggingSubscriber', () => {
     bus.emit({ type: 'node.ready', timestamp: new Date(), runId: 'r1', nodeId: 'n1' });
     expect(lines).toHaveLength(1);
     expect(lines[0]).toContain('run.started');
+  });
+
+  it('attach() 두 번 호출 시 이전 구독 해제', () => {
+    const lines: string[] = [];
+    const bus = new EventBus();
+    const sub = new LoggingSubscriber({ log: (l) => lines.push(l) });
+    sub.attach(bus);
+    sub.attach(bus);
+    bus.emit(makeRunStarted('r1'));
+    expect(lines).toHaveLength(1);
   });
 
   it('verbose includes payload', () => {
