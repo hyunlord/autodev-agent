@@ -3,6 +3,7 @@ import { AutoDevAgentBackend } from './backends/autodev';
 import { ClaudeCodeBackend } from './backends/claude-code';
 import { GeminiCLIBackend } from './backends/gemini-cli';
 import { CodexCLIBackend } from './backends/codex-cli';
+import { VerifierBackend } from './backends/verifier';
 
 export class AgentNotImplementedError extends Error {
   constructor(message: string) {
@@ -21,6 +22,7 @@ export class AgentValidationError extends Error {
 export const ROLE_MODEL_MATRIX: Record<AgentRole, AgentModel[]> = {
   planner: ['autodev-internal', 'claude-code', 'gemini-cli', 'codex-cli'],
   coder: ['autodev-internal', 'claude-code', 'gemini-cli', 'codex-cli'],
+  verifier: ['auto-cross-model', 'claude-cli', 'codex-cli', 'gemini-cli'],
 };
 
 export function resolveBackend(
@@ -30,14 +32,23 @@ export function resolveBackend(
   const role = (specRole ?? 'planner') as string;
 
   if (role === 'verifier') {
-    throw new AgentNotImplementedError('verifier is not implemented; reserved for C7-1.5');
+    const model = (specModel ?? 'auto-cross-model') as AgentModel;
+    const validModels = ROLE_MODEL_MATRIX['verifier'];
+    if (!validModels.includes(model)) {
+      throw new AgentValidationError(
+        `Model "${model}" is not valid for role "verifier". Valid models: ${validModels.join(', ')}.`,
+      );
+    }
+    return new VerifierBackend(model);
   }
 
   if (role !== 'planner' && role !== 'coder') {
-    throw new AgentValidationError(`Role "${role}" is not supported. Use 'planner' or 'coder'.`);
+    throw new AgentValidationError(
+      `Role "${role}" is not supported. Use 'planner', 'coder', or 'verifier'.`,
+    );
   }
 
-  const typedRole = role as AgentRole;
+  const typedRole = role as 'planner' | 'coder';
   const model = (specModel ?? 'autodev-internal') as string;
   const validModels = ROLE_MODEL_MATRIX[typedRole];
 
@@ -56,5 +67,9 @@ export function resolveBackend(
       return new GeminiCLIBackend();
     case 'codex-cli':
       return new CodexCLIBackend();
+    default:
+      throw new AgentValidationError(
+        `Model "${model}" is not valid for role "${typedRole}". Valid models: ${validModels.join(', ')}.`,
+      );
   }
 }

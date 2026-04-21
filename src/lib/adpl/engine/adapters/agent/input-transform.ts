@@ -1,4 +1,4 @@
-import type { AgentInput } from '@/agents/interfaces';
+import type { AgentInput, VerifyInput } from '@/agents/interfaces';
 import type { AgentNodeSpec } from '@/lib/adpl/types/nodes/agent';
 import type { ExecutionContext } from '../types';
 import type { PipelineEvent } from '@/lib/types';
@@ -69,5 +69,30 @@ export function transformInput(
       timeoutMs,
     },
     onProgress,
+  };
+}
+
+export function buildVerifierInput(
+  spec: AgentNodeSpec,
+  ctx: ExecutionContext,
+  onProgress: (e: PipelineEvent) => void,
+): VerifyInput {
+  const base = transformInput(spec, ctx, onProgress);
+
+  const codeNode = ctx.$nodes['code'] as NodeOutput | undefined;
+  const codeData = codeNode?.data as
+    | { modifiedFiles?: string[]; text?: string; [key: string]: unknown }
+    | undefined;
+
+  const planNode = ctx.$nodes['plan'] as NodeOutput | undefined;
+  const planData = planNode?.data as VerifyInput['plan'];
+
+  return {
+    ...base,
+    originalPrompt: ctx.$task?.prompt ?? '',
+    modifiedFiles: codeData?.modifiedFiles ?? [],
+    projectDir: ctx.worktreeRoot,
+    tools: [],
+    plan: planData,
   };
 }

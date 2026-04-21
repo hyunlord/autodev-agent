@@ -90,6 +90,10 @@ describe('AutoDevAgentBackend', () => {
     config: {},
   };
 
+  it('id is autodev-internal', () => {
+    expect(backend.id).toBe('autodev-internal');
+  });
+
   it('calls PlanningAgent.invoke for planner role', async () => {
     await backend.run('planner', input, makeCtx(), makeOptions());
     expect(PlanningAgentMock).toHaveBeenCalledOnce();

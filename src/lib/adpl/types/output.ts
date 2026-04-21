@@ -23,6 +23,8 @@ export interface NodeMetrics {
   costUsd?: number;
   tokensIn?: number;
   tokensOut?: number;
+  agentModel?: string;
+  promptTruncated?: boolean;
 }
 
 export interface NodeOutput {

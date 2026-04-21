@@ -91,6 +91,10 @@ describe('GeminiCLIBackend', () => {
     config: {},
   };
 
+  it('id is gemini-cli', () => {
+    expect(backend.id).toBe('gemini-cli');
+  });
+
   it('calls PlanningAgent with gemini-cli mode for planner role', async () => {
     await backend.run('planner', input, makeCtx(), makeOptions());
     expect(PlanningAgentMock).toHaveBeenCalledWith('gemini-cli');

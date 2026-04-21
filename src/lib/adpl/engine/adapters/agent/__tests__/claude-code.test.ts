@@ -88,6 +88,10 @@ describe('ClaudeCodeBackend', () => {
     config: {},
   };
 
+  it('id is claude-code', () => {
+    expect(backend.id).toBe('claude-code');
+  });
+
   it('returns success for coder role', async () => {
     const output = await backend.run('coder', baseInput, makeCtx(), makeOptions());
     expect(output.success).toBe(true);

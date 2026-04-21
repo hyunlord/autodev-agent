@@ -355,6 +355,44 @@ pipeline:
   });
 
   // ─────────────────────────────────────────────────────
+  // 시나리오 9: Plan→Code→Verify — verify 노드가 $nodes.code 출력에 접근 가능
+  // ─────────────────────────────────────────────────────
+  it('9. Plan→Code→Verify: verify node receives code node output in $nodes', async () => {
+    const codeOutput = { text: 'generated code', modifiedFiles: ['src/foo.ts'] };
+    const capturedVerifyCtx: { $nodes: Record<string, NodeOutput> } | null = { $nodes: {} };
+    let verifyCtxCapture: Record<string, NodeOutput> | null = null;
+
+    registry.register(
+      new MockAdapter({
+        type: 'agent',
+        behavior: {
+          executeCallback: async (spec, context): Promise<NodeOutput> => {
+            if (spec.id === 'code') {
+              return {
+                status: 'success',
+                data: codeOutput,
+                metrics: { durationMs: 100, agentModel: 'claude-code' },
+              };
+            }
+            if (spec.id === 'verify') {
+              verifyCtxCapture = { ...context.$nodes };
+            }
+            return { status: 'success', data: null };
+          },
+        },
+      }),
+    );
+
+    const result = await executor.run(makeInput('02-plan-code-verify.yaml'));
+
+    expect(result.status).toBe('completed');
+    expect(verifyCtxCapture).not.toBeNull();
+    expect(verifyCtxCapture!['code']).toBeDefined();
+    expect((verifyCtxCapture!['code'] as NodeOutput).data).toEqual(codeOutput);
+    expect((verifyCtxCapture!['code'] as NodeOutput).metrics?.agentModel).toBe('claude-code');
+  });
+
+  // ─────────────────────────────────────────────────────
   // 추가: 10 샘플 YAML smoke test
   // executor.run() 으로 전수 실행 — throw 없이 완료/실패 반환 확인
   // ─────────────────────────────────────────────────────

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { transformInput } from '../input-transform';
+import { transformInput, buildVerifierInput } from '../input-transform';
 import { setupCleanCli } from './helpers';
 import type { ExecutionContext } from '../../types';
 import type { AgentNodeSpec } from '@/lib/adpl/types/nodes/agent';
@@ -90,5 +90,39 @@ describe('transformInput', () => {
     const spec: AgentNodeSpec = { id: 'n1', type: 'agent', timeout: 60 };
     const input = transformInput(spec, makeCtx(), noop);
     expect(input.config.timeoutMs).toBe(60_000);
+  });
+});
+
+describe('buildVerifierInput', () => {
+  it('sets originalPrompt from ctx.$task.prompt', () => {
+    const spec: AgentNodeSpec = { id: 'verify', type: 'agent', role: 'verifier' };
+    const input = buildVerifierInput(spec, makeCtx(), noop);
+    expect(input.originalPrompt).toBe('task prompt');
+  });
+
+  it('sets projectDir from ctx.worktreeRoot', () => {
+    const spec: AgentNodeSpec = { id: 'verify', type: 'agent', role: 'verifier' };
+    const input = buildVerifierInput(spec, makeCtx(), noop);
+    expect(input.projectDir).toBe('/tmp/test');
+  });
+
+  it('reads modifiedFiles from ctx.$nodes.code.data', () => {
+    const spec: AgentNodeSpec = { id: 'verify', type: 'agent', role: 'verifier' };
+    const ctx = makeCtx();
+    ctx.$nodes = {
+      code: {
+        status: 'success',
+        data: { text: 'generated code', modifiedFiles: ['src/foo.ts', 'src/bar.ts'] },
+        metrics: { durationMs: 100 },
+      },
+    };
+    const input = buildVerifierInput(spec, ctx, noop);
+    expect(input.modifiedFiles).toEqual(['src/foo.ts', 'src/bar.ts']);
+  });
+
+  it('defaults modifiedFiles to empty array when code node is absent', () => {
+    const spec: AgentNodeSpec = { id: 'verify', type: 'agent', role: 'verifier' };
+    const input = buildVerifierInput(spec, makeCtx(), noop);
+    expect(input.modifiedFiles).toEqual([]);
   });
 });

@@ -81,6 +81,10 @@ describe('CodexCLIBackend', () => {
     backend = new CodexCLIBackend();
   });
 
+  it('id is codex-cli', () => {
+    expect(backend.id).toBe('codex-cli');
+  });
+
   it('does not emit agent.input_degraded for short prompt (< 12000 chars)', async () => {
     const options = makeOptions();
     const degradedEvents: any[] = [];
