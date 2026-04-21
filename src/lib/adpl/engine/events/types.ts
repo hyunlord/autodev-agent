@@ -21,7 +21,8 @@ export type EngineEvent =
   | AgentTokenEvent
   | AgentToolCallEvent
   | AgentFallbackEvent
-  | AgentInputDegradedEvent;
+  | AgentInputDegradedEvent
+  | ShellOutputEvent;
 
 interface EventBase {
   timestamp: Date;
@@ -136,6 +137,13 @@ export interface AgentInputDegradedEvent extends EventBase {
   keptSize: number;
   severity: 'warning' | 'error';
   reason: string;
+}
+
+export interface ShellOutputEvent extends EventBase {
+  type: 'shell.output';
+  nodeId: string;
+  stream: 'stdout' | 'stderr';
+  chunk: string;
 }
 
 export type EngineEventType = EngineEvent['type'];

@@ -25,6 +25,7 @@ export interface NodeMetrics {
   tokensOut?: number;
   agentModel?: string;
   promptTruncated?: boolean;
+  outputTruncated?: boolean;
 }
 
 export interface NodeOutput {

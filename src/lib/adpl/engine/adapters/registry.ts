@@ -1,4 +1,6 @@
 import type { NodeAdapter } from './types';
+import { agentAdapter } from './agent';
+import { shellAdapter } from './shell';
 
 export class AdapterRegistry {
   private adapters = new Map<string, NodeAdapter>();
@@ -43,4 +45,11 @@ export class AdapterRegistry {
   size(): number {
     return this.adapters.size;
   }
+}
+
+export function createDefaultRegistry(): AdapterRegistry {
+  const r = new AdapterRegistry();
+  r.register(agentAdapter);
+  r.register(shellAdapter);
+  return r;
 }
