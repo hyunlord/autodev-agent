@@ -50,7 +50,8 @@ src/lib/adpl/
 | Trigger (task_created, schedule) | Stage 5 범위 | Stage 5 |
 | Expression evaluator 고도화 | 기본형만 Stage 2 에서 완성 | Stage 5 |
 | AgentAdapter 2-레이어 심화 추상화 | 일단 얕은 추상으로 Stage 3 종료, 검증 후 심화 | Stage 7 |
-| Verify Agent **전체** wrap (8 특수 모듈 포함) | C7-1 조사 결과 1,641줄 + PBT/VLM/A11y/SAST/Visual Regression, 10-15시간 소요 | **C7-1.5 별도 작업** (Week 7 내 또는 Week 8 초) |
+| Verify Agent **전체** wrap (8 특수 모듈 포함) | Stage 3 범위 초과, Stage 7 이월 | Stage 7 |
+| Verify Agent 최소 wrap (C7-1.5) | 2026-04-21 완료 (c5b9815+cd36de8, 98점) | ✅ 완료 |
 | Debate Mode wrap (Drafter/Challenger/QC) | role 개념 자체가 Stage 4 flow (branch/loop) 없이는 어색 | Stage 4 |
 
 ### 0.4 로드맵 v7 와의 관계
@@ -305,47 +306,49 @@ export const agentAdapter: NodeAdapter<AgentNodeSpec> = {
 자기합리화 방지 원칙(§메모리: coder ≠ verifier LLM)은 이미 기존 코드에 구현되어 있다. `src/lib/agents/verify-agent.ts` 의 `selectDifferentFrom()` (라인 44-68) 이 coder 와 다른 LLM 을 동적으로 선택한다. **Stage 3 의 Resolver 는 이 로직을 침범하지 않는다** — 단순 validator 역할만 한다.
 
 ```typescript
-// src/lib/adpl/engine/adapters/agent/resolver.ts
+// src/lib/adpl/engine/adapters/agent/resolver.ts (실구현)
 
-type Role = 'planner' | 'coder' | 'verifier';  // Stage 3 범위: 3 role
-type Model =
-  | 'autodev-internal'       // 기존 executor wrapping
-  | 'claude-code'            // claude CLI
-  | 'gemini-cli'             // gemini CLI
-  | 'codex-cli'              // codex CLI
-  | 'auto-cross-model';      // verifier 전용: coder 와 다른 LLM 동적 선택
-
-// Stage 3 의 허용 매트릭스
-const ROLE_MODEL_MATRIX: Record<Role, Model[]> = {
-  planner:  ['autodev-internal', 'claude-code', 'gemini-cli', 'codex-cli'],
-  coder:    ['autodev-internal', 'claude-code', 'gemini-cli', 'codex-cli'],
-  verifier: ['autodev-internal', 'auto-cross-model', 'gemini-cli', 'codex-cli', 'claude-code'],
-  //                             ^^^^^^^^^^^^^^^^^ 기본값, selectDifferentFrom 위임
+export const ROLE_MODEL_MATRIX: Record<AgentRole, AgentModel[]> = {
+  planner: ['autodev-internal', 'claude-code', 'gemini-cli', 'codex-cli'],
+  coder:   ['autodev-internal', 'claude-code', 'gemini-cli', 'codex-cli'],
+  verifier: ['auto-cross-model', 'claude-cli', 'codex-cli', 'gemini-cli'],
+  //          ^^^^^^^^^^^^^^^^^ 기본값, VerifierBackend 내부에서 selectDifferentFrom 위임
 };
 
-export function resolveBackend(role: Role, model: Model, ctx: ExecutionContext): AgentBackend {
-  const allowed = ROLE_MODEL_MATRIX[role];
-  if (!allowed.includes(model)) {
-    throw new ValidationError(
-      `Role '${role}' cannot use model '${model}'. Allowed: ${allowed.join(', ')}`
+export function resolveBackend(
+  specRole: string | undefined,
+  specModel: string | undefined,
+): AgentBackend {
+  const role = (specRole ?? 'planner') as string;
+
+  if (role === 'verifier') {
+    const model = (specModel ?? 'auto-cross-model') as AgentModel;
+    const validModels = ROLE_MODEL_MATRIX['verifier'];
+    if (!validModels.includes(model)) {
+      throw new AgentValidationError(
+        `Model "${model}" is not valid for role "verifier". Valid models: ${validModels.join(', ')}.`
+      );
+    }
+    return new VerifierBackend(model);
+    // VerifierBackend 내부에서 auto-cross-model 인 경우 ctx.$nodes['code'].metrics.agentModel 조회 후 selectDifferentFrom 호출
+  }
+
+  if (role !== 'planner' && role !== 'coder') {
+    throw new AgentValidationError(
+      `Role "${role}" is not supported. Use 'planner', 'coder', or 'verifier'.`
     );
   }
 
-  // verifier + auto-cross-model → coder 의 실제 model 조회 후 다른 것 선택
-  if (role === 'verifier' && model === 'auto-cross-model') {
-    const coderModel = ctx.$.resolve('$nodes.code.model') as Model | undefined;
-    return new AutoDevAgentBackend({ crossModelBase: coderModel });
-    // AutoDevAgentBackend 내부에서 기존 selectDifferentFrom 호출
-  }
-
-  // 그 외: model 명시된 backend 직접 반환
-  return createBackend(model);
+  // planner/coder: 명시된 model 로 backend 직접 반환
+  ...
 }
 ```
 
-**주의**:
-- `claude-code` 를 verifier 에도 허용하는 것은 명시 사용자 override 용이다. 기본값(`auto-cross-model`) 이 coder 와 다른 LLM 을 고르므로 자기합리화 방지는 지켜진다.
-- Stage 3 에서 **evaluator role 은 reserved** — validate 단계에서 거부. 이유: 메모리 기록 ("evaluator 는 reserved 역할, UI disabled + 서버 가드 패턴").
+**실구현 노트**: 설계 초안 대비 주요 차이점:
+- verifier 에서 `autodev-internal` 제거 — VerifyAgent 는 항상 `VerifierBackend` 를 통해 호출
+- `claude-code` → `claude-cli` (verifier 허용 모델명 변경)
+- `resolveBackend` 에 `ctx` 파라미터 없음 — cross-model 선택은 `VerifierBackend.run()` 내부에서 `ctx.$nodes` 접근
+- evaluator role 은 별도 "reserved" 에러 없이, 지원 안 되는 role 로 일반 ValidationError 처리
 
 ### 3.4 Backend 공통 인터페이스
 
@@ -502,26 +505,29 @@ export class ClaudeCodeBackend implements AgentBackend {
 - MCP 설정 2 번 생성 가능
 - AdapterEvent 의 `completed` 가 한 번만 emit 되어야 하는 원칙 위반 가능
 
-Stage 3 대응:
-- 폴백 발생 시 `metrics.backendFallback = true` 플래그
-- SDK 시도에서 emit 된 `token` 이벤트는 **폐기 표시**: `progress` 이벤트 `{ kind: 'backend-fallback', discardedTokens: N }` 전송
-- 토큰 비용은 CLI 측 최종값만 기록, SDK 부분은 별도 `metrics.sdkAttemptTokens` 에 참고용으로만
+구현: `ClaudeCodeBackend` 는 기존 `ClaudeCodeAgent` 의 `onProgress` 콜백을 래핑하여, `"falling back to CLI"` 문자열이 포함된 `log warn` 이벤트 감지 시 `emitFallback` 을 호출한다.
 
 ```typescript
-let sdkTokens = 0;
-try {
-  for await (const ev of sdkStream) {
-    if (ev.type === 'token') { sdkTokens += estimate(ev.text); yield ev; }
-    // ...
-  }
-} catch (sdkErr) {
-  ctx.emit({
-    type: 'progress',
-    data: { kind: 'backend-fallback', from: 'sdk', to: 'cli', discardedTokens: sdkTokens }
+// 실구현 (adapters/agent/streaming.ts — emitFallback)
+export function emitFallback(
+  ctx: ExecutionContext,
+  options: ExecutionOptions,
+  from: string,   // 'sdk'
+  to: string,     // 'cli'
+  reason: string,
+): void {
+  options.eventBus.emit({
+    type: 'agent.fallback',
+    timestamp: new Date(),
+    runId, nodeId,
+    from, to, reason,
   });
-  yield* this.runViaCli(input, ctx);  // CLI 에서만 final metrics 카운팅
 }
 ```
+
+**실구현 노트**: 설계 초안 대비 단순화:
+- `discardedTokens`, `metrics.sdkAttemptTokens`, `metrics.backendFallback` 미구현 — 폴백 발생 자체만 `agent.fallback` 이벤트로 기록
+- `agent.fallback` 이벤트 = 백엔드 전환 알림. 토큰 회계 정확도보다 가시성 우선
 
 ### 3.7 CodexCLIAdapter — stdin 슬라이싱 워크어라운드
 
@@ -556,28 +562,37 @@ export class CodexCLIBackend implements AgentBackend {
 }
 ```
 
-**12K prompt slicing silent failure 승격 (보고서 10.3 반영)**: 기존 코드는 `MAX_PROMPT_LENGTH` 초과 시 자동 slice + `[... truncated]` 접미사 + warning log 만 emit 한다. 문제는 **silent** — exit code 0, 사용자 모름, 결과 품질만 저하.
-
-Stage 3 대응 (기존 slicing 로직은 건드리지 않고 adapter 레이어에서 승격):
+**Codex truncation → agent.input_degraded 전용 이벤트**: `MAX_PROMPT_LENGTH` (12,000자) 초과 시 `emitInputDegraded` 를 호출하여 전용 `agent.input_degraded` 이벤트를 발행한다. `progress` 이벤트가 아닌 별도 타입으로 분리됨.
 
 ```typescript
-const originalLength = payload.length;
-if (originalLength > MAX_PROMPT_LENGTH) {
-  ctx.emit({
-    type: 'progress',
-    data: {
-      kind: 'prompt-truncated',
-      original: originalLength,
-      kept: MAX_PROMPT_LENGTH,
-      severity: 'warning',
-    }
+// 실구현 (adapters/agent/streaming.ts — emitInputDegraded)
+export function emitInputDegraded(
+  ctx: ExecutionContext,
+  options: ExecutionOptions,
+  kind: 'prompt-truncated',
+  originalSize: number,
+  keptSize: number,
+  reason: string,
+  severity: 'warning' | 'error' = 'warning',
+): void {
+  options.eventBus.emit({
+    type: 'agent.input_degraded',
+    timestamp: new Date(),
+    runId, nodeId,
+    kind,          // 'prompt-truncated'
+    originalSize,
+    keptSize,
+    severity,      // 기본: 'warning'
+    reason,
   });
-  metrics.promptTruncated = true;
-  metrics.promptOriginalLength = originalLength;
 }
 ```
 
-Verify Agent 가 `metrics.promptTruncated === true` 인 node 의 output 을 평가할 때는 **score 상한 캡** 적용 (Stage 3 에서 85/100 권고). 이유: truncation 은 품질 저하 확정.
+**agent.fallback 과의 의미론적 차이**:
+- `agent.fallback` = 백엔드 전환 (SDK → CLI). 실행 경로 변경.
+- `agent.input_degraded` = 입력 품질 저하 (12K 초과 truncation). 실행 경로는 동일, 입력 손실.
+
+**score 캡 적용 위치**: `agent.input_degraded` 발생 시 `promptTruncated` 플래그가 `output-transform.ts` 의 `transformVerifierOutput` 에 전달되며, score > 85 이면 85 로 캡핑된다. Verify Agent 내부가 아닌 adapter 출력 변환 단계에서 처리.
 
 ### 3.8 GeminiCLIAdapter + debug dump + 홈 디렉토리 리디렉션
 
@@ -608,33 +623,15 @@ export class GeminiCLIBackend implements AgentBackend {
 
 **홈 디렉토리 오염 대응 (보고서 10.4 반영)**: 기존 Verify Agent 는 `~/.autodev/` 아래 **5 종** 디렉토리를 사용한다:
 
-| 디렉토리 | 용도 | Stage 3 정책 |
-|---------|------|-------------|
-| `~/.autodev/debug/` | 프롬프트/응답 dump | **유지** (사용자 홈이 의미 있음 — 전역 디버깅) |
-| `~/.autodev/baselines/` | Visual regression baseline | **프로젝트 내부 이동**: `<worktreeRoot>/.autodev/baselines/` |
-| `~/.autodev/screenshots/` | 테스트 스크린샷 | **프로젝트 내부 이동**: `<worktreeRoot>/.autodev/screenshots/` |
-| `~/.autodev/pbt/` | Property-Based Test 결과 | **프로젝트 내부 이동**: `<worktreeRoot>/.autodev/pbt/` |
-| `~/.autodev/vlm-config.json` | VLM 설정 읽기 | **유지** (사용자 전역 설정) |
+| 디렉토리 | Stage 3 정책 |
+|---------|----------------|
+| `~/.autodev/debug/` | 유지 (전역 디버깅) |
+| `~/.autodev/baselines/` | ✅ 이미 worktree 내부 (기존) |
+| `~/.autodev/screenshots/` | 유지 — Stage 7 이월 (wrap 원칙) |
+| `~/.autodev/pbt/` | ✅ 이미 worktree 내부 (기존) |
+| `~/.autodev/vlm-config.json` | 유지 (사용자 전역 설정) |
 
-근거:
-- baselines/screenshots/pbt 는 **프로젝트별 데이터**. 홈에 두면 프로젝트 전환 시 오염.
-- Phase P 원칙: "모든 부수효과는 worktree 내부". Legacy 가 위반하고 있었음.
-- debug 와 vlm-config 은 사용자 전역 성격이므로 예외.
-
-**구현 방법**: Adapter 에서 wrapping 할 때 path resolver 를 주입:
-
-```typescript
-// verify agent 의 path 결정 로직을 override
-const pathResolver = {
-  debug: () => joinHome('.autodev', 'debug'),
-  baselines: () => join(ctx.worktreeRoot, '.autodev', 'baselines'),
-  screenshots: () => join(ctx.worktreeRoot, '.autodev', 'screenshots'),
-  pbt: () => join(ctx.worktreeRoot, '.autodev', 'pbt'),
-  vlmConfig: () => joinHome('.autodev', 'vlm-config.json'),
-};
-```
-
-**마이그레이션**: 기존 baselines 는 프로젝트별 한 번 복사 필요. Stage 3 에서는 자동 마이그레이션 스크립트 (`scripts/migrate-autodev-home.ts`) 제공, 1 회 실행 후 기존 디렉토리 삭제 가이드.
+baselines/pbt 는 Verify Agent 기존 코드가 이미 worktree 내부 라우팅으로 동작 중이었다 (C7-1.5 조사 발견). screenshots 만 `~/.autodev/screenshots/` HOME 경로를 사용 중이며, 이를 worktree 내부로 이전하려면 `verify-agent.ts` 직접 수정이 필요해 wrap 원칙 위반이 된다. Stage 7 이월.
 
 ### 3.9 Input Transform — ADPL spec → Legacy input
 
@@ -705,46 +702,40 @@ async cancel(runId: string) {
 
 Stage 2 의 Executor 가 `ctx.abortSignal` 을 전달하므로 대부분의 backend 는 signal 만 듣고 있으면 됨. explicit cancel 은 외부 트리거 (UI 취소 버튼) 용.
 
-### 3.13 수락 기준 (Stage 3 Week 7 종료 시)
-
-- [ ] `AgentNodeSpec` (role=planner, model=autodev-internal) 실행 → artifact 반환
-- [ ] role=coder, model=claude-code → diff 반환
-- [ ] role=verifier, model=gemini-cli → score 반환 + debug dump 생성
-- [ ] role × model 매트릭스 위반 시 ValidationError
-- [ ] Streaming token 이벤트 UI 에서 수신 확인
 ### 3.13 수락 기준 — C7-1 (Week 7 Day 1-3)
+
+✅ C7-1 완료: 2026-04-21 14da3d3+3af54ed, 98점
 
 **C7-1 범위는 Planner / Coder role + 4 backend**. Verifier 는 최소 동작만 (아래 별도).
 
-- [ ] `AgentNodeSpec` (role=planner, model=autodev-internal) 실행 → artifact 반환
-- [ ] `AgentNodeSpec` (role=planner, model=gemini-cli) → artifact 반환
-- [ ] `AgentNodeSpec` (role=coder, model=claude-code) → diff 반환 (SDK 경로)
-- [ ] `AgentNodeSpec` (role=coder, model=claude-code) → CLI 폴백 경로 동작 + `partial-fallback` 에러 정확히 발생
-- [ ] `AgentNodeSpec` (role=coder, model=codex-cli) → 12K 초과 시 `prompt-truncated` progress 이벤트 발생
-- [ ] role × model 매트릭스 위반 시 ValidationError
-- [ ] Evaluator role 사용 시도 시 "reserved" ValidationError
-- [ ] Streaming token 이벤트 UI 에서 수신 확인
-- [ ] Cancel → child process SIGTERM 후 5 초 내 종료
-- [ ] 전역 CLI 캐시 `clearCliCache()` 호출로 테스트 간 격리 확인
-- [ ] Planner/Coder 단위 테스트 통과 (약 15 개)
+- [x] `AgentNodeSpec` (role=planner, model=autodev-internal) 실행 → artifact 반환
+- [x] `AgentNodeSpec` (role=planner, model=gemini-cli) → artifact 반환
+- [x] `AgentNodeSpec` (role=coder, model=claude-code) → diff 반환 (SDK 경로)
+- [x] `AgentNodeSpec` (role=coder, model=claude-code) → CLI 폴백 시 `agent.fallback` 이벤트 발생
+- [x] `AgentNodeSpec` (role=coder, model=codex-cli) → 12K 초과 시 `agent.input_degraded` 이벤트 발생
+- [x] role × model 매트릭스 위반 시 ValidationError
+- [x] 지원하지 않는 role 사용 시 `AgentValidationError` ("not supported") 발생
+- [x] Streaming token 이벤트 UI 에서 수신 확인
+- [x] Cancel → child process SIGTERM 후 5 초 내 종료
+- [x] 전역 CLI 캐시 `clearCliCache()` 호출로 테스트 간 격리 확인
+- [x] Planner/Coder 단위 테스트 통과 (약 15 개)
 
 ### 3.14 수락 기준 — C7-1.5 (Verify Agent 최소 wrap, Week 7 Day 4-5 + Week 8 초)
 
+✅ C7-1.5 완료: 2026-04-21 c5b9815+cd36de8, 98점
+
 **Verify Agent 는 1,641 줄 단일 파일 + 8 특수 모듈이라 전체 wrap 은 Stage 3 범위 초과 (10-15 시간).** C7-1.5 에서는 **최소 wrap** 만:
 
-- [ ] `AgentNodeSpec` (role=verifier, model=auto-cross-model) 실행 → score 반환 (mechanical + evidence stages 만)
-- [ ] `~/.autodev/debug/` dump 유지 확인
-- [ ] baselines/screenshots/pbt 가 worktree 내부로 리디렉션되는지 확인 (마이그레이션 스크립트 동작)
-- [ ] coder=claude-code → verifier 가 자동으로 codex-cli 또는 gemini-cli 선택 (selectDifferentFrom 동작)
+- [x] `AgentNodeSpec` (role=verifier, model=auto-cross-model) 실행 → score 반환 (mechanical + evidence stages 만)
+- [x] `~/.autodev/debug/` dump 유지 확인
+- [x] baselines/pbt worktree 내부 확인 (기존), screenshots 는 HOME 유지 (Stage 7 이월)
+- [x] coder=claude-code → verifier 가 자동으로 codex-cli 또는 gemini-cli 선택 (selectDifferentFrom 동작)
 
 **C7-1.5 에서 제외 (Stage 7 이월)**:
-- VLM (Visual analysis, OpenRouter API) → 기존 코드가 async 호출하는 것만 wrap, 실패해도 score 계산은 진행
-- PBT (Property-Based Testing) → 동일
-- Visual Regression (baselines 비교) → 동일
-- A11y / SAST → 동일
+- VLM / PBT / Visual Regression / A11y / SAST → 기존 자체 soft failure 거동 그대로 사용 (wrap 없음)
 - Debate verification (Debate Mode와 연동된 검증) → Stage 4
 
-즉 **"LLM + mechanical check 만 통과하는 Verify"** 를 Stage 3 종료 시점 상태로 삼는다. 나머지 8 개 특수 모듈은 기존 코드가 호출되지만 실패 시 warning 만.
+즉 **"LLM + mechanical check 만 통과하는 Verify"** 를 Stage 3 종료 시점 상태로 삼는다. 나머지 8 개 특수 모듈은 기존 코드의 soft failure 거동에 위임.
 
 ---
 
