@@ -33,12 +33,10 @@ function makeExecutor(bus?: EventBus) {
 
 describe('Stage 3 E2E — Shell adapter in pipeline', () => {
   let executor: PipelineExecutor;
-  let bus: EventBus;
 
   beforeEach(() => {
     const e = makeExecutor();
     executor = e.executor;
-    bus = e.eventBus;
   });
 
   // ─────────────────────────────────────────────────────
@@ -83,19 +81,6 @@ pipeline:
   // 시나리오 11: Shell node with JSON output is parsed automatically
   // ─────────────────────────────────────────────────────
   it('11. Shell node with JSON stdout is parsed in auto mode', async () => {
-    const yaml = `
-adplVersion: 1
-name: shell-json
-triggers:
-  - id: t1
-    type: task_created
-pipeline:
-  - id: json-node
-    type: shell
-    command: 'node -e "console.log(JSON.stringify({status:ok,count:3}))"'
-    outputFormat: auto
-`;
-    // Inline the JSON via echo so we don't need shell interpolation issues
     const yamlFixed = `
 adplVersion: 1
 name: shell-json
