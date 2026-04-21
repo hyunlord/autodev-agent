@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { PipelineCompiler } from './compiler';
 import { StateStore } from './state/store';
 import { EventBus } from './events/bus';
@@ -5,6 +6,7 @@ import { CancellationToken } from './cancel/token';
 import { Scheduler } from './scheduler';
 import { RealWorker, WorkerOptions } from './worker';
 import { AdapterRegistry } from './adapters/registry';
+import { ExecutionContextError } from './worker/context-builder';
 import type { ExecutionPlan } from './compiler/types';
 import type { PipelineRunState } from './state/types';
 import type { TriggerContext } from '@/lib/adpl/types';
@@ -17,7 +19,7 @@ export interface RunInput {
   taskId: string;
   triggerContext: TriggerContext;
   /** Absolute path to the worktree root for this run. Required for adapters that perform side effects. */
-  worktreeRoot?: string;
+  worktreeRoot: string;
 }
 
 export interface RunOptions {
@@ -82,6 +84,12 @@ export class PipelineExecutor {
 
   async run(input: RunInput, options: RunOptions = {}): Promise<RunResult> {
     const totalStart = Date.now();
+
+    if (!path.isAbsolute(input.worktreeRoot)) {
+      throw new ExecutionContextError(
+        `worktreeRoot must be an absolute path, got: ${input.worktreeRoot}`,
+      );
+    }
 
     // 1. Compile — pipelineVersionId 를 sourcePath 로 사용해 캐시 키 안정화
     const compileStart = Date.now();

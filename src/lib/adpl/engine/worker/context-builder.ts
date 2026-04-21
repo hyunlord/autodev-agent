@@ -28,11 +28,7 @@ export function buildExecutionContext(
   const task = {} as unknown as TaskContext;
   const project = {} as unknown as ProjectContext;
 
-  const worktreeRoot =
-    worktreeRootHint ??
-    (task as unknown as { config?: { projectDir?: string } })?.config?.projectDir ??
-    (project as unknown as { path?: string })?.path ??
-    null;
+  const worktreeRoot = worktreeRootHint ?? null;
 
   if (!worktreeRoot) {
     throw new ExecutionContextError(

@@ -4,7 +4,7 @@ import type { AgentBackend, AgentRole } from './types';
 import { PlanningAgent } from '@/agents/planning/planning-agent';
 import { CodingAgentWrapper } from '@/agents/coding/coding-agent';
 import { CodexCliAgent } from '@/lib/plugins/agents/codex-cli';
-import { emitFallback } from '../streaming';
+import { emitInputDegraded } from '../streaming';
 
 const MAX_PROMPT_LENGTH = 12_000;
 
@@ -18,7 +18,14 @@ export class CodexCLIBackend implements AgentBackend {
     options: ExecutionOptions,
   ): Promise<AgentOutput> {
     if (input.prompt.length > MAX_PROMPT_LENGTH) {
-      emitFallback(ctx, options, 'full-prompt', 'truncated-prompt', 'prompt-truncated');
+      emitInputDegraded(
+        ctx,
+        options,
+        'prompt-truncated',
+        input.prompt.length,
+        MAX_PROMPT_LENGTH,
+        'Codex CLI 12K prompt limit exceeded',
+      );
     }
 
     if (role === 'planner') {

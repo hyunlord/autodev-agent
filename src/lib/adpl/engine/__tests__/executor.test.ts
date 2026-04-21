@@ -165,6 +165,7 @@ describe('PipelineExecutor', () => {
           pipelineVersionId: 'bad-v1',
           taskId: 't1',
           triggerContext: TRIGGER,
+          worktreeRoot: '/tmp/test-worktree',
         }),
       ).rejects.toThrow(/Compile failed/);
     });
@@ -353,6 +354,21 @@ describe('PipelineExecutor', () => {
       });
 
       expect(executor.activeRunCount()).toBe(0);
+    });
+  });
+
+  // ──────────────────────────────────────────────
+  describe('RunInput type safety', () => {
+    it('rejects RunInput without worktreeRoot at compile-time', () => {
+      // @ts-expect-error worktreeRoot is required
+      const _bad: import('../executor').RunInput = {
+        pipelineYaml: 'x',
+        projectId: 'p',
+        pipelineVersionId: 'v',
+        taskId: 't',
+        triggerContext: {} as any,
+      };
+      expect(true).toBe(true); // runtime never reached; compile-time check only
     });
   });
 

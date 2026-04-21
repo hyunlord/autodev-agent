@@ -20,7 +20,8 @@ export type EngineEvent =
   | GateDecidedEvent
   | AgentTokenEvent
   | AgentToolCallEvent
-  | AgentFallbackEvent;
+  | AgentFallbackEvent
+  | AgentInputDegradedEvent;
 
 interface EventBase {
   timestamp: Date;
@@ -124,6 +125,16 @@ export interface AgentFallbackEvent extends EventBase {
   nodeId: string;
   from: string;
   to: string;
+  reason: string;
+}
+
+export interface AgentInputDegradedEvent extends EventBase {
+  type: 'agent.input_degraded';
+  nodeId: string;
+  kind: 'prompt-truncated';
+  originalSize: number;
+  keptSize: number;
+  severity: 'warning' | 'error';
   reason: string;
 }
 

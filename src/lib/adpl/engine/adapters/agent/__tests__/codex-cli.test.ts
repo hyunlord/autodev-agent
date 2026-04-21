@@ -81,10 +81,10 @@ describe('CodexCLIBackend', () => {
     backend = new CodexCLIBackend();
   });
 
-  it('does not emit agent.fallback for short prompt (< 12000 chars)', async () => {
+  it('does not emit agent.input_degraded for short prompt (< 12000 chars)', async () => {
     const options = makeOptions();
-    const fallbackEvents: any[] = [];
-    options.eventBus.on('agent.fallback', (e) => { fallbackEvents.push(e); });
+    const degradedEvents: any[] = [];
+    options.eventBus.on('agent.input_degraded', (e) => { degradedEvents.push(e); });
 
     const input: AgentInput = {
       prompt: 'short prompt',
@@ -93,12 +93,14 @@ describe('CodexCLIBackend', () => {
     };
 
     await backend.run('planner', input, makeCtx(), options);
-    expect(fallbackEvents).toHaveLength(0);
+    expect(degradedEvents).toHaveLength(0);
   });
 
-  it('emits agent.fallback for long prompt (> 12000 chars)', async () => {
+  it('emits agent.input_degraded (not agent.fallback) for long prompt (> 12000 chars)', async () => {
     const options = makeOptions();
+    const degradedEvents: any[] = [];
     const fallbackEvents: any[] = [];
+    options.eventBus.on('agent.input_degraded', (e) => { degradedEvents.push(e); });
     options.eventBus.on('agent.fallback', (e) => { fallbackEvents.push(e); });
 
     const input: AgentInput = {
@@ -108,10 +110,16 @@ describe('CodexCLIBackend', () => {
     };
 
     await backend.run('planner', input, makeCtx(), options);
-    expect(fallbackEvents).toHaveLength(1);
-    expect(fallbackEvents[0].from).toBe('full-prompt');
-    expect(fallbackEvents[0].to).toBe('truncated-prompt');
-    expect(fallbackEvents[0].reason).toBe('prompt-truncated');
+
+    // 새 이벤트 발생 확인
+    expect(degradedEvents).toHaveLength(1);
+    expect(degradedEvents[0].kind).toBe('prompt-truncated');
+    expect(degradedEvents[0].originalSize).toBe(MAX_PROMPT_LENGTH + 1);
+    expect(degradedEvents[0].keptSize).toBe(MAX_PROMPT_LENGTH);
+    expect(degradedEvents[0].severity).toBe('warning');
+
+    // agent.fallback 은 emit 되지 않아야 함
+    expect(fallbackEvents).toHaveLength(0);
   });
 
   it('returns success for planner role', async () => {
@@ -134,10 +142,10 @@ describe('CodexCLIBackend', () => {
     expect(output.success).toBe(true);
   });
 
-  it('does not emit agent.fallback for prompt exactly at MAX_PROMPT_LENGTH (12000 chars)', async () => {
+  it('does not emit agent.input_degraded for prompt exactly at MAX_PROMPT_LENGTH (12000 chars)', async () => {
     const options = makeOptions();
-    const fallbackEvents: any[] = [];
-    options.eventBus.on('agent.fallback', (e) => { fallbackEvents.push(e); });
+    const degradedEvents: any[] = [];
+    options.eventBus.on('agent.input_degraded', (e) => { degradedEvents.push(e); });
 
     const input: AgentInput = {
       prompt: 'x'.repeat(MAX_PROMPT_LENGTH),
@@ -146,6 +154,6 @@ describe('CodexCLIBackend', () => {
     };
 
     await backend.run('planner', input, makeCtx(), options);
-    expect(fallbackEvents).toHaveLength(0);
+    expect(degradedEvents).toHaveLength(0);
   });
 });
