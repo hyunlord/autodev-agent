@@ -47,6 +47,7 @@ describe('Stage 2 E2E — PipelineExecutor', () => {
       pipelineVersionId: `e2e-${yamlFile}-${Date.now()}`,
       taskId: 'e2e-t',
       triggerContext: TRIGGER,
+      worktreeRoot: '/tmp/test-worktree',
     };
   }
 
@@ -100,6 +101,7 @@ settings:
       pipelineVersionId: 'linear-5-v1',
       taskId: 'e2e-t',
       triggerContext: TRIGGER,
+      worktreeRoot: '/tmp/test-worktree',
     });
 
     expect(result.status).toBe('completed');
@@ -201,6 +203,7 @@ pipeline:
       pipelineVersionId: 'timeout-v1',
       taskId: 'e2e-t',
       triggerContext: TRIGGER,
+      worktreeRoot: '/tmp/test-worktree',
     });
 
     expect(result.status).toBe('failed');
@@ -260,6 +263,7 @@ pipeline:
       pipelineVersionId: 'retry-v1',
       taskId: 'e2e-t',
       triggerContext: TRIGGER,
+      worktreeRoot: '/tmp/test-worktree',
     });
 
     expect(result.status).toBe('completed');

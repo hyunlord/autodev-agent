@@ -13,6 +13,8 @@ import { buildExecutionContext } from './context-builder';
 export interface WorkerOptions {
   /** env secrets (settings.allowedEnvKeys 에 나열된 키 → 값) */
   env?: Record<string, string>;
+  /** Absolute path to worktree root passed to ExecutionContext */
+  worktreeRoot?: string;
   /** Adapter 미등록 시 throw 대신 failure 반환 (default: false = throw) */
   lenientOnMissingAdapter?: boolean;
 }
@@ -89,7 +91,7 @@ export class RealWorker implements Worker {
 
       let output: NodeOutput;
       try {
-        const context = buildExecutionContext(node, plan, state, this.options.env);
+        const context = buildExecutionContext(node, plan, state, this.options.env, this.options.worktreeRoot);
         output = await withTimeout(
           adapter.execute(node.spec, context, {
             cancellationToken: token,

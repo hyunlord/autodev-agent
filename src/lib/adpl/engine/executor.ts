@@ -16,6 +16,8 @@ export interface RunInput {
   pipelineVersionId: string;
   taskId: string;
   triggerContext: TriggerContext;
+  /** Absolute path to the worktree root for this run. Required for adapters that perform side effects. */
+  worktreeRoot?: string;
 }
 
 export interface RunOptions {
@@ -108,6 +110,7 @@ export class PipelineExecutor {
       const workerOptions: WorkerOptions = {
         ...options.worker,
         env: options.worker?.env ?? options.env,
+        worktreeRoot: options.worker?.worktreeRoot ?? input.worktreeRoot,
       };
       const worker = new RealWorker(this.registry, this.bus, workerOptions);
 

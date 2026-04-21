@@ -31,7 +31,7 @@ async function setup(sampleFile: string, adapterBehavior?: ConstructorParameters
     registry.register(new MockAdapter({ type, behavior: adapterBehavior }));
   }
 
-  const worker = new RealWorker(registry, bus);
+  const worker = new RealWorker(registry, bus, { worktreeRoot: '/tmp/test-worktree' });
 
   return { plan, state, store, bus, token, collector, registry, worker };
 }
@@ -114,7 +114,7 @@ describe('RealWorker — timeout', () => {
     const node = plan.nodes.get(plan.topologicalOrder[0])!;
     (node.spec as any).timeout = 0.02;
 
-    const worker = new RealWorker(registry, bus);
+    const worker = new RealWorker(registry, bus, { worktreeRoot: '/tmp/test-worktree' });
     const output = await worker.execute(node.pathId, plan, state, token);
     expect(output.status).toBe('failure');
     expect(output.error?.category).toBe('timeout');
@@ -150,7 +150,7 @@ describe('RealWorker — retry', () => {
     // maxAttempts=3 with fast backoff
     (node.spec as any).retryPolicy = { maxAttempts: 3, backoff: 'fixed', initialDelay: 0.01 };
 
-    const worker = new RealWorker(registry, bus);
+    const worker = new RealWorker(registry, bus, { worktreeRoot: '/tmp/test-worktree' });
     const output = await worker.execute(node.pathId, plan, state, token);
     expect(output.status).toBe('success');
     expect(callCount).toBe(3);
@@ -178,7 +178,7 @@ describe('RealWorker — retry', () => {
     const node = plan.nodes.get(plan.topologicalOrder[0])!;
     (node.spec as any).retryPolicy = { maxAttempts: 5, backoff: 'fixed', initialDelay: 0.01 };
 
-    const worker = new RealWorker(registry, bus);
+    const worker = new RealWorker(registry, bus, { worktreeRoot: '/tmp/test-worktree' });
     const output = await worker.execute(node.pathId, plan, state, token);
     expect(output.status).toBe('failure');
     expect(callCount).toBe(1);
@@ -209,7 +209,7 @@ describe('RealWorker — retry', () => {
     const node = plan.nodes.get(plan.topologicalOrder[0])!;
     (node.spec as any).retryPolicy = { maxAttempts: 3, backoff: 'fixed', initialDelay: 0.01 };
 
-    const worker = new RealWorker(registry, bus);
+    const worker = new RealWorker(registry, bus, { worktreeRoot: '/tmp/test-worktree' });
     await worker.execute(node.pathId, plan, state, token);
 
     const retryEvents = collector.ofType('node.retry');
@@ -240,7 +240,7 @@ describe('RealWorker — retry', () => {
     const token = new CancellationToken();
     setTimeout(() => token.cancel('user stop'), 30);
 
-    const worker = new RealWorker(registry, bus);
+    const worker = new RealWorker(registry, bus, { worktreeRoot: '/tmp/test-worktree' });
     const output = await worker.execute(node.pathId, plan, state, token);
     expect(output.status).toBe('cancelled');
   });

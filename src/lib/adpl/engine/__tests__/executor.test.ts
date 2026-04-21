@@ -61,6 +61,7 @@ describe('PipelineExecutor', () => {
         pipelineVersionId: 'v1',
         taskId: 't1',
         triggerContext: TRIGGER,
+        worktreeRoot: '/tmp/test-worktree',
       });
 
       expect(result.status).toBe('completed');
@@ -82,6 +83,7 @@ describe('PipelineExecutor', () => {
         pipelineVersionId: 'v2',
         taskId: 't1',
         triggerContext: TRIGGER,
+        worktreeRoot: '/tmp/test-worktree',
       });
 
       expect(result.status).toBe('completed');
@@ -96,6 +98,7 @@ describe('PipelineExecutor', () => {
         pipelineVersionId: 'cached-v1',
         taskId: 't1',
         triggerContext: TRIGGER,
+        worktreeRoot: '/tmp/test-worktree',
       };
 
       const first = await executor.run(input);
@@ -117,6 +120,7 @@ describe('PipelineExecutor', () => {
           pipelineVersionId: 'no-cache-v1',
           taskId: 't1',
           triggerContext: TRIGGER,
+          worktreeRoot: '/tmp/test-worktree',
         },
         { useCompileCache: false },
       );
@@ -146,6 +150,7 @@ describe('PipelineExecutor', () => {
         pipelineVersionId: 'fail-v1',
         taskId: 't1',
         triggerContext: TRIGGER,
+        worktreeRoot: '/tmp/test-worktree',
       });
 
       expect(result.status).toBe('failed');
@@ -182,6 +187,7 @@ describe('PipelineExecutor', () => {
         pipelineVersionId: 'cancel-v1',
         taskId: 't1',
         triggerContext: TRIGGER,
+        worktreeRoot: '/tmp/test-worktree',
       });
 
       // 첫 번째 node 실행 중 cancel
@@ -213,6 +219,7 @@ describe('PipelineExecutor', () => {
         pipelineVersionId: 'cancel-twice-v1',
         taskId: 't1',
         triggerContext: TRIGGER,
+        worktreeRoot: '/tmp/test-worktree',
       });
 
       setTimeout(() => {
@@ -242,6 +249,7 @@ describe('PipelineExecutor', () => {
         pipelineVersionId: 'cancel-evt-v1',
         taskId: 't1',
         triggerContext: TRIGGER,
+        worktreeRoot: '/tmp/test-worktree',
       });
 
       setTimeout(() => {
@@ -270,6 +278,7 @@ describe('PipelineExecutor', () => {
         pipelineVersionId: 'status-v1',
         taskId: 't1',
         triggerContext: TRIGGER,
+        worktreeRoot: '/tmp/test-worktree',
       });
 
       const status = executor.getStatus(result.runId);
@@ -291,6 +300,7 @@ describe('PipelineExecutor', () => {
         pipelineVersionId: 'state-v1',
         taskId: 't1',
         triggerContext: TRIGGER,
+        worktreeRoot: '/tmp/test-worktree',
       });
 
       const state = executor.getState(result.runId);
@@ -317,6 +327,7 @@ describe('PipelineExecutor', () => {
         pipelineVersionId: 'ar-v1',
         taskId: 't1',
         triggerContext: TRIGGER,
+        worktreeRoot: '/tmp/test-worktree',
       });
 
       expect(executor.activeRunCount()).toBe(0);
@@ -338,6 +349,7 @@ describe('PipelineExecutor', () => {
         pipelineVersionId: 'ar-fail-v1',
         taskId: 't1',
         triggerContext: TRIGGER,
+        worktreeRoot: '/tmp/test-worktree',
       });
 
       expect(executor.activeRunCount()).toBe(0);
@@ -353,6 +365,7 @@ describe('PipelineExecutor', () => {
         pipelineVersionId: 'evt-v1',
         taskId: 't1',
         triggerContext: TRIGGER,
+        worktreeRoot: '/tmp/test-worktree',
       });
 
       expect(collector.ofType('run.started')).toHaveLength(1);
@@ -369,6 +382,7 @@ describe('PipelineExecutor', () => {
         pipelineVersionId: 'evt-v2',
         taskId: 't1',
         triggerContext: TRIGGER,
+        worktreeRoot: '/tmp/test-worktree',
       });
 
       expect(collector.ofType('run.started')).toHaveLength(1);
@@ -385,6 +399,7 @@ describe('PipelineExecutor', () => {
         pipelineVersionId: 'state-match-v1',
         taskId: 't1',
         triggerContext: TRIGGER,
+        worktreeRoot: '/tmp/test-worktree',
       });
 
       const state = executor.getState(result.runId);

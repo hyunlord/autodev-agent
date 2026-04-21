@@ -25,6 +25,7 @@ function makeContext(): ExecutionContext {
     $loop: null,
     $flow: null,
     $variables: {},
+    worktreeRoot: '/tmp/test-worktree',
   };
 }
 

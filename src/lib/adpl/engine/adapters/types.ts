@@ -31,6 +31,8 @@ export interface ExecutionContext {
   $loop: LoopContext | null;
   $flow: FlowContext | null;
   $variables: Record<string, unknown>;
+  /** Absolute path to worktree root. All side effects MUST stay inside this directory. */
+  worktreeRoot: string;
 }
 
 export interface ValidationError {

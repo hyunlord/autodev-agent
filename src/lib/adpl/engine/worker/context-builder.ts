@@ -3,22 +3,46 @@ import type { ExecutionContext } from '../adapters/types';
 import type { CompiledNode, ExecutionPlan } from '../compiler/types';
 import type { PipelineRunState } from '../state/types';
 
+export class ExecutionContextError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ExecutionContextError';
+  }
+}
+
 /**
  * Adapter 가 소비하는 Execution context 조립.
  *
  * v1 제약:
  * - $task / $project / $trigger: 런타임에 주입된 hint 없으면 빈 placeholder
  * - $loop / $flow: Stage 4 Flow Adapter 구현까지 null
+ * - worktreeRoot: worktreeRootHint → task.config.projectDir → project.path 순 fallback; 없으면 throw
  */
 export function buildExecutionContext(
   node: CompiledNode,
   plan: ExecutionPlan,
   state: PipelineRunState,
   env: Record<string, string> = {},
+  worktreeRootHint?: string,
 ): ExecutionContext {
+  const task = {} as unknown as TaskContext;
+  const project = {} as unknown as ProjectContext;
+
+  const worktreeRoot =
+    worktreeRootHint ??
+    (task as unknown as { config?: { projectDir?: string } })?.config?.projectDir ??
+    (project as unknown as { path?: string })?.path ??
+    null;
+
+  if (!worktreeRoot) {
+    throw new ExecutionContextError(
+      'Cannot determine worktreeRoot: task.config.projectDir and project.path both missing.',
+    );
+  }
+
   return {
-    $task: {} as unknown as TaskContext,
-    $project: {} as unknown as ProjectContext,
+    $task: task,
+    $project: project,
     $trigger: {} as unknown as TriggerContext,
     $env: env,
     $now: new Date(),
@@ -28,6 +52,7 @@ export function buildExecutionContext(
     $loop: null,
     $flow: null,
     $variables: plan.context.variables,
+    worktreeRoot,
   };
 }
 
