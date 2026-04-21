@@ -359,7 +359,6 @@ pipeline:
   // ─────────────────────────────────────────────────────
   it('9. Plan→Code→Verify: verify node receives code node output in $nodes', async () => {
     const codeOutput = { text: 'generated code', modifiedFiles: ['src/foo.ts'] };
-    const capturedVerifyCtx: { $nodes: Record<string, NodeOutput> } | null = { $nodes: {} };
     let verifyCtxCapture: Record<string, NodeOutput> | null = null;
 
     registry.register(
