@@ -1,4 +1,21 @@
-import { describe, it, expect, beforeEach, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from 'vitest';
+
+// ── C9-1 facade 시나리오용 DB mock (기존 테스트는 이 모듈 미사용 → 무영향) ──
+const facadeMocks = vi.hoisted(() => ({
+  dbGet: vi.fn(),
+  dbRun: vi.fn(),
+}));
+vi.mock('@/lib/db/client', () => ({
+  db: {
+    select: () => ({ from: () => ({ where: () => ({ get: facadeMocks.dbGet }) }) }),
+    insert: () => ({ values: () => ({ run: facadeMocks.dbRun }) }),
+    update: () => ({ set: () => ({ where: () => ({ run: facadeMocks.dbRun }) }) }),
+  },
+}));
+vi.mock('@/lib/db/schema', () => ({ tasks: {}, events: {}, pipelineVersions: {} }));
+vi.mock('drizzle-orm', () => ({ eq: vi.fn() }));
+vi.mock('nanoid', () => ({ nanoid: () => 'facade-e2e-id' }));
+vi.mock('@/worker/pipeline', () => ({ runLegacyPipeline: vi.fn() }));
 import { createServer } from 'http';
 import type { AddressInfo } from 'net';
 import { PipelineExecutor } from '../executor';
@@ -289,6 +306,81 @@ beforeAll(async () => {
 });
 
 afterAll(async () => { await webhookServerClose?.(); });
+
+// ─────────────────────────────────────────────────────
+// Stage 3 C9-1: Facade 경유 Phase P 실행 시나리오
+// DB mock + PipelineExecutor.prototype.run spy로 경로 검증
+// ─────────────────────────────────────────────────────
+
+import { runPipeline } from '@/worker/pipeline-facade';
+
+const FACADE_YAML = `
+adplVersion: 1
+name: facade-e2e
+triggers:
+  - id: t1
+    type: task_created
+pipeline:
+  - id: plan
+    type: agent
+    role: planner
+`;
+
+describe('Stage 3 C9-1 — facade routes phase_p task to PipelineExecutor', () => {
+  let runSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    facadeMocks.dbGet.mockReset();
+    facadeMocks.dbRun.mockReset();
+    runSpy = vi.spyOn(PipelineExecutor.prototype, 'run').mockResolvedValue({
+      runId: 'run-1',
+      pipelineVersionId: 'v1',
+      status: 'completed',
+      completedNodes: 1,
+      failedNodes: 0,
+      skippedNodes: 0,
+      cancelledNodes: 0,
+      totalDurationMs: 10,
+      compileDurationMs: 5,
+      executionDurationMs: 5,
+      state: {} as never,
+      plan: {} as never,
+    });
+  });
+
+  afterEach(() => {
+    runSpy.mockRestore();
+  });
+
+  it('16. facade.runPipeline(phase_p) → PipelineExecutor.run receives correct RunInput', async () => {
+    facadeMocks.dbGet
+      .mockReturnValueOnce({
+        id: 'task-1',
+        pipelineMode: 'phase_p',
+        pipelineVersionId: 'v1',
+        projectId: 'proj-1',
+        projectDir: '/tmp/facade-e2e',
+        status: 'pending',
+        updatedAt: new Date().toISOString(),
+      })
+      .mockReturnValueOnce({ id: 'v1', pipelineYaml: FACADE_YAML });
+
+    const emits: Array<{ type: string; success?: boolean }> = [];
+    await runPipeline('task-1', (e) => emits.push(e as { type: string; success?: boolean }));
+
+    expect(runSpy).toHaveBeenCalledOnce();
+    expect(runSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pipelineYaml: FACADE_YAML,
+        taskId: 'task-1',
+        projectId: 'proj-1',
+        pipelineVersionId: 'v1',
+        worktreeRoot: '/tmp/facade-e2e',
+      }),
+    );
+    expect(emits.some((e) => e.type === 'task_complete' && e.success === true)).toBe(true);
+  });
+});
 
 describe('Stage 3 E2E — webhook_out adapter in pipeline', () => {
   it('15. webhook_out node sends Slack payload and pipeline completes', async () => {

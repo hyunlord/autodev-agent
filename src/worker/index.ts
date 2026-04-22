@@ -1,5 +1,5 @@
 import type { WorkerMessage } from '../lib/worker-manager';
-import { runPipeline } from './pipeline';
+import { runPipeline } from './pipeline-facade';
 import { PluginRegistry } from '../lib/plugins/registry';
 import { ClaudeCodeAgent } from '../lib/plugins/agents/claude-code';
 import { CodexCliAgent } from '../lib/plugins/agents/codex-cli';

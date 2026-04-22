@@ -19,7 +19,7 @@ import { collectInstructions, mergeInstructions } from '../lib/harness/instructi
 import { type EmitFn, type SingleCycleResult, checkAbort } from './pipeline-types';
 import { Blackboard } from '../lib/blackboard';
 
-export async function runPipeline(taskId: string, rawEmit: EmitFn, signal?: AbortSignal): Promise<void> {
+export async function runLegacyPipeline(taskId: string, rawEmit: EmitFn, signal?: AbortSignal): Promise<void> {
   // Wrap emit to persist all events to DB for later retrieval
   const emit: EmitFn = (event) => {
     rawEmit(event);
