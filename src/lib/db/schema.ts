@@ -271,3 +271,20 @@ export const triggerRoutes = sqliteTable('trigger_routes', {
   index('trigger_routes_enabled_idx').on(table.enabled),
   index('trigger_routes_version_idx').on(table.pipelineVersionId),
 ]);
+
+export const shadowRuns = sqliteTable('shadow_runs', {
+  id:               text('id').primaryKey(),
+  taskId:           text('task_id').notNull(),
+  projectId:        text('project_id').notNull(),
+  legacyOk:         integer('legacy_ok', { mode: 'boolean' }).notNull(),
+  legacyDurationMs: integer('legacy_duration_ms').notNull(),
+  legacyError:      text('legacy_error'),
+  shadowOk:         integer('shadow_ok', { mode: 'boolean' }).notNull(),
+  shadowDurationMs: integer('shadow_duration_ms').notNull(),
+  shadowError:      text('shadow_error'),
+  shadowStatus:     text('shadow_status'),
+  createdAt:        text('created_at').notNull(),
+}, (table) => [
+  index('shadow_runs_task_idx').on(table.taskId),
+  index('shadow_runs_project_idx').on(table.projectId),
+]);

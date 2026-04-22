@@ -1,4 +1,5 @@
 import { runLegacyPipeline } from './pipeline';
+import { runShadow } from './shadow-runner';
 import { PipelineExecutor } from '@/lib/adpl/engine/executor';
 import { PipelineCompiler } from '@/lib/adpl/engine/compiler';
 import { StateStore } from '@/lib/adpl/engine/state/store';
@@ -63,9 +64,7 @@ export async function runPipeline(
       return runPhasePPipeline(task, emit);
 
     case 'shadow':
-      // C9-3 stub
-      failTask(taskId, emit, 'SHADOW_MODE_NOT_IMPLEMENTED', 'shadow mode not yet implemented (C9-3)');
-      return;
+      return runShadow(task, rawEmit, emit, signal);
 
     default:
       failTask(taskId, emit, 'UNKNOWN_PIPELINE_MODE', `unknown pipeline_mode: ${mode}`);
@@ -75,61 +74,64 @@ export async function runPipeline(
 
 async function runPhasePPipeline(task: TaskRow, emit: EmitFn): Promise<void> {
   const { id: taskId } = task;
-
-  let pipelineVersionId = task.pipelineVersionId;
-  if (!pipelineVersionId) {
-    pipelineVersionId = await ensureDefaultPipelineVersion(task);
-    await db
-      .update(tasks)
-      .set({ pipelineVersionId, updatedAt: new Date().toISOString() })
-      .where(eq(tasks.id, taskId))
-      .run();
-  }
-
-  const version = db.select().from(pipelineVersions)
-    .where(eq(pipelineVersions.id, pipelineVersionId))
-    .get();
-  if (!version) {
-    failTask(taskId, emit, 'PHASE_P_PIPELINE_VERSION_NOT_FOUND', `pipeline_version not found: ${pipelineVersionId}`);
-    return;
-  }
-
-  const worktreeRoot = resolve(task.projectDir ?? process.cwd());
-
-  const triggerContext: TriggerContextBase = {
-    triggerId: nanoid(),
-    type: 'task_created',
-    firedAt: new Date().toISOString(),
-  };
-
-  const bus = new EventBus();
-  bus.on('*', (event) => {
-    emit({ type: 'log', level: 'info', message: `[phase_p:${event.type}]` });
-  });
-
-  const executor = new PipelineExecutor(
-    new PipelineCompiler(),
-    new AdapterRegistry(),
-    new StateStore(),
-    bus,
-  );
-
-  const result = await executor.run({
-    pipelineYaml: version.pipelineYaml,
-    projectId: task.projectId ?? '',
-    pipelineVersionId,
-    taskId,
-    triggerContext,
-    worktreeRoot,
-  });
-
-  const success = result.status === 'completed';
   try {
-    db.update(tasks)
-      .set({ status: success ? 'completed' : 'failed', updatedAt: new Date().toISOString() })
-      .where(eq(tasks.id, taskId))
-      .run();
-  } catch { /* non-critical */ }
+    let pipelineVersionId = task.pipelineVersionId;
+    if (!pipelineVersionId) {
+      pipelineVersionId = await ensureDefaultPipelineVersion(task);
+      await db
+        .update(tasks)
+        .set({ pipelineVersionId, updatedAt: new Date().toISOString() })
+        .where(eq(tasks.id, taskId))
+        .run();
+    }
 
-  emit({ type: 'task_complete', success, summary: `Phase P pipeline ${result.status}` });
+    const version = db.select().from(pipelineVersions)
+      .where(eq(pipelineVersions.id, pipelineVersionId))
+      .get();
+    if (!version) {
+      failTask(taskId, emit, 'PHASE_P_PIPELINE_VERSION_NOT_FOUND', `pipeline_version not found: ${pipelineVersionId}`);
+      return;
+    }
+
+    const worktreeRoot = resolve(task.projectDir ?? process.cwd());
+
+    const triggerContext: TriggerContextBase = {
+      triggerId: nanoid(),
+      type: 'task_created',
+      firedAt: new Date().toISOString(),
+    };
+
+    const bus = new EventBus();
+    bus.on('*', (event) => {
+      emit({ type: 'log', level: 'info', message: `[phase_p:${event.type}]` });
+    });
+
+    const executor = new PipelineExecutor(
+      new PipelineCompiler(),
+      new AdapterRegistry(),
+      new StateStore(),
+      bus,
+    );
+
+    const result = await executor.run({
+      pipelineYaml: version.pipelineYaml,
+      projectId: task.projectId ?? '',
+      pipelineVersionId,
+      taskId,
+      triggerContext,
+      worktreeRoot,
+    });
+
+    const success = result.status === 'completed';
+    try {
+      db.update(tasks)
+        .set({ status: success ? 'completed' : 'failed', updatedAt: new Date().toISOString() })
+        .where(eq(tasks.id, taskId))
+        .run();
+    } catch { /* non-critical */ }
+
+    emit({ type: 'task_complete', success, summary: `Phase P pipeline ${result.status}` });
+  } catch (err) {
+    failTask(taskId, emit, 'ENSURE_DEFAULT_FAILED', err instanceof Error ? err.message : String(err));
+  }
 }

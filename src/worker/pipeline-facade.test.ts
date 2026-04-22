@@ -2,6 +2,7 @@ import { describe, test, expect, vi, beforeEach } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   runLegacyPipeline: vi.fn<() => Promise<void>>(),
+  runShadow: vi.fn<() => Promise<void>>(),
   executorRun: vi.fn(),
   dbGet: vi.fn(),
   dbRun: vi.fn(),
@@ -11,6 +12,10 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('./pipeline', () => ({
   runLegacyPipeline: mocks.runLegacyPipeline,
+}));
+
+vi.mock('./shadow-runner', () => ({
+  runShadow: mocks.runShadow,
 }));
 
 vi.mock('@/lib/db/client', () => ({
@@ -58,6 +63,7 @@ describe('pipeline facade', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.runLegacyPipeline.mockResolvedValue(undefined);
+    mocks.runShadow.mockResolvedValue(undefined);
     mocks.executorRun.mockResolvedValue({
       status: 'completed',
       completedNodes: 1,
@@ -106,13 +112,33 @@ describe('pipeline facade', () => {
     expect(mocks.runLegacyPipeline).not.toHaveBeenCalled();
   });
 
-  test('pipeline_mode === shadow → SHADOW_MODE_NOT_IMPLEMENTED 에러', async () => {
+  test('pipeline_mode === shadow → runShadow 호출 (stub 에러 없음)', async () => {
     mocks.dbGet.mockReturnValue({ ...baseTask, pipelineMode: 'shadow' });
+    const emit = vi.fn();
+    await runPipeline('task-1', emit);
+    expect(mocks.runShadow).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'task-1', pipelineMode: 'shadow' }),
+      emit,
+      expect.any(Function),
+      undefined,
+    );
+    expect(mocks.runLegacyPipeline).not.toHaveBeenCalled();
+    expect(mocks.executorRun).not.toHaveBeenCalled();
+  });
+
+  test('runPhasePPipeline: ensureDefault throw → ENSURE_DEFAULT_FAILED emit + failTask DB update', async () => {
+    mocks.ensureDefaultPipelineVersion.mockRejectedValue(new Error('no projectId'));
+    mocks.dbGet.mockReturnValue({ ...baseTask, pipelineMode: 'phase_p', pipelineVersionId: null });
     const emits: Array<{ type: string; message?: string }> = [];
     await runPipeline('task-1', (e) => emits.push(e as { type: string; message?: string }));
-    expect(mocks.executorRun).not.toHaveBeenCalled();
-    expect(mocks.runLegacyPipeline).not.toHaveBeenCalled();
-    expect(emits.some((e) => e.message?.includes('SHADOW_MODE_NOT_IMPLEMENTED'))).toBe(true);
+    expect(emits.some((e) => e.message?.includes('ENSURE_DEFAULT_FAILED'))).toBe(true);
+    expect(mocks.dbRun).toHaveBeenCalled();
+  });
+
+  test('runPhasePPipeline: async throw → unhandled rejection 없이 resolve', async () => {
+    mocks.ensureDefaultPipelineVersion.mockRejectedValue(new Error('unexpected'));
+    mocks.dbGet.mockReturnValue({ ...baseTask, pipelineMode: 'phase_p', pipelineVersionId: null });
+    await expect(runPipeline('task-1', vi.fn())).resolves.toBeUndefined();
   });
 
   test('pipeline_mode === unknown → UNKNOWN_PIPELINE_MODE 에러', async () => {
