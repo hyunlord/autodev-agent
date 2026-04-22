@@ -22,7 +22,10 @@ export type EngineEvent =
   | AgentToolCallEvent
   | AgentFallbackEvent
   | AgentInputDegradedEvent
-  | ShellOutputEvent;
+  | ShellOutputEvent
+  | HttpRequestEvent
+  | HttpResponseEvent
+  | HttpRetryEvent;
 
 interface EventBase {
   timestamp: Date;
@@ -144,6 +147,26 @@ export interface ShellOutputEvent extends EventBase {
   nodeId: string;
   stream: 'stdout' | 'stderr';
   chunk: string;
+}
+
+export interface HttpRequestEvent extends EventBase {
+  type: 'http.request';
+  url: string;
+  method: string;
+  attempt: number;
+}
+
+export interface HttpResponseEvent extends EventBase {
+  type: 'http.response';
+  status: number;
+  bodySize: number;
+}
+
+export interface HttpRetryEvent extends EventBase {
+  type: 'http.retry';
+  attempt: number;
+  reason: 'status' | 'network';
+  backoffMs: number;
 }
 
 export type EngineEventType = EngineEvent['type'];

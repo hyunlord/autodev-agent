@@ -1,4 +1,6 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, beforeAll, afterAll } from 'vitest';
+import { createServer } from 'http';
+import type { AddressInfo } from 'net';
 import { PipelineExecutor } from '../executor';
 import { PipelineCompiler } from '../compiler';
 import { StateStore } from '../state/store';
@@ -6,6 +8,7 @@ import { EventBus } from '../events/bus';
 import { AdapterRegistry } from '../adapters/registry';
 import { MockAdapter } from '../adapters/mock';
 import { shellAdapter } from '../adapters/shell';
+import { httpAdapter } from '../adapters/http';
 import type { ShellOutputEvent } from '../events/types';
 
 const NON_SHELL_TYPES = [
@@ -174,5 +177,83 @@ pipeline:
     expect(collected.length).toBeGreaterThan(0);
     expect(collected.some((e) => e.type === 'shell.output')).toBe(true);
     expect(collected.some((e) => e.chunk.includes('event-test'))).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────────────
+// Scenario 14: HTTP node in pipeline (real httpAdapter + mock server)
+// ─────────────────────────────────────────────────────
+
+let httpServerUrl = '';
+let httpServerClose: () => Promise<void>;
+
+beforeAll(async () => {
+  const server = createServer((_req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ pipelineOk: true }));
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.on('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const { port } = server.address() as AddressInfo;
+      httpServerUrl = `http://127.0.0.1:${port}`;
+      resolve();
+    });
+  });
+  httpServerClose = () =>
+    new Promise((res, rej) => server.close((err) => (err ? rej(err) : res())));
+});
+
+afterAll(async () => {
+  await httpServerClose?.();
+});
+
+describe('Stage 3 E2E — HTTP adapter in pipeline', () => {
+  it('14. HTTP node fetches JSON and pipeline completes successfully', async () => {
+    const yaml = `
+adplVersion: 1
+name: http-e2e
+triggers:
+  - id: t1
+    type: task_created
+pipeline:
+  - id: http-call
+    type: http
+    url: "${httpServerUrl}/data"
+    method: GET
+    allowedHosts:
+      - "127.0.0.1"
+`;
+
+    const registry = new AdapterRegistry();
+    registry.register(httpAdapter);
+    for (const t of NON_SHELL_TYPES.filter((t) => t !== 'http')) {
+      registry.register(new MockAdapter({ type: t }));
+    }
+    const executor = new PipelineExecutor(
+      new PipelineCompiler(),
+      registry,
+      new StateStore(),
+      new EventBus(),
+    );
+
+    const result = await executor.run({
+      pipelineYaml: yaml,
+      projectId: 'e2e-http',
+      pipelineVersionId: 'http-e2e-v1',
+      taskId: 'e2e-http-task',
+      triggerContext: TRIGGER,
+      worktreeRoot: process.cwd(),
+    });
+
+    expect(result.status).toBe('completed');
+    expect(result.completedNodes).toBe(1);
+    expect(result.failedNodes).toBe(0);
+
+    const [nodeState] = Array.from(result.state.nodes.values());
+    expect(nodeState?.status).toBe('success');
+    const data = nodeState?.output?.data as Record<string, unknown>;
+    expect(data?.status).toBe(200);
+    expect((data?.bodyJson as Record<string, unknown>)?.pipelineOk).toBe(true);
   });
 });
