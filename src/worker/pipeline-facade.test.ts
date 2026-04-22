@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   dbGet: vi.fn(),
   dbRun: vi.fn(),
   busOn: vi.fn(),
+  ensureDefaultPipelineVersion: vi.fn<() => Promise<string>>(),
 }));
 
 vi.mock('./pipeline', () => ({
@@ -37,6 +38,9 @@ vi.mock('@/lib/adpl/engine/adapters/registry', () => ({ AdapterRegistry: vi.fn()
 vi.mock('@/lib/db/schema', () => ({ tasks: {}, events: {}, pipelineVersions: {} }));
 vi.mock('drizzle-orm', () => ({ eq: vi.fn() }));
 vi.mock('nanoid', () => ({ nanoid: () => 'test-id' }));
+vi.mock('@/lib/adpl/legacy-bridge', () => ({
+  ensureDefaultPipelineVersion: mocks.ensureDefaultPipelineVersion,
+}));
 
 import { runPipeline } from './pipeline-facade';
 
@@ -87,13 +91,19 @@ describe('pipeline facade', () => {
     expect(mocks.runLegacyPipeline).not.toHaveBeenCalled();
   });
 
-  test('pipeline_mode === phase_p + pipelineVersionId null → PHASE_P_NO_PIPELINE_VERSION 에러', async () => {
-    mocks.dbGet.mockReturnValue({ ...baseTask, pipelineMode: 'phase_p', pipelineVersionId: null });
-    const emits: Array<{ type: string; message?: string }> = [];
-    await runPipeline('task-1', (e) => emits.push(e as { type: string; message?: string }));
-    expect(mocks.executorRun).not.toHaveBeenCalled();
+  test('pipeline_mode === phase_p + pipelineVersionId null → ensureDefaultPipelineVersion 호출 후 PipelineExecutor.run 실행', async () => {
+    mocks.ensureDefaultPipelineVersion.mockResolvedValue('auto-version-id');
+    mocks.dbGet
+      .mockReturnValueOnce({ ...baseTask, pipelineMode: 'phase_p', pipelineVersionId: null })
+      .mockReturnValueOnce({ id: 'auto-version-id', pipelineYaml: 'adplVersion: 1\nname: legacy-equivalent-default\n' });
+    const emit = vi.fn();
+    await runPipeline('task-1', emit);
+    expect(mocks.ensureDefaultPipelineVersion).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'task-1', projectId: 'proj-1' }),
+    );
+    expect(mocks.dbRun).toHaveBeenCalled(); // tasks update
+    expect(mocks.executorRun).toHaveBeenCalled();
     expect(mocks.runLegacyPipeline).not.toHaveBeenCalled();
-    expect(emits.some((e) => e.message?.includes('PHASE_P_NO_PIPELINE_VERSION'))).toBe(true);
   });
 
   test('pipeline_mode === shadow → SHADOW_MODE_NOT_IMPLEMENTED 에러', async () => {

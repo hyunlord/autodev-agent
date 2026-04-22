@@ -7,6 +7,7 @@ import { AdapterRegistry } from '@/lib/adpl/engine/adapters/registry';
 import { db } from '@/lib/db/client';
 import { tasks, events, pipelineVersions } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
+import { ensureDefaultPipelineVersion } from '@/lib/adpl/legacy-bridge';
 import { nanoid } from 'nanoid';
 import { resolve } from 'path';
 import type { EmitFn } from './pipeline-types';
@@ -75,21 +76,21 @@ export async function runPipeline(
 async function runPhasePPipeline(task: TaskRow, emit: EmitFn): Promise<void> {
   const { id: taskId } = task;
 
-  if (!task.pipelineVersionId) {
-    failTask(
-      taskId,
-      emit,
-      'PHASE_P_NO_PIPELINE_VERSION',
-      'pipelineVersionId required for phase_p mode; run C9-2 legacy-equivalent YAML generation first',
-    );
-    return;
+  let pipelineVersionId = task.pipelineVersionId;
+  if (!pipelineVersionId) {
+    pipelineVersionId = await ensureDefaultPipelineVersion(task);
+    await db
+      .update(tasks)
+      .set({ pipelineVersionId, updatedAt: new Date().toISOString() })
+      .where(eq(tasks.id, taskId))
+      .run();
   }
 
   const version = db.select().from(pipelineVersions)
-    .where(eq(pipelineVersions.id, task.pipelineVersionId))
+    .where(eq(pipelineVersions.id, pipelineVersionId))
     .get();
   if (!version) {
-    failTask(taskId, emit, 'PHASE_P_PIPELINE_VERSION_NOT_FOUND', `pipeline_version not found: ${task.pipelineVersionId}`);
+    failTask(taskId, emit, 'PHASE_P_PIPELINE_VERSION_NOT_FOUND', `pipeline_version not found: ${pipelineVersionId}`);
     return;
   }
 
@@ -116,7 +117,7 @@ async function runPhasePPipeline(task: TaskRow, emit: EmitFn): Promise<void> {
   const result = await executor.run({
     pipelineYaml: version.pipelineYaml,
     projectId: task.projectId ?? '',
-    pipelineVersionId: task.pipelineVersionId,
+    pipelineVersionId,
     taskId,
     triggerContext,
     worktreeRoot,
