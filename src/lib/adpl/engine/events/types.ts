@@ -25,7 +25,9 @@ export type EngineEvent =
   | ShellOutputEvent
   | HttpRequestEvent
   | HttpResponseEvent
-  | HttpRetryEvent;
+  | HttpRetryEvent
+  | WebhookSentEvent
+  | WebhookRateLimitedEvent;
 
 interface EventBase {
   timestamp: Date;
@@ -167,6 +169,18 @@ export interface HttpRetryEvent extends EventBase {
   attempt: number;
   reason: 'status' | 'network';
   backoffMs: number;
+}
+
+export interface WebhookSentEvent extends EventBase {
+  type: 'webhook.sent';
+  provider: 'slack' | 'discord' | 'teams' | 'generic';
+  status: number;
+}
+
+export interface WebhookRateLimitedEvent extends EventBase {
+  type: 'webhook.rate_limited';
+  provider: string;
+  waitMs: number;
 }
 
 export type EngineEventType = EngineEvent['type'];

@@ -2,6 +2,7 @@ import type { NodeAdapter } from './types';
 import { agentAdapter } from './agent';
 import { shellAdapter } from './shell';
 import { httpAdapter } from './http';
+import { webhookOutAdapter } from './webhook-out';
 
 export class AdapterRegistry {
   private adapters = new Map<string, NodeAdapter>();
@@ -53,5 +54,6 @@ export function createDefaultRegistry(): AdapterRegistry {
   r.register(agentAdapter);
   r.register(shellAdapter);
   r.register(httpAdapter);
+  r.register(webhookOutAdapter);
   return r;
 }

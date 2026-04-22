@@ -9,6 +9,7 @@ import { AdapterRegistry } from '../adapters/registry';
 import { MockAdapter } from '../adapters/mock';
 import { shellAdapter } from '../adapters/shell';
 import { httpAdapter } from '../adapters/http';
+import { webhookOutAdapter } from '../adapters/webhook-out';
 import type { ShellOutputEvent } from '../events/types';
 
 const NON_SHELL_TYPES = [
@@ -255,5 +256,85 @@ pipeline:
     const data = nodeState?.output?.data as Record<string, unknown>;
     expect(data?.status).toBe(200);
     expect((data?.bodyJson as Record<string, unknown>)?.pipelineOk).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────────────
+// Scenario 15: webhook_out node in pipeline (real webhookOutAdapter + mock server)
+// ─────────────────────────────────────────────────────
+
+let webhookServerUrl = '';
+let webhookServerClose: () => Promise<void>;
+let lastWebhookBody: Record<string, unknown> = {};
+
+beforeAll(async () => {
+  const server = createServer(async (req, res) => {
+    const chunks: Buffer[] = [];
+    req.on('data', (c: Buffer) => chunks.push(c));
+    req.on('end', () => {
+      try { lastWebhookBody = JSON.parse(Buffer.concat(chunks).toString()); } catch { /* ignore */ }
+      res.writeHead(200); res.end('ok');
+    });
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.on('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const { port } = server.address() as AddressInfo;
+      webhookServerUrl = `http://127.0.0.1:${port}`;
+      resolve();
+    });
+  });
+  webhookServerClose = () =>
+    new Promise((res, rej) => server.close((err) => (err ? rej(err) : res())));
+});
+
+afterAll(async () => { await webhookServerClose?.(); });
+
+describe('Stage 3 E2E — webhook_out adapter in pipeline', () => {
+  it('15. webhook_out node sends Slack payload and pipeline completes', async () => {
+    const yaml = `
+adplVersion: 1
+name: webhook-e2e
+triggers:
+  - id: t1
+    type: task_created
+pipeline:
+  - id: notify
+    type: webhook_out
+    provider: slack
+    url: "${webhookServerUrl}/webhook"
+    body:
+      message: "pipeline complete"
+`;
+
+    const registry = new AdapterRegistry();
+    registry.register(webhookOutAdapter);
+    for (const t of NON_SHELL_TYPES.filter((t) => t !== 'webhook_out')) {
+      registry.register(new MockAdapter({ type: t }));
+    }
+    const executor = new PipelineExecutor(
+      new PipelineCompiler(),
+      registry,
+      new StateStore(),
+      new EventBus(),
+    );
+
+    const result = await executor.run({
+      pipelineYaml: yaml,
+      projectId: 'e2e-webhook',
+      pipelineVersionId: 'webhook-e2e-v1',
+      taskId: 'e2e-webhook-task',
+      triggerContext: TRIGGER,
+      worktreeRoot: process.cwd(),
+    });
+
+    expect(result.status).toBe('completed');
+    expect(result.completedNodes).toBe(1);
+    expect(result.failedNodes).toBe(0);
+
+    const [nodeState] = Array.from(result.state.nodes.values());
+    expect(nodeState?.status).toBe('success');
+    // Slack transforms { message: ... } → { text: ... }
+    expect(lastWebhookBody).toEqual({ text: 'pipeline complete' });
   });
 });
