@@ -20,6 +20,9 @@ export type EngineEvent =
   | FlowBranchSelectEvent
   | LoopIterationStartEvent
   | LoopIterationDoneEvent
+  | FlowLoopStartEvent
+  | FlowLoopIterationEvent
+  | FlowLoopCompleteEvent
   | GateOpenedEvent
   | GateDecidedEvent
   | AgentTokenEvent
@@ -119,6 +122,22 @@ export interface FlowBranchSelectEvent extends EventBase {
   type: 'flow.branch.select';
   branchNodeId: string;
   selectedCase: string | null;
+}
+export interface FlowLoopStartEvent extends EventBase {
+  type: 'flow.loop.start';
+  parentId: string;
+  kind: 'forEach' | 'while';
+}
+export interface FlowLoopIterationEvent extends EventBase {
+  type: 'flow.loop.iteration';
+  parentId: string;
+  index: number;
+}
+export interface FlowLoopCompleteEvent extends EventBase {
+  type: 'flow.loop.complete';
+  parentId: string;
+  iterationCount: number;
+  terminated: 'complete' | 'max_iterations' | 'error';
 }
 export interface LoopIterationStartEvent extends EventBase {
   type: 'flow.loop.iteration_start';

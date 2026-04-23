@@ -657,6 +657,98 @@ settings:
   });
 
   // ─────────────────────────────────────────────────────
+  // 시나리오 14: forEach loop E2E
+  // items 3개 배열 → loop 노드 success, iterations 길이 3 확인
+  // ─────────────────────────────────────────────────────
+  it('14. forEach loop: items 3개 → loop 노드 success, iterationCount=3', async () => {
+    const yaml = `
+adplVersion: 1
+name: foreach-loop-e2e
+triggers:
+  - id: t1
+    type: task_created
+pipeline:
+  - id: process
+    type: loop
+    mode: forEach
+    over: '["item-a","item-b","item-c"]'
+    as: current
+    do:
+      - id: work
+        type: agent
+        role: planner
+settings:
+  maxParallel: 2
+`;
+
+    const result = await executor.run({
+      pipelineYaml: yaml,
+      projectId: 'e2e-p',
+      pipelineVersionId: 'foreach-loop-v1',
+      taskId: 'e2e-t',
+      triggerContext: TRIGGER,
+      worktreeRoot: '/tmp/test-worktree',
+    });
+
+    expect(result.status).toBe('completed');
+
+    // loop 노드(pipeline.0) output 확인
+    const loopNodeState = Array.from(result.state.nodes.values()).find(
+      (n) => n.nodeId === 'pipeline.0',
+    );
+    expect(loopNodeState).toBeDefined();
+    expect(loopNodeState!.status).toBe('success');
+    const data = loopNodeState!.output?.data as Record<string, unknown> | undefined;
+    expect(data?.iterationCount).toBe(3);
+    expect(data?.terminated).toBe('complete');
+  });
+
+  // ─────────────────────────────────────────────────────
+  // 시나리오 15: while loop E2E
+  // condition 없음 → 1회 실행 후 종료, iterationCount=1
+  // ─────────────────────────────────────────────────────
+  it('15. while loop: condition 없음 → 1회 실행, iterationCount=1', async () => {
+    const yaml = `
+adplVersion: 1
+name: while-loop-e2e
+triggers:
+  - id: t1
+    type: task_created
+pipeline:
+  - id: once
+    type: loop
+    mode: while
+    maxIterations: 10
+    do:
+      - id: step
+        type: agent
+        role: planner
+settings:
+  maxParallel: 2
+`;
+
+    const result = await executor.run({
+      pipelineYaml: yaml,
+      projectId: 'e2e-p',
+      pipelineVersionId: 'while-loop-v1',
+      taskId: 'e2e-t',
+      triggerContext: TRIGGER,
+      worktreeRoot: '/tmp/test-worktree',
+    });
+
+    expect(result.status).toBe('completed');
+
+    const loopNodeState = Array.from(result.state.nodes.values()).find(
+      (n) => n.nodeId === 'pipeline.0',
+    );
+    expect(loopNodeState).toBeDefined();
+    expect(loopNodeState!.status).toBe('success');
+    const data = loopNodeState!.output?.data as Record<string, unknown> | undefined;
+    expect(data?.iterationCount).toBe(1);
+    expect(data?.terminated).toBe('complete');
+  });
+
+  // ─────────────────────────────────────────────────────
   // 추가: 10 샘플 YAML smoke test
   // executor.run() 으로 전수 실행 — throw 없이 완료/실패 반환 확인
   // ─────────────────────────────────────────────────────

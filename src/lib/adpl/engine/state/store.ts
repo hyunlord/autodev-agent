@@ -58,6 +58,18 @@ export class StateStore {
     return this.runs.get(runId)?.flowStates.get(flowNodeId) ?? null;
   }
 
+  /**
+   * 동적 서브노드 등록 — loop 반복 실행 시 컴파일 타임에 없는 pathId 를 런타임에 추가.
+   * 이미 존재하는 경우 무시 (idempotent).
+   */
+  registerDynamicNode(runId: string, nodeId: string): void {
+    const state = this.runs.get(runId);
+    if (!state) throw new Error(`PipelineRun "${runId}" 가 존재하지 않습니다`);
+    if (!state.nodes.has(nodeId)) {
+      state.nodes.set(nodeId, { nodeId, status: 'pending', attemptNumber: 0 });
+    }
+  }
+
   updateNode(
     runId: string,
     nodeId: string,

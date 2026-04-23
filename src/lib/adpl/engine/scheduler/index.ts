@@ -167,6 +167,9 @@ export class Scheduler {
    * Scheduler 의 ready queue 를 거치지 않음.
    */
   private async runSubNodeDirectly(pathId: string): Promise<NodeOutput> {
+    // 동적 서브노드(loop 반복 생성 pathId)는 컴파일 타임에 없을 수 있으므로 lazy 등록
+    this.store.registerDynamicNode(this.state.id, pathId);
+
     // pending → ready
     this.store.updateNode(this.state.id, pathId, () => ({ status: 'ready' }));
     this.eventBus.emit({
@@ -193,7 +196,24 @@ export class Scheduler {
 
     let output: NodeOutput;
     try {
-      const subNode = this.plan.nodes.get(pathId);
+      let subNode = this.plan.nodes.get(pathId);
+
+      // 동적 loop 반복 pathId (예: pipeline.0.do.2.0) 는 plan 에 없을 수 있음.
+      // loop handler 가 생성하는 패턴: {loopPathId}.do.{iterIdx}.{nodeIdx}
+      // 컴파일 타임 template path:    {loopPathId}.do.{nodeIdx}
+      // iterIdx 세그먼트를 제거하여 template 노드 찾아 plan 에 동적 등록.
+      if (!subNode) {
+        const templatePathId = resolveLoopTemplatePath(pathId);
+        if (templatePathId) {
+          const templateNode = this.plan.nodes.get(templatePathId);
+          if (templateNode) {
+            // 동적 pathId 로 template 노드를 plan.nodes 에 등록 (Worker 조회 가능하게)
+            subNode = { ...templateNode, pathId };
+            this.plan.nodes.set(pathId, subNode);
+          }
+        }
+      }
+
       if (!subNode) {
         throw new Error(`Sub-node "${pathId}" not found in plan`);
       }
@@ -456,4 +476,31 @@ export class Scheduler {
       durationMs: Date.now() - this.startTime,
     };
   }
+}
+
+/**
+ * loop handler 가 생성하는 동적 pathId 에서 컴파일 타임 template pathId 를 복원.
+ *
+ * 패턴: {loopPathId}.do.{iterIdx}.{nodeIdx}
+ * 템플릿: {loopPathId}.do.{nodeIdx}
+ *
+ * ".do." 세그먼트를 찾아 그 뒤의 iterIdx 를 제거한다.
+ * 예: "pipeline.0.do.2.0" → "pipeline.0.do.0"
+ *     "pipeline.0.do.1.1" → "pipeline.0.do.1"
+ *
+ * ".do." 가 없으면 null 반환 (loop 동적 pathId 아님).
+ */
+function resolveLoopTemplatePath(pathId: string): string | null {
+  const doMarker = '.do.';
+  const idx = pathId.indexOf(doMarker);
+  if (idx === -1) return null;
+
+  const loopPrefix = pathId.slice(0, idx); // e.g. "pipeline.0"
+  const afterDo = pathId.slice(idx + doMarker.length); // e.g. "2.0"
+  const parts = afterDo.split('.');
+  if (parts.length < 2) return null;
+
+  // parts[0] = iterIdx, parts[1..] = nodeIdx (and possible nested)
+  const nodeIdxParts = parts.slice(1);
+  return `${loopPrefix}${doMarker}${nodeIdxParts.join('.')}`;
 }
