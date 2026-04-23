@@ -218,16 +218,16 @@ describe('branchHandler', () => {
   });
 
   // ─────────────────────────────────────────────
-  // 6. string condition → error thrown
+  // 6. string condition — Stage 5 E2 이후 지원
+  // empty $nodes → NaN >= 80 → false → no match → skip → success
   // ─────────────────────────────────────────────
-  it('6. string condition → output failure (not supported until Stage 5)', async () => {
+  it('6. string condition with empty $nodes → no match → success (selectedCase=null)', async () => {
     const spec: BranchNodeSpec = {
       id: 'decide',
       type: 'branch',
       cases: [
         {
-          // string condition — Stage 5 이전 미지원
-          when: '$nodes.step1.data.score >= 80' as unknown as import('@/lib/adpl/types/expression').StructuredCondition,
+          when: '$nodes.step1.data.score >= 80',
           then: [{ id: 'n1', type: 'agent', role: 'planner' }],
         },
       ],
@@ -240,7 +240,9 @@ describe('branchHandler', () => {
       makeOptions(bus, token),
     );
 
-    expect(output.status).toBe('failure');
+    // string condition evaluates: undefined >= 80 → NaN >= 80 → false → no match → skip
+    expect(output.status).toBe('success');
+    expect((output.data as Record<string, unknown>)?.selectedCase).toBeNull();
   });
 
   // ─────────────────────────────────────────────

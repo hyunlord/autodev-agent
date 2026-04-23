@@ -1,15 +1,9 @@
 import type { BranchNodeSpec } from '@/lib/adpl/types/nodes/branch';
 import type { NodeOutput } from '@/lib/adpl/types';
 import type { FlowNodeHandler, FlowNodeOptions, RunSubNodeFn } from '../flow-handler';
-import type { StructuredCondition } from '@/lib/adpl/types/expression';
 import { evaluateCondition } from '../condition-evaluator';
 import type { ExecutionContext } from '../../adapters/types';
 
-/**
- * BranchNodeSpec.cases 의 조건을 평가하기 위한 최소 ExecutionContext stub.
- * branch handler 는 Worker 가 아니라 Scheduler 에서 실행되므로
- * $nodes 만 제공하면 충분 — 나머지는 빈 placeholder.
- */
 function makeMinimalCtx(nodeOutputs: Record<string, unknown>): ExecutionContext {
   return {
     $task: {} as ExecutionContext['$task'],
@@ -36,10 +30,9 @@ export const branchHandler: FlowNodeHandler<BranchNodeSpec> = {
     const evaluationMode = spec.evaluationMode ?? 'first_match';
     const onMissingMatch = spec.onMissingMatch ?? 'skip';
 
-    // $nodes 수집을 위한 최소 컨텍스트 — branch 핸들러가 Scheduler 내부에서 직접 호출됨.
-    // Worker 레이어를 우회하므로 $nodes 에 접근할 방법이 없음.
-    // 조건 평가에 필요한 최소 ctx 를 생성.
-    const ctx = makeMinimalCtx({});
+    // Scheduler 가 buildFlowHandlerOptions() 로 주입한 $nodes 를 추출.
+    const $nodes = (options as unknown as { $nodes?: Record<string, unknown> }).$nodes ?? {};
+    const ctx = makeMinimalCtx($nodes);
 
     // 조건 평가 — string condition 은 Stage 5 이전 미지원
     let selectedCaseIdx = -1;
@@ -59,16 +52,9 @@ export const branchHandler: FlowNodeHandler<BranchNodeSpec> = {
           }
           if (!c.when) continue;
 
-          if (typeof c.when === 'string') {
-            throw new Error(
-              `[BranchHandler] string condition is not supported until Stage 5. ` +
-              `Use StructuredCondition instead. Got: "${c.when}"`,
-            );
-          }
-
           let matched: boolean;
           try {
-            matched = evaluateCondition(c.when as StructuredCondition, ctx);
+            matched = evaluateCondition(c.when, ctx);
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
             throw Object.assign(
@@ -102,15 +88,9 @@ export const branchHandler: FlowNodeHandler<BranchNodeSpec> = {
           }
           if (!c.when) continue;
 
-          if (typeof c.when === 'string') {
-            throw new Error(
-              `[BranchHandler] string condition is not supported until Stage 5. Got: "${c.when}"`,
-            );
-          }
-
           let matched: boolean;
           try {
-            matched = evaluateCondition(c.when as StructuredCondition, ctx);
+            matched = evaluateCondition(c.when, ctx);
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
             throw Object.assign(

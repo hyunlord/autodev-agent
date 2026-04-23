@@ -1,7 +1,6 @@
 import type { LoopNodeSpec } from '@/lib/adpl/types/nodes/loop';
 import type { NodeOutput } from '@/lib/adpl/types';
 import type { FlowNodeHandler, FlowNodeOptions, RunSubNodeFn } from '../flow-handler';
-import type { StructuredCondition } from '@/lib/adpl/types/expression';
 import { evaluateCondition } from '../condition-evaluator';
 import type { ExecutionContext, LoopContext } from '../../adapters/types';
 
@@ -332,14 +331,8 @@ async function runWhile(
     // 조건 평가 — 없으면 1회 실행 후 종료
     if (!spec.condition) break;
 
-    if (typeof spec.condition === 'string') {
-      throw new Error(
-        `[LoopHandler] string condition is not supported until Stage 5. Use StructuredCondition instead.`,
-      );
-    }
-
     const ctx = makeCtxWithLoop(loopCtx);
-    const shouldContinue = evaluateCondition(spec.condition as StructuredCondition, ctx);
+    const shouldContinue = evaluateCondition(spec.condition, ctx);
     if (!shouldContinue) break;
   } while (true);
 

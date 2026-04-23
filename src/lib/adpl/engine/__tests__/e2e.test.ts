@@ -1355,6 +1355,138 @@ settings:
   });
 
   // ─────────────────────────────────────────────────────
+  // 시나리오 24 (Stage 5 E2): branch string condition — then 선택
+  // plan 노드 output confidence: 0.9 → "$nodes.plan.data.confidence >= 0.8" → true → then
+  // ─────────────────────────────────────────────────────
+  it('24. branch string condition: confidence 0.9 >= 0.8 → then case selected', async () => {
+    registry.register(
+      new MockAdapter({
+        type: 'agent',
+        behavior: {
+          executeCallback: async (spec): Promise<NodeOutput> => {
+            if (spec.id === 'plan') {
+              return { status: 'success', data: { confidence: 0.9 } };
+            }
+            return { status: 'success', data: null };
+          },
+        },
+      }),
+    );
+
+    const yaml = `
+adplVersion: 1
+name: branch-string-condition-e2e
+triggers:
+  - id: t1
+    type: task_created
+pipeline:
+  - id: plan
+    type: agent
+    role: planner
+  - id: decide
+    type: branch
+    dependsOn: [plan]
+    cases:
+      - when: "$nodes.plan.data.confidence >= 0.8"
+        then:
+          - id: high-confidence-action
+            type: agent
+            role: planner
+      - default: true
+        then:
+          - id: low-confidence-action
+            type: agent
+            role: planner
+settings:
+  maxParallel: 2
+`;
+
+    const result = await executor.run({
+      pipelineYaml: yaml,
+      projectId: 'e2e-p',
+      pipelineVersionId: 'branch-str-cond-v1',
+      taskId: 'e2e-t',
+      triggerContext: TRIGGER,
+      worktreeRoot: '/tmp/test-worktree',
+    });
+
+    expect(result.status).toBe('completed');
+
+    const branchState = Array.from(result.state.nodes.values()).find(
+      (n) => n.nodeId === 'pipeline.1',
+    );
+    expect(branchState?.status).toBe('success');
+    const data = branchState?.output?.data as Record<string, unknown> | undefined;
+    expect(data?.selectedCase).toBe('case[0]');
+  });
+
+  // ─────────────────────────────────────────────────────
+  // 시나리오 25 (Stage 5 E2): branch string condition — default 선택
+  // plan 노드 output confidence: 0.3 → "$nodes.plan.data.confidence >= 0.8" → false → default
+  // ─────────────────────────────────────────────────────
+  it('25. branch string condition: confidence 0.3 < 0.8 → default case selected', async () => {
+    registry.register(
+      new MockAdapter({
+        type: 'agent',
+        behavior: {
+          executeCallback: async (spec): Promise<NodeOutput> => {
+            if (spec.id === 'plan') {
+              return { status: 'success', data: { confidence: 0.3 } };
+            }
+            return { status: 'success', data: null };
+          },
+        },
+      }),
+    );
+
+    const yaml = `
+adplVersion: 1
+name: branch-string-condition-default-e2e
+triggers:
+  - id: t1
+    type: task_created
+pipeline:
+  - id: plan
+    type: agent
+    role: planner
+  - id: decide
+    type: branch
+    dependsOn: [plan]
+    cases:
+      - when: "$nodes.plan.data.confidence >= 0.8"
+        then:
+          - id: high-confidence-action
+            type: agent
+            role: planner
+      - default: true
+        then:
+          - id: low-confidence-action
+            type: agent
+            role: planner
+settings:
+  maxParallel: 2
+`;
+
+    const result = await executor.run({
+      pipelineYaml: yaml,
+      projectId: 'e2e-p',
+      pipelineVersionId: 'branch-str-cond-default-v1',
+      taskId: 'e2e-t',
+      triggerContext: TRIGGER,
+      worktreeRoot: '/tmp/test-worktree',
+    });
+
+    expect(result.status).toBe('completed');
+
+    const branchState = Array.from(result.state.nodes.values()).find(
+      (n) => n.nodeId === 'pipeline.1',
+    );
+    expect(branchState?.status).toBe('success');
+    const data = branchState?.output?.data as Record<string, unknown> | undefined;
+    expect(data?.selectedCase).toBe('default');
+  });
+
+  // ─────────────────────────────────────────────────────
   // 추가: 10 샘플 YAML smoke test
   // executor.run() 으로 전수 실행 — throw 없이 완료/실패 반환 확인
   // ─────────────────────────────────────────────────────

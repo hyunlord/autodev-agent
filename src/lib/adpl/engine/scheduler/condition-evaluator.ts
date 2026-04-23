@@ -1,15 +1,19 @@
-import type { StructuredCondition, FieldCondition } from '@/lib/adpl/types/expression';
+import type { StructuredCondition, FieldCondition, Condition } from '@/lib/adpl/types/expression';
 import type { ExecutionContext } from '../adapters/types';
+import { evaluateStringCondition } from './expression';
 
 /**
- * StructuredCondition 평가기.
- * FieldCondition.field 의 $ 경로를 ExecutionContext 에서 resolve.
- * string condition (Slot 2 표현식)은 Stage 5 이전 미지원 → 명시적 오류 throw.
+ * Condition 평가기 (Stage 5 E2 이후).
+ * - string → evaluateStringCondition (mini-evaluator)
+ * - StructuredCondition → 기존 로직
  */
 export function evaluateCondition(
-  condition: StructuredCondition,
+  condition: Condition,
   ctx: ExecutionContext,
 ): boolean {
+  if (typeof condition === 'string') {
+    return evaluateStringCondition(condition, ctx);
+  }
   if ('all' in condition) {
     return condition.all.every((c) => evaluateCondition(c, ctx));
   }
