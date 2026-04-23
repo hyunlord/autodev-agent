@@ -23,6 +23,8 @@ export type EngineEvent =
   | FlowLoopStartEvent
   | FlowLoopIterationEvent
   | FlowLoopCompleteEvent
+  | FlowLoopIterationFailedEvent
+  | FlowLoopBreakEvent
   | GateOpenedEvent
   | GateDecidedEvent
   | AgentTokenEvent
@@ -137,7 +139,18 @@ export interface FlowLoopCompleteEvent extends EventBase {
   type: 'flow.loop.complete';
   parentId: string;
   iterationCount: number;
-  terminated: 'complete' | 'max_iterations' | 'error';
+  terminated: 'complete' | 'max_iterations' | 'error' | 'break' | 'complete-with-errors';
+}
+export interface FlowLoopIterationFailedEvent extends EventBase {
+  type: 'flow.loop.iteration.failed';
+  parentId: string;
+  index: number;
+  error: string;
+}
+export interface FlowLoopBreakEvent extends EventBase {
+  type: 'flow.loop.break';
+  parentId: string;
+  index: number;
 }
 export interface LoopIterationStartEvent extends EventBase {
   type: 'flow.loop.iteration_start';

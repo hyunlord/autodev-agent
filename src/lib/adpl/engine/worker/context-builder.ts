@@ -24,6 +24,7 @@ export function buildExecutionContext(
   state: PipelineRunState,
   env: Record<string, string> = {},
   worktreeRootHint?: string,
+  triggerContext?: Record<string, unknown>,
 ): ExecutionContext {
   const task = {} as unknown as TaskContext;
   const project = {} as unknown as ProjectContext;
@@ -39,7 +40,7 @@ export function buildExecutionContext(
   return {
     $task: task,
     $project: project,
-    $trigger: {} as unknown as TriggerContext,
+    $trigger: (triggerContext ?? {}) as unknown as TriggerContext,
     $env: env,
     $now: new Date(),
     $self: node,

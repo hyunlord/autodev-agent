@@ -1487,6 +1487,178 @@ settings:
   });
 
   // ─────────────────────────────────────────────────────
+  // 시나리오 26 (Stage 5 E3): $trigger 주입
+  // worker.triggerContext → adapter ExecutionContext.$trigger 로 흐르는 것 검증
+  // ─────────────────────────────────────────────────────
+  it('26. $trigger injection: worker.triggerContext flows to adapter $trigger.kind', async () => {
+    let capturedTrigger: Record<string, unknown> | undefined;
+
+    registry.register(
+      new MockAdapter({
+        type: 'agent',
+        behavior: {
+          executeCallback: async (_spec, context): Promise<NodeOutput> => {
+            capturedTrigger = context.$trigger as Record<string, unknown>;
+            return { status: 'success', data: null };
+          },
+        },
+      }),
+    );
+
+    const yaml = `
+adplVersion: 1
+name: trigger-inject-e2e
+triggers:
+  - id: t1
+    type: task_created
+pipeline:
+  - id: check-trigger
+    type: agent
+    role: planner
+settings:
+  maxParallel: 1
+`;
+
+    const result = await executor.run(
+      {
+        pipelineYaml: yaml,
+        projectId: 'e2e-p',
+        pipelineVersionId: 'trigger-inject-v1',
+        taskId: 'e2e-t',
+        triggerContext: TRIGGER,
+        worktreeRoot: '/tmp/test-worktree',
+      },
+      {
+        worker: {
+          triggerContext: { kind: 'task_created', taskId: 'e2e-t', projectId: 'e2e-p', createdAt: '2026-04-23T00:00:00.000Z' },
+        },
+      },
+    );
+
+    expect(result.status).toBe('completed');
+    expect(capturedTrigger?.kind).toBe('task_created');
+    expect(capturedTrigger?.taskId).toBe('e2e-t');
+    expect(capturedTrigger?.projectId).toBe('e2e-p');
+  });
+
+  // ─────────────────────────────────────────────────────
+  // 시나리오 27 (Stage 5 E3): continueOnIterFailure 통합 E2E
+  // forEach 3 items, 전체 실패 → loop NODE 는 success, terminated=complete-with-errors
+  // Note: buildResult() 는 sub-node failures 도 카운트하므로 result.status='failed' 가능.
+  //       여기서는 loop NODE 의 출력(spec 파싱·handler 연동)을 검증한다.
+  // ─────────────────────────────────────────────────────
+  it('27. continueOnIterFailure: all items fail → loop node success with complete-with-errors', async () => {
+    registry.register(
+      new MockAdapter({
+        type: 'agent',
+        behavior: {
+          executeCallback: async (): Promise<NodeOutput> => ({
+            status: 'failure',
+            error: { code: 'err', message: 'always-fail', category: 'persistent' },
+          }),
+        },
+      }),
+    );
+
+    const yaml = `
+adplVersion: 1
+name: continue-on-failure-e2e
+triggers:
+  - id: t1
+    type: task_created
+pipeline:
+  - id: process
+    type: loop
+    mode: forEach
+    over: '["a","b","c"]'
+    continueOnIterFailure: true
+    do:
+      - id: step-agent
+        type: agent
+        role: planner
+settings:
+  maxParallel: 1
+`;
+
+    const result = await executor.run({
+      pipelineYaml: yaml,
+      projectId: 'e2e-p',
+      pipelineVersionId: 'continue-on-failure-v1',
+      taskId: 'e2e-t',
+      triggerContext: TRIGGER,
+      worktreeRoot: '/tmp/test-worktree',
+    });
+
+    // loop NODE 자체는 success (continueOnIterFailure 가 파싱·적용됨)
+    const loopState = Array.from(result.state.nodes.values()).find(
+      (n) => n.nodeId === 'pipeline.0',
+    );
+    expect(loopState?.status).toBe('success');
+    const data = loopState?.output?.data as Record<string, unknown> | undefined;
+    expect(data?.iterationCount).toBe(3);
+    expect(data?.terminated).toBe('complete-with-errors');
+
+    const iters = data?.iterations as Array<{ failed?: boolean }> | undefined;
+    expect(iters?.every((it) => it.failed === true)).toBe(true);
+  });
+
+  // ─────────────────────────────────────────────────────
+  // 시나리오 28 (Stage 5 E3): breakCondition 통합 E2E
+  // forEach 5 items, index=1 에서 break → iterationCount=2, terminated=break
+  // ─────────────────────────────────────────────────────
+  it('28. breakCondition: breaks at index=1 → iterationCount=2, terminated=break', async () => {
+    registry.register(
+      new MockAdapter({
+        type: 'agent',
+        behavior: {
+          executeCallback: async (): Promise<NodeOutput> => ({ status: 'success', data: null }),
+        },
+      }),
+    );
+
+    const yaml = `
+adplVersion: 1
+name: break-condition-e2e
+triggers:
+  - id: t1
+    type: task_created
+pipeline:
+  - id: process
+    type: loop
+    mode: forEach
+    over: '["a","b","c","d","e"]'
+    breakCondition:
+      field: '$loop.index'
+      eq: 1
+    do:
+      - id: step-agent
+        type: agent
+        role: planner
+settings:
+  maxParallel: 1
+`;
+
+    const result = await executor.run({
+      pipelineYaml: yaml,
+      projectId: 'e2e-p',
+      pipelineVersionId: 'break-condition-v1',
+      taskId: 'e2e-t',
+      triggerContext: TRIGGER,
+      worktreeRoot: '/tmp/test-worktree',
+    });
+
+    expect(result.status).toBe('completed');
+
+    const loopState = Array.from(result.state.nodes.values()).find(
+      (n) => n.nodeId === 'pipeline.0',
+    );
+    expect(loopState?.status).toBe('success');
+    const data = loopState?.output?.data as Record<string, unknown> | undefined;
+    expect(data?.iterationCount).toBe(2);
+    expect(data?.terminated).toBe('break');
+  });
+
+  // ─────────────────────────────────────────────────────
   // 추가: 10 샘플 YAML smoke test
   // executor.run() 으로 전수 실행 — throw 없이 완료/실패 반환 확인
   // ─────────────────────────────────────────────────────

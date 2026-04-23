@@ -141,6 +141,15 @@ export function resolveField(field: string, ctx: ExecutionContext): unknown {
     case '$variables':
       current = ctx.$variables;
       break;
+    case '$trigger':
+      current = ctx.$trigger;
+      break;
+    case '$task':
+      current = ctx.$task;
+      break;
+    case '$project':
+      current = ctx.$project;
+      break;
     default:
       return undefined;
   }

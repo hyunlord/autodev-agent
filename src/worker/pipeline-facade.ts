@@ -13,6 +13,7 @@ import { nanoid } from 'nanoid';
 import { resolve } from 'path';
 import type { EmitFn } from './pipeline-types';
 import type { TriggerContextBase } from '@/lib/adpl/types';
+import { buildTriggerContext } from './context-builder';
 
 type TaskRow = typeof tasks.$inferSelect;
 
@@ -127,6 +128,8 @@ async function runPhasePPipeline(task: TaskRow, emit: EmitFn): Promise<void> {
     bus,
   );
 
+  const taskTriggerCtx = buildTriggerContext(task);
+
   try {
     const result = await executor.run({
       pipelineYaml: version.pipelineYaml,
@@ -135,6 +138,8 @@ async function runPhasePPipeline(task: TaskRow, emit: EmitFn): Promise<void> {
       taskId,
       triggerContext,
       worktreeRoot,
+    }, {
+      worker: { triggerContext: taskTriggerCtx as unknown as Record<string, unknown> },
     });
 
     const success = result.status === 'completed';

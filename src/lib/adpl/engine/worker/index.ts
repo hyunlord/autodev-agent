@@ -17,6 +17,8 @@ export interface WorkerOptions {
   worktreeRoot?: string;
   /** Adapter 미등록 시 throw 대신 failure 반환 (default: false = throw) */
   lenientOnMissingAdapter?: boolean;
+  /** Runtime trigger context injected into ExecutionContext.$trigger */
+  triggerContext?: Record<string, unknown>;
 }
 
 /**
@@ -91,7 +93,7 @@ export class RealWorker implements Worker {
 
       let output: NodeOutput;
       try {
-        const context = buildExecutionContext(node, plan, state, this.options.env, this.options.worktreeRoot);
+        const context = buildExecutionContext(node, plan, state, this.options.env, this.options.worktreeRoot, this.options.triggerContext);
         output = await withTimeout(
           adapter.execute(node.spec, context, {
             cancellationToken: token,
