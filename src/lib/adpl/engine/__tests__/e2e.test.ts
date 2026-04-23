@@ -540,6 +540,123 @@ settings:
   });
 
   // ─────────────────────────────────────────────────────
+  // 시나리오 12: branch then 선택 E2E
+  // truthy: false 조건 (undefined field) → case[0] 선택 → branch 노드 success
+  // branch handler output 에 selectedCase='case[0]' 확인
+  // ─────────────────────────────────────────────────────
+  it('12. branch then 선택: 조건 매칭 → branch 노드 success, selectedCase=case[0]', async () => {
+    // branch handler 내 minimal ctx 의 $nodes 는 빈 객체 →
+    // '$nodes.prepare.data.flag' → undefined → truthy: false → true → case[0] 선택
+    const yaml = `
+adplVersion: 1
+name: branch-then-e2e
+triggers:
+  - id: t1
+    type: task_created
+pipeline:
+  - id: prepare
+    type: agent
+    role: planner
+  - id: decide
+    type: branch
+    dependsOn: [prepare]
+    cases:
+      - when:
+          field: '$nodes.prepare.data.flag'
+          truthy: false
+        then:
+          - id: then-action
+            type: agent
+            role: planner
+      - default: true
+        then:
+          - id: else-action
+            type: agent
+            role: planner
+settings:
+  maxParallel: 2
+`;
+
+    const result = await executor.run({
+      pipelineYaml: yaml,
+      projectId: 'e2e-p',
+      pipelineVersionId: 'branch-then-v1',
+      taskId: 'e2e-t',
+      triggerContext: TRIGGER,
+      worktreeRoot: '/tmp/test-worktree',
+    });
+
+    expect(result.status).toBe('completed');
+
+    // branch 노드(pipeline.1) output 확인 — selectedCase='case[0]' (then 선택)
+    const branchNodeState = Array.from(result.state.nodes.values()).find(
+      (n) => n.nodeId === 'pipeline.1',
+    );
+    expect(branchNodeState).toBeDefined();
+    expect(branchNodeState!.status).toBe('success');
+    const data = branchNodeState!.output?.data as Record<string, unknown> | undefined;
+    expect(data?.selectedCase).toBe('case[0]');
+  });
+
+  // ─────────────────────────────────────────────────────
+  // 시나리오 13: branch else 선택 E2E
+  // truthy: true 조건 (undefined field) → 불일치 → default 선택
+  // branch handler output 에 selectedCase='default' 확인
+  // ─────────────────────────────────────────────────────
+  it('13. branch else 선택: 조건 불일치 → default case 선택, selectedCase=default', async () => {
+    // '$nodes.prepare.data.flag' → undefined → truthy: true → false → no match → default 선택
+    const yaml = `
+adplVersion: 1
+name: branch-else-e2e
+triggers:
+  - id: t1
+    type: task_created
+pipeline:
+  - id: prepare
+    type: agent
+    role: planner
+  - id: decide
+    type: branch
+    dependsOn: [prepare]
+    cases:
+      - when:
+          field: '$nodes.prepare.data.flag'
+          truthy: true
+        then:
+          - id: then-action
+            type: agent
+            role: planner
+      - default: true
+        then:
+          - id: else-action
+            type: agent
+            role: planner
+settings:
+  maxParallel: 2
+`;
+
+    const result = await executor.run({
+      pipelineYaml: yaml,
+      projectId: 'e2e-p',
+      pipelineVersionId: 'branch-else-v1',
+      taskId: 'e2e-t',
+      triggerContext: TRIGGER,
+      worktreeRoot: '/tmp/test-worktree',
+    });
+
+    expect(result.status).toBe('completed');
+
+    // branch 노드(pipeline.1) output 확인 — selectedCase='default' (else 선택)
+    const branchNodeState = Array.from(result.state.nodes.values()).find(
+      (n) => n.nodeId === 'pipeline.1',
+    );
+    expect(branchNodeState).toBeDefined();
+    expect(branchNodeState!.status).toBe('success');
+    const data = branchNodeState!.output?.data as Record<string, unknown> | undefined;
+    expect(data?.selectedCase).toBe('default');
+  });
+
+  // ─────────────────────────────────────────────────────
   // 추가: 10 샘플 YAML smoke test
   // executor.run() 으로 전수 실행 — throw 없이 완료/실패 반환 확인
   // ─────────────────────────────────────────────────────

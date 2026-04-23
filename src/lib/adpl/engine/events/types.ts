@@ -17,6 +17,7 @@ export type EngineEvent =
   | FlowParallelStartEvent
   | FlowBranchCompleteEvent
   | FlowParallelCompleteEvent
+  | FlowBranchSelectEvent
   | LoopIterationStartEvent
   | LoopIterationDoneEvent
   | GateOpenedEvent
@@ -113,6 +114,11 @@ export interface FlowParallelCompleteEvent extends EventBase {
   parallelId: string;
   branchCount: number;
   failureCount: number;
+}
+export interface FlowBranchSelectEvent extends EventBase {
+  type: 'flow.branch.select';
+  branchNodeId: string;
+  selectedCase: string | null;
 }
 export interface LoopIterationStartEvent extends EventBase {
   type: 'flow.loop.iteration_start';
