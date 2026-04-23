@@ -141,6 +141,29 @@ describe('pipeline facade', () => {
     await expect(runPipeline('task-1', vi.fn())).resolves.toBeUndefined();
   });
 
+  test('runPhasePPipeline: executor.run throw → PHASE_P_EXECUTOR_FAILED (ENSURE_DEFAULT_FAILED 아님)', async () => {
+    mocks.executorRun.mockRejectedValue(new Error('executor boom'));
+    mocks.dbGet
+      .mockReturnValueOnce({ ...baseTask, pipelineMode: 'phase_p', pipelineVersionId: 'v1' })
+      .mockReturnValueOnce({ id: 'v1', pipelineYaml: 'adplVersion: 1\nname: test\n' });
+    const emits: Array<{ type: string; message?: string }> = [];
+    await runPipeline('task-1', (e) => emits.push(e as { type: string; message?: string }));
+    expect(emits.some((e) => e.message?.includes('PHASE_P_EXECUTOR_FAILED'))).toBe(true);
+    expect(emits.every((e) => !e.message?.includes('ENSURE_DEFAULT_FAILED'))).toBe(true);
+    expect(mocks.dbRun).toHaveBeenCalled();
+  });
+
+  test('runPhasePPipeline: version null → PHASE_P_PIPELINE_VERSION_NOT_FOUND + failTask', async () => {
+    mocks.dbGet
+      .mockReturnValueOnce({ ...baseTask, pipelineMode: 'phase_p', pipelineVersionId: 'v-missing' })
+      .mockReturnValueOnce(null);
+    const emits: Array<{ type: string; message?: string }> = [];
+    await runPipeline('task-1', (e) => emits.push(e as { type: string; message?: string }));
+    expect(emits.some((e) => e.message?.includes('PHASE_P_PIPELINE_VERSION_NOT_FOUND'))).toBe(true);
+    expect(mocks.executorRun).not.toHaveBeenCalled();
+    expect(mocks.dbRun).toHaveBeenCalled();
+  });
+
   test('pipeline_mode === unknown → UNKNOWN_PIPELINE_MODE 에러', async () => {
     mocks.dbGet.mockReturnValue({ ...baseTask, pipelineMode: 'unexpected_mode' });
     const emits: Array<{ type: string; message?: string }> = [];

@@ -74,45 +74,54 @@ export async function runPipeline(
 
 async function runPhasePPipeline(task: TaskRow, emit: EmitFn): Promise<void> {
   const { id: taskId } = task;
-  try {
-    let pipelineVersionId = task.pipelineVersionId;
-    if (!pipelineVersionId) {
+
+  // Part A: ensureDefault 전용 try-catch
+  let pipelineVersionId = task.pipelineVersionId;
+  if (!pipelineVersionId) {
+    try {
       pipelineVersionId = await ensureDefaultPipelineVersion(task);
       await db
         .update(tasks)
         .set({ pipelineVersionId, updatedAt: new Date().toISOString() })
         .where(eq(tasks.id, taskId))
         .run();
-    }
-
-    const version = db.select().from(pipelineVersions)
-      .where(eq(pipelineVersions.id, pipelineVersionId))
-      .get();
-    if (!version) {
-      failTask(taskId, emit, 'PHASE_P_PIPELINE_VERSION_NOT_FOUND', `pipeline_version not found: ${pipelineVersionId}`);
+    } catch (err) {
+      failTask(taskId, emit, 'ENSURE_DEFAULT_FAILED', err instanceof Error ? err.message : String(err));
       return;
     }
+  }
 
-    const worktreeRoot = resolve(task.projectDir ?? process.cwd());
+  // Part B: version fetch — null 체크만 (throw 없음)
+  const version = db.select().from(pipelineVersions)
+    .where(eq(pipelineVersions.id, pipelineVersionId))
+    .get();
+  if (!version) {
+    failTask(taskId, emit, 'PHASE_P_PIPELINE_VERSION_NOT_FOUND', `pipeline_version not found: ${pipelineVersionId}`);
+    return;
+  }
 
-    const triggerContext: TriggerContextBase = {
-      triggerId: nanoid(),
-      type: 'task_created',
-      firedAt: new Date().toISOString(),
-    };
+  // Part C: executor 전용 try-catch
+  const worktreeRoot = resolve(task.projectDir ?? process.cwd());
 
-    const bus = new EventBus();
-    bus.on('*', (event) => {
-      emit({ type: 'log', level: 'info', message: `[phase_p:${event.type}]` });
-    });
+  const triggerContext: TriggerContextBase = {
+    triggerId: nanoid(),
+    type: 'task_created',
+    firedAt: new Date().toISOString(),
+  };
 
-    const executor = new PipelineExecutor(
-      new PipelineCompiler(),
-      new AdapterRegistry(),
-      new StateStore(),
-      bus,
-    );
+  const bus = new EventBus();
+  bus.on('*', (event) => {
+    emit({ type: 'log', level: 'info', message: `[phase_p:${event.type}]` });
+  });
 
+  const executor = new PipelineExecutor(
+    new PipelineCompiler(),
+    new AdapterRegistry(),
+    new StateStore(),
+    bus,
+  );
+
+  try {
     const result = await executor.run({
       pipelineYaml: version.pipelineYaml,
       projectId: task.projectId ?? '',
@@ -132,6 +141,6 @@ async function runPhasePPipeline(task: TaskRow, emit: EmitFn): Promise<void> {
 
     emit({ type: 'task_complete', success, summary: `Phase P pipeline ${result.status}` });
   } catch (err) {
-    failTask(taskId, emit, 'ENSURE_DEFAULT_FAILED', err instanceof Error ? err.message : String(err));
+    failTask(taskId, emit, 'PHASE_P_EXECUTOR_FAILED', err instanceof Error ? err.message : String(err));
   }
 }
