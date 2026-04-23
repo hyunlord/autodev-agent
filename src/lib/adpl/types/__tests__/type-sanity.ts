@@ -130,11 +130,9 @@ const gatedPipeline: AdplPipeline = {
     {
       id: 'approval-gate',
       type: 'gate',
-      prompt: '빌드 완료. 배포할까요?',
-      options: ['deploy_prod', 'defer', 'cancel'],
-      defaultOption: 'defer',
-      timeout: 28800,
-      artifactsToShow: ['build'],
+      condition: { field: '$nodes.build.data.exitCode', eq: 0 },
+      onFail: 'fail_node',
+      message: '빌드 실패 — 배포 차단',
     } satisfies GateNodeSpec,
     {
       id: 'deploy',

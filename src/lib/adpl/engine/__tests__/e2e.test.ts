@@ -749,6 +749,470 @@ settings:
   });
 
   // ─────────────────────────────────────────────────────
+  // 시나리오 16: gate pass E2E — condition truthy:false (undefined) → passes
+  // ─────────────────────────────────────────────────────
+  it('16. gate pass: condition truthy:false on undefined field → gate passes, pipeline completed', async () => {
+    const executedNodes: string[] = [];
+
+    registry.register(
+      new MockAdapter({
+        type: 'agent',
+        behavior: {
+          executeCallback: async (spec): Promise<NodeOutput> => {
+            executedNodes.push(spec.id);
+            return { status: 'success', data: null };
+          },
+        },
+      }),
+    );
+
+    const yaml = `
+adplVersion: 1
+name: gate-pass-e2e
+triggers:
+  - id: t1
+    type: task_created
+pipeline:
+  - id: build
+    type: agent
+    role: planner
+  - id: quality-check
+    type: gate
+    dependsOn: [build]
+    condition:
+      field: '$nodes.build.data.blocked'
+      truthy: false
+    onFail: fail_node
+  - id: deploy
+    type: agent
+    role: planner
+    dependsOn: [quality-check]
+settings:
+  maxParallel: 2
+`;
+
+    const result = await executor.run({
+      pipelineYaml: yaml,
+      projectId: 'e2e-p',
+      pipelineVersionId: 'gate-pass-v1',
+      taskId: 'e2e-t',
+      triggerContext: TRIGGER,
+      worktreeRoot: '/tmp/test-worktree',
+    });
+
+    expect(result.status).toBe('completed');
+    expect(executedNodes).toContain('build');
+    expect(executedNodes).toContain('deploy');
+
+    // gate 노드(pipeline.1) output 확인
+    const gateNodeState = Array.from(result.state.nodes.values()).find(
+      (n) => n.nodeId === 'pipeline.1',
+    );
+    expect(gateNodeState).toBeDefined();
+    expect(gateNodeState!.status).toBe('success');
+    const data = gateNodeState!.output?.data as Record<string, unknown> | undefined;
+    expect(data?.passed).toBe(true);
+    expect(data?.gateId).toBe('quality-check');
+  });
+
+  // ─────────────────────────────────────────────────────
+  // 시나리오 17: gate fail_node E2E — condition truthy:true (undefined) → fails
+  // downstream 노드는 abort 정책으로 skip
+  // ─────────────────────────────────────────────────────
+  it('17. gate fail_node: condition truthy:true on undefined → gate fails, deploy skipped', async () => {
+    const executedNodes: string[] = [];
+
+    registry.register(
+      new MockAdapter({
+        type: 'agent',
+        behavior: {
+          executeCallback: async (spec): Promise<NodeOutput> => {
+            executedNodes.push(spec.id);
+            return { status: 'success', data: null };
+          },
+        },
+      }),
+    );
+
+    const yaml = `
+adplVersion: 1
+name: gate-fail-e2e
+triggers:
+  - id: t1
+    type: task_created
+pipeline:
+  - id: build
+    type: agent
+    role: planner
+  - id: strict-gate
+    type: gate
+    dependsOn: [build]
+    condition:
+      field: '$nodes.build.data.score'
+      truthy: true
+    onFail: fail_node
+    message: 'Score must be truthy to proceed'
+  - id: deploy
+    type: agent
+    role: planner
+    dependsOn: [strict-gate]
+settings:
+  maxParallel: 2
+`;
+
+    const result = await executor.run(
+      {
+        pipelineYaml: yaml,
+        projectId: 'e2e-p',
+        pipelineVersionId: 'gate-fail-v1',
+        taskId: 'e2e-t',
+        triggerContext: TRIGGER,
+        worktreeRoot: '/tmp/test-worktree',
+      },
+      { scheduler: { defaultOnError: 'abort' } },
+    );
+
+    expect(result.status).toBe('failed');
+    expect(result.failedNodes).toBeGreaterThanOrEqual(1);
+    // build 은 실행됨, deploy 는 abort 로 skip
+    expect(executedNodes).toContain('build');
+    expect(executedNodes).not.toContain('deploy');
+
+    // gate 노드 failure 확인
+    const gateNodeState = Array.from(result.state.nodes.values()).find(
+      (n) => n.nodeId === 'pipeline.1',
+    );
+    expect(gateNodeState?.status).toBe('failure');
+    expect(gateNodeState?.error?.code).toBe('GATE_CONDITION_FAILED');
+    expect(gateNodeState?.error?.message).toBe('Score must be truthy to proceed');
+  });
+
+  // ─────────────────────────────────────────────────────
+  // 시나리오 18: gate + all combinator E2E
+  // all: [ truthy:false, truthy:false ] → both undefined → both true → gate passes
+  // ─────────────────────────────────────────────────────
+  it('18. gate all-combinator: both conditions pass → gate passes, pipeline completed', async () => {
+    const executedNodes: string[] = [];
+
+    registry.register(
+      new MockAdapter({
+        type: 'agent',
+        behavior: {
+          executeCallback: async (spec): Promise<NodeOutput> => {
+            executedNodes.push(spec.id);
+            return { status: 'success', data: null };
+          },
+        },
+      }),
+    );
+
+    const yaml = `
+adplVersion: 1
+name: gate-all-e2e
+triggers:
+  - id: t1
+    type: task_created
+pipeline:
+  - id: prepare
+    type: agent
+    role: planner
+  - id: multi-check
+    type: gate
+    dependsOn: [prepare]
+    condition:
+      all:
+        - field: '$nodes.prepare.data.lintOk'
+          truthy: false
+        - field: '$nodes.prepare.data.testOk'
+          truthy: false
+    onFail: fail_node
+  - id: release
+    type: agent
+    role: planner
+    dependsOn: [multi-check]
+settings:
+  maxParallel: 2
+`;
+
+    const result = await executor.run({
+      pipelineYaml: yaml,
+      projectId: 'e2e-p',
+      pipelineVersionId: 'gate-all-v1',
+      taskId: 'e2e-t',
+      triggerContext: TRIGGER,
+      worktreeRoot: '/tmp/test-worktree',
+    });
+
+    expect(result.status).toBe('completed');
+    expect(executedNodes).toContain('prepare');
+    expect(executedNodes).toContain('release');
+
+    const gateNodeState = Array.from(result.state.nodes.values()).find(
+      (n) => n.nodeId === 'pipeline.1',
+    );
+    expect(gateNodeState?.status).toBe('success');
+  });
+
+  // ─────────────────────────────────────────────────────
+  // 시나리오 19: parallel 내 branch (중첩 flow node — Stage 4 통합 E2E)
+  // track-a: branch 분기 (undefined field → truthy:false 매칭 → coder-a 실행)
+  // track-b: 단순 agent
+  // ─────────────────────────────────────────────────────
+  it('19. parallel→branch: parallel 두 브랜치 동시 실행, track-a 내 branch 분기 정상', async () => {
+    const yaml = `
+adplVersion: 1
+name: parallel-branch-e2e
+triggers:
+  - id: t1
+    type: task_created
+pipeline:
+  - id: setup
+    type: agent
+    role: planner
+  - id: multi-process
+    type: parallel
+    dependsOn: [setup]
+    branches:
+      - id: track-a
+        nodes:
+          - id: decide-a
+            type: branch
+            cases:
+              - when:
+                  field: '$nodes.setup.data.skip'
+                  truthy: false
+                then:
+                  - id: coder-a
+                    type: agent
+                    role: planner
+              - default: true
+                then:
+                  - id: reviewer-a
+                    type: agent
+                    role: planner
+      - id: track-b
+        nodes:
+          - id: analyzer-b
+            type: agent
+            role: planner
+settings:
+  maxParallel: 4
+`;
+
+    const result = await executor.run({
+      pipelineYaml: yaml,
+      projectId: 'e2e-p',
+      pipelineVersionId: 'parallel-branch-v1',
+      taskId: 'e2e-t',
+      triggerContext: TRIGGER,
+      worktreeRoot: '/tmp/test-worktree',
+    });
+
+    expect(result.status).toBe('completed');
+
+    // parallel 노드(pipeline.1) 성공 확인
+    const parallelState = Array.from(result.state.nodes.values()).find(
+      (n) => n.nodeId === 'pipeline.1',
+    );
+    expect(parallelState?.status).toBe('success');
+
+    // branch 노드(track-a 내 decide-a) pathId: pipeline.1.branches.0.nodes.0
+    const branchState = Array.from(result.state.nodes.values()).find(
+      (n) => n.nodeId === 'pipeline.1.branches.0.nodes.0',
+    );
+    expect(branchState?.status).toBe('success');
+    const branchData = branchState?.output?.data as Record<string, unknown> | undefined;
+    expect(branchData?.selectedCase).toBe('case[0]');
+  });
+
+  // ─────────────────────────────────────────────────────
+  // 시나리오 20: loop 내 parallel (중첩 flow node — Stage 4 통합 E2E)
+  // times 2회 loop, 각 iteration 에서 parallel 2 브랜치 실행
+  // ─────────────────────────────────────────────────────
+  it('20. loop→parallel: times loop 2회, 각 iteration 에서 parallel 2 브랜치 동시 실행', async () => {
+    const yaml = `
+adplVersion: 1
+name: loop-parallel-e2e
+triggers:
+  - id: t1
+    type: task_created
+pipeline:
+  - id: batch-loop
+    type: loop
+    mode: times
+    count: 2
+    do:
+      - id: par-work
+        type: parallel
+        branches:
+          - id: coder
+            nodes:
+              - id: code-node
+                type: agent
+                role: planner
+          - id: reviewer
+            nodes:
+              - id: review-node
+                type: agent
+                role: planner
+settings:
+  maxParallel: 4
+`;
+
+    const result = await executor.run({
+      pipelineYaml: yaml,
+      projectId: 'e2e-p',
+      pipelineVersionId: 'loop-parallel-v1',
+      taskId: 'e2e-t',
+      triggerContext: TRIGGER,
+      worktreeRoot: '/tmp/test-worktree',
+    });
+
+    expect(result.status).toBe('completed');
+
+    // loop 노드(pipeline.0) 성공 + 2회 반복 확인
+    const loopState = Array.from(result.state.nodes.values()).find(
+      (n) => n.nodeId === 'pipeline.0',
+    );
+    expect(loopState?.status).toBe('success');
+    const loopData = loopState?.output?.data as Record<string, unknown> | undefined;
+    expect(loopData?.iterationCount).toBe(2);
+    expect(loopData?.terminated).toBe('complete');
+  });
+
+  // ─────────────────────────────────────────────────────
+  // 시나리오 21a: branch 내 loop — condition 매칭 → times loop 3회
+  // ─────────────────────────────────────────────────────
+  it('21a. branch→loop (condition match): truthy:false → loop 3회 실행', async () => {
+    const yaml = `
+adplVersion: 1
+name: branch-loop-match-e2e
+triggers:
+  - id: t1
+    type: task_created
+pipeline:
+  - id: plan
+    type: agent
+    role: planner
+  - id: maybe-iterate
+    type: branch
+    dependsOn: [plan]
+    cases:
+      - when:
+          field: '$nodes.plan.data.iterate'
+          truthy: false
+        then:
+          - id: iter-loop
+            type: loop
+            mode: times
+            count: 3
+            do:
+              - id: iter-step
+                type: agent
+                role: planner
+      - default: true
+        then:
+          - id: fallback-step
+            type: agent
+            role: planner
+settings:
+  maxParallel: 2
+`;
+
+    const result = await executor.run({
+      pipelineYaml: yaml,
+      projectId: 'e2e-p',
+      pipelineVersionId: 'branch-loop-match-v1',
+      taskId: 'e2e-t',
+      triggerContext: TRIGGER,
+      worktreeRoot: '/tmp/test-worktree',
+    });
+
+    expect(result.status).toBe('completed');
+
+    // branch 노드(pipeline.1) case[0] 선택
+    const branchState = Array.from(result.state.nodes.values()).find(
+      (n) => n.nodeId === 'pipeline.1',
+    );
+    expect(branchState?.status).toBe('success');
+    const branchData = branchState?.output?.data as Record<string, unknown> | undefined;
+    expect(branchData?.selectedCase).toBe('case[0]');
+
+    // loop 노드(iter-loop) pathId: pipeline.1.cases.0.then.0
+    const loopState = Array.from(result.state.nodes.values()).find(
+      (n) => n.nodeId === 'pipeline.1.cases.0.then.0',
+    );
+    expect(loopState?.status).toBe('success');
+    const loopData = loopState?.output?.data as Record<string, unknown> | undefined;
+    expect(loopData?.iterationCount).toBe(3);
+  });
+
+  // ─────────────────────────────────────────────────────
+  // 시나리오 21b: branch 내 loop — condition 불일치 → default(fallback) 실행
+  // ─────────────────────────────────────────────────────
+  it('21b. branch→loop (default): truthy:true on null → default case, fallback-step 실행', async () => {
+    const yaml = `
+adplVersion: 1
+name: branch-loop-default-e2e
+triggers:
+  - id: t1
+    type: task_created
+pipeline:
+  - id: plan
+    type: agent
+    role: planner
+  - id: maybe-iterate
+    type: branch
+    dependsOn: [plan]
+    cases:
+      - when:
+          field: '$nodes.plan.data.iterate'
+          truthy: true
+        then:
+          - id: iter-loop
+            type: loop
+            mode: times
+            count: 3
+            do:
+              - id: iter-step
+                type: agent
+                role: planner
+      - default: true
+        then:
+          - id: fallback-step
+            type: agent
+            role: planner
+settings:
+  maxParallel: 2
+`;
+
+    const result = await executor.run({
+      pipelineYaml: yaml,
+      projectId: 'e2e-p',
+      pipelineVersionId: 'branch-loop-default-v1',
+      taskId: 'e2e-t',
+      triggerContext: TRIGGER,
+      worktreeRoot: '/tmp/test-worktree',
+    });
+
+    expect(result.status).toBe('completed');
+
+    // branch default 선택
+    const branchState = Array.from(result.state.nodes.values()).find(
+      (n) => n.nodeId === 'pipeline.1',
+    );
+    expect(branchState?.status).toBe('success');
+    const branchData = branchState?.output?.data as Record<string, unknown> | undefined;
+    expect(branchData?.selectedCase).toBe('default');
+
+    // loop 는 실행되지 않음
+    const loopState = Array.from(result.state.nodes.values()).find(
+      (n) => n.nodeId?.includes('iter-loop'),
+    );
+    expect(loopState).toBeUndefined();
+  });
+
+  // ─────────────────────────────────────────────────────
   // 추가: 10 샘플 YAML smoke test
   // executor.run() 으로 전수 실행 — throw 없이 완료/실패 반환 확인
   // ─────────────────────────────────────────────────────

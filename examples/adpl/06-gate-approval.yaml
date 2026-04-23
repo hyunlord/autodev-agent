@@ -1,9 +1,8 @@
-# 프로덕션 배포 전 사람 승인 대기 (human-in-the-loop)
-# Staging 배포 → gate 대기 → approve 시 프로덕션 배포, 그 외 취소
-# defaultOption: reject — 1시간 무응답 시 자동 취소 (안전 기본값)
-# reminderAfter: 1800 — 30분 후 Slack reminder 발송
+# 프로덕션 배포 전 빌드 품질 게이트 (condition-based)
+# build → gate 조건 평가 → pass 시 staging-deploy → prod-deploy
+# condition: build exitCode eq 0 (minimal ctx 에서 undefined → fail_node)
 adplVersion: 1
-name: deploy-with-approval
+name: deploy-with-gate
 
 triggers:
   - id: manual
@@ -20,24 +19,18 @@ pipeline:
 
   - id: approval
     type: gate
-    prompt: "Staging 확인 완료. 프로덕션 배포를 승인하시겠습니까?"
-    options:
-      - approve
-      - reject
-      - retry-staging
-    defaultOption: reject
-    timeout: 3600
-    notifyConfig:
-      channels:
-        - slack
-      reminderAfter: 1800
+    condition:
+      field: "$nodes.build.data.exitCode"
+      truthy: false
+    onFail: fail_node
+    message: "빌드 실패 — 배포 차단"
 
   - id: route-approval
     type: branch
     cases:
       - when:
-          field: "$nodes.approval.output.data.decision"
-          eq: "approve"
+          field: "$nodes.approval.data.passed"
+          truthy: true
         then:
           - id: prod-deploy
             type: shell
@@ -49,7 +42,7 @@ pipeline:
             provider: slack
             url: "${$env.SLACK_WEBHOOK_URL}"
             body:
-              text: "배포 취소됨: ${$nodes.approval.output.data.decision}"
+              text: "배포 취소됨: gate 조건 미충족"
 
 settings:
   allowedEnvKeys:

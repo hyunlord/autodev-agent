@@ -62,10 +62,9 @@ describe('ADPL Zod 스키마 — valid', () => {
         {
           id: 'approval',
           type: 'gate',
-          prompt: '배포할까요?',
-          options: ['deploy', 'cancel'],
-          defaultOption: 'cancel',
-          timeout: 3600,
+          condition: { field: '$nodes.build.data.exitCode', truthy: false },
+          onFail: 'fail_node',
+          message: '빌드 실패 — 배포 차단',
         },
       ],
     };

@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import { NodeSpecBaseSchema } from '../common';
+import { StructuredConditionSchema } from '../expression';
 
+// human-approval gate 알림 설정 (Stage 5+ 구현 예정, 타입 호환용 유지)
 export const NotifyConfigSchema = z.object({
   channels: z.array(z.string()).optional(),
   webhookUrl: z.string().optional(),
@@ -8,11 +10,13 @@ export const NotifyConfigSchema = z.object({
   messageTemplate: z.string().optional(),
 });
 
+/**
+ * D4 조건 게이트 스키마.
+ * condition 평가 true → 통과, false → onFail 정책 적용.
+ */
 export const GateNodeSpecSchema = NodeSpecBaseSchema.extend({
   type: z.literal('gate'),
-  prompt: z.string(),
-  options: z.array(z.string()),
-  defaultOption: z.string().optional(),
-  artifactsToShow: z.array(z.string()).optional(),
-  notifyConfig: NotifyConfigSchema.optional(),
+  condition: StructuredConditionSchema,
+  onFail: z.enum(['throw', 'fail_node']).optional(),
+  message: z.string().optional(),
 });

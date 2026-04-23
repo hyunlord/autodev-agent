@@ -87,18 +87,17 @@ pipeline:
             command: "./deploy.sh staging"
           - id: approval
             type: gate
-            prompt: "Staging 확인 후 프로덕션 배포를 승인하시겠습니까?"
-            options:
-              - approve
-              - reject
-            defaultOption: reject
-            timeout: 3600
+            condition:
+              field: "$nodes.staging-deploy.data.exitCode"
+              truthy: false
+            onFail: fail_node
+            message: "Staging 배포 실패 — 프로덕션 배포 차단"
           - id: prod-route
             type: branch
             cases:
               - when:
-                  field: "$nodes.approval.output.data.decision"
-                  eq: "approve"
+                  field: "$nodes.approval.data.passed"
+                  truthy: true
                 then:
                   - id: prod-deploy
                     type: shell

@@ -2,6 +2,7 @@ import type { FlowNodeHandler } from './flow-handler';
 import { parallelHandler } from './handlers/parallel-handler';
 import { branchHandler } from './handlers/branch-handler';
 import { loopHandler } from './handlers/loop-handler';
+import { gateHandler } from './handlers/gate-handler';
 
 const FLOW_NODE_TYPES = new Set(['parallel', 'branch', 'loop', 'gate']);
 
@@ -34,5 +35,6 @@ export function createDefaultFlowRegistry(): FlowRegistry {
   r.register(parallelHandler);
   r.register(branchHandler);
   r.register(loopHandler);
+  r.register(gateHandler);
   return r;
 }

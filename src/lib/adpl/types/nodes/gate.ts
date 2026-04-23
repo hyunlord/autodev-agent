@@ -1,5 +1,7 @@
 import type { NodeSpecBase } from '../common';
+import type { StructuredCondition } from '../expression';
 
+// 기존 human-approval gate 설정 (Stage 5+ 구현 예정)
 export interface NotifyConfig {
   channels?: string[]; // 'slack' | 'email' 등
   webhookUrl?: string; // Slot 1 가능
@@ -7,11 +9,13 @@ export interface NotifyConfig {
   messageTemplate?: string; // Slot 1 가능
 }
 
+/**
+ * D4 조건 게이트 — condition 평가로 파이프라인 진행 여부 결정.
+ * condition true → 통과 (completed), false → onFail 정책 적용.
+ */
 export interface GateNodeSpec extends NodeSpecBase {
   type: 'gate';
-  prompt: string; // 사용자에게 보여줄 질문
-  options: string[]; // 선택 가능한 옵션 (기계 식별자 권장)
-  defaultOption?: string; // timeout 시 자동 선택
-  artifactsToShow?: string[]; // 참고 자료로 표시할 노드 ID 목록
-  notifyConfig?: NotifyConfig;
+  condition: StructuredCondition;
+  onFail?: 'throw' | 'fail_node'; // 기본값: 'throw'
+  message?: string; // 실패 시 커스텀 메시지
 }
