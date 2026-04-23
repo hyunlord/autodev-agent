@@ -91,10 +91,16 @@ async function runPhasePPipeline(task: TaskRow, emit: EmitFn): Promise<void> {
     }
   }
 
-  // Part B: version fetch — null 체크만 (throw 없음)
-  const version = db.select().from(pipelineVersions)
-    .where(eq(pipelineVersions.id, pipelineVersionId))
-    .get();
+  // Part B: version fetch
+  let version;
+  try {
+    version = db.select().from(pipelineVersions)
+      .where(eq(pipelineVersions.id, pipelineVersionId))
+      .get();
+  } catch (err) {
+    failTask(taskId, emit, 'PHASE_P_PIPELINE_VERSION_FETCH_FAILED', err instanceof Error ? err.message : String(err));
+    return;
+  }
   if (!version) {
     failTask(taskId, emit, 'PHASE_P_PIPELINE_VERSION_NOT_FOUND', `pipeline_version not found: ${pipelineVersionId}`);
     return;

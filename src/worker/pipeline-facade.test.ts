@@ -164,6 +164,18 @@ describe('pipeline facade', () => {
     expect(mocks.dbRun).toHaveBeenCalled();
   });
 
+  test('runPhasePPipeline: fetchVersion throw → PHASE_P_PIPELINE_VERSION_FETCH_FAILED + failTask', async () => {
+    mocks.dbGet
+      .mockReturnValueOnce({ ...baseTask, pipelineMode: 'phase_p', pipelineVersionId: 'v-throw' })
+      .mockImplementationOnce(() => { throw new Error('DB connection lost'); });
+    const emits: Array<{ type: string; message?: string }> = [];
+    await runPipeline('task-1', (e) => emits.push(e as { type: string; message?: string }));
+    expect(emits.some((e) => e.message?.includes('PHASE_P_PIPELINE_VERSION_FETCH_FAILED'))).toBe(true);
+    expect(emits.some((e) => e.message?.includes('DB connection lost'))).toBe(true);
+    expect(mocks.executorRun).not.toHaveBeenCalled();
+    expect(mocks.dbRun).toHaveBeenCalled();
+  });
+
   test('pipeline_mode === unknown → UNKNOWN_PIPELINE_MODE 에러', async () => {
     mocks.dbGet.mockReturnValue({ ...baseTask, pipelineMode: 'unexpected_mode' });
     const emits: Array<{ type: string; message?: string }> = [];
