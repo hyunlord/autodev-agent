@@ -2,6 +2,7 @@ import type { ExecutionPlan } from '../compiler/types';
 import type { PipelineRunState } from '../state/types';
 import type { NodeOutput } from '@/lib/adpl/types';
 import type { CancellationToken } from '../cancel/token';
+import type { FlowRegistry } from './flow-registry';
 
 /**
  * Scheduler 가 호출하는 Worker 계약.
@@ -34,4 +35,6 @@ export interface SchedulerOptions {
   /** 기본 onError 정책. default: 'abort' */
   defaultOnError?: 'abort' | 'continue';
   debug?: boolean;
+  /** Flow node handler registry. default: parallelHandler 포함 기본 registry */
+  flowRegistry?: FlowRegistry;
 }

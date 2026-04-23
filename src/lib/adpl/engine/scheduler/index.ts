@@ -5,6 +5,7 @@ import type { EventBus } from '../events/bus';
 import type { CancellationToken } from '../cancel/token';
 import type { Worker, SchedulerResult, SchedulerOptions } from './types';
 import type { NodeOutput } from '@/lib/adpl/types';
+import { isFlowNode, FlowRegistry, createDefaultFlowRegistry } from './flow-registry';
 
 export class Scheduler {
   private readyQueue: string[] = [];
@@ -12,6 +13,7 @@ export class Scheduler {
   private readonly maxConcurrent: number;
   private readonly defaultOnError: 'abort' | 'continue';
   private readonly debug: boolean;
+  private readonly flowRegistry: FlowRegistry;
   private hasFailure = false;
   private startTime = 0;
 
@@ -27,6 +29,7 @@ export class Scheduler {
     this.maxConcurrent = plan.context.settings.maxParallel;
     this.defaultOnError = options.defaultOnError ?? 'abort';
     this.debug = options.debug ?? false;
+    this.flowRegistry = options.flowRegistry ?? createDefaultFlowRegistry();
   }
 
   async run(): Promise<SchedulerResult> {
@@ -134,8 +137,119 @@ export class Scheduler {
   }
 
   private async executeNode(nodeId: string): Promise<void> {
-    const output = await this.worker.execute(nodeId, this.plan, this.state, this.token);
+    const node = this.plan.nodes.get(nodeId);
+    let output: NodeOutput;
+
+    if (node && isFlowNode(node.spec.type) && this.flowRegistry.has(node.spec.type)) {
+      // flow node → FlowNodeHandler 경로 (Executor.run() 수정 없음)
+      const handler = this.flowRegistry.get(node.spec.type);
+      output = await handler.handle(
+        node.spec,
+        nodeId,
+        (subPathId) => this.runSubNodeDirectly(subPathId),
+        {
+          runId: this.state.id,
+          eventBus: this.eventBus,
+          token: this.token,
+        },
+      );
+    } else {
+      // leaf node → Worker 경로 (기존)
+      output = await this.worker.execute(nodeId, this.plan, this.state, this.token);
+    }
+
     this.handleNodeComplete(nodeId, output);
+  }
+
+  /**
+   * FlowNodeHandler 가 sub-node 를 직접 실행할 때 호출하는 콜백.
+   * 상태 전이 (pending→ready→running→terminal) + node 이벤트 emit 담당.
+   * Scheduler 의 ready queue 를 거치지 않음.
+   */
+  private async runSubNodeDirectly(pathId: string): Promise<NodeOutput> {
+    // pending → ready
+    this.store.updateNode(this.state.id, pathId, () => ({ status: 'ready' }));
+    this.eventBus.emit({
+      type: 'node.ready',
+      timestamp: new Date(),
+      runId: this.state.id,
+      nodeId: pathId,
+    });
+
+    // ready → running
+    this.store.updateNode(this.state.id, pathId, (n) => ({
+      status: 'running',
+      startedAt: new Date(),
+      attemptNumber: n.attemptNumber + 1,
+    }));
+    const attempt = this.store.getNode(this.state.id, pathId)!.attemptNumber;
+    this.eventBus.emit({
+      type: 'node.started',
+      timestamp: new Date(),
+      runId: this.state.id,
+      nodeId: pathId,
+      attempt,
+    });
+
+    let output: NodeOutput;
+    try {
+      const subNode = this.plan.nodes.get(pathId);
+      if (!subNode) {
+        throw new Error(`Sub-node "${pathId}" not found in plan`);
+      }
+
+      if (isFlowNode(subNode.spec.type) && this.flowRegistry.has(subNode.spec.type)) {
+        // 중첩 flow node — 재귀
+        const handler = this.flowRegistry.get(subNode.spec.type);
+        output = await handler.handle(
+          subNode.spec,
+          pathId,
+          (innerPathId) => this.runSubNodeDirectly(innerPathId),
+          {
+            runId: this.state.id,
+            eventBus: this.eventBus,
+            token: this.token,
+          },
+        );
+      } else {
+        output = await this.worker.execute(pathId, this.plan, this.state, this.token);
+      }
+    } catch (err) {
+      output = {
+        status: 'failure',
+        error: {
+          code: 'sub_node_crash',
+          message: err instanceof Error ? err.message : String(err),
+          category: 'persistent',
+        },
+      };
+    }
+
+    const targetStatus =
+      output.status === 'success' ? 'success' as const :
+      output.status === 'cancelled' ? 'cancelled' as const :
+      'failure' as const;
+
+    const startedAt = this.store.getNode(this.state.id, pathId)?.startedAt;
+    const durationMs = startedAt ? Date.now() - startedAt.getTime() : 0;
+
+    this.store.updateNode(this.state.id, pathId, () => ({
+      status: targetStatus,
+      completedAt: new Date(),
+      output,
+      error: output.error,
+    }));
+
+    this.eventBus.emit({
+      type: 'node.completed',
+      timestamp: new Date(),
+      runId: this.state.id,
+      nodeId: pathId,
+      output,
+      durationMs,
+    });
+
+    return output;
   }
 
   private handleNodeComplete(nodeId: string, output: NodeOutput): void {
@@ -181,6 +295,7 @@ export class Scheduler {
     const dependents = this.plan.graph.forward.get(nodeId) ?? new Set<string>();
     for (const depId of dependents) {
       const depState = this.store.getNode(this.state.id, depId);
+      // 이미 terminal 이거나 ready/running 상태이면 skip
       if (!depState || depState.status !== 'pending') continue;
       if (this.allDependenciesSatisfied(depId)) {
         this.markReady(depId);

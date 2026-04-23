@@ -14,6 +14,9 @@ export type EngineEvent =
   | NodeCancelledEvent
   | BranchTakenEvent
   | ParallelBranchDoneEvent
+  | FlowParallelStartEvent
+  | FlowBranchCompleteEvent
+  | FlowParallelCompleteEvent
   | LoopIterationStartEvent
   | LoopIterationDoneEvent
   | GateOpenedEvent
@@ -92,6 +95,24 @@ export interface ParallelBranchDoneEvent extends EventBase {
   parallelId: string;
   branchId: string;
   status: 'success' | 'failure' | 'cancelled';
+}
+export interface FlowParallelStartEvent extends EventBase {
+  type: 'flow.parallel.start';
+  parallelId: string;
+  branchCount: number;
+}
+export interface FlowBranchCompleteEvent extends EventBase {
+  type: 'flow.branch.complete';
+  parallelId: string;
+  branchId: string;
+  ok: boolean;
+  error?: string;
+}
+export interface FlowParallelCompleteEvent extends EventBase {
+  type: 'flow.parallel.complete';
+  parallelId: string;
+  branchCount: number;
+  failureCount: number;
 }
 export interface LoopIterationStartEvent extends EventBase {
   type: 'flow.loop.iteration_start';

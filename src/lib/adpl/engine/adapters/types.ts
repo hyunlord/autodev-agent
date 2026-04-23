@@ -13,6 +13,8 @@ export interface LoopContext {
 export interface FlowContext {
   parentUserId: string;
   parentType: string;
+  /** parallel 완료 후 downstream 노드에서 각 branch 결과 접근: $flow.branches.<id>.data */
+  branches?: Record<string, { data: unknown }>;
 }
 
 /**

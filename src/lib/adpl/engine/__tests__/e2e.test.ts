@@ -392,6 +392,154 @@ pipeline:
   });
 
   // ─────────────────────────────────────────────────────
+  // 시나리오 10: parallel fail-fast E2E — 1 branch 실패 → 파이프라인 실패
+  // ─────────────────────────────────────────────────────
+  it('10. parallel fail-fast: 1 branch 실패 → 파이프라인 failed', async () => {
+    registry.register(
+      new MockAdapter({
+        type: 'shell',
+        behavior: {
+          executeCallback: async (spec): Promise<NodeOutput> => {
+            if (spec.id === 'test-run') {
+              return {
+                status: 'failure',
+                error: { code: 'test_fail', message: 'tests failed', category: 'persistent' },
+              };
+            }
+            return { status: 'success', data: null };
+          },
+        },
+      }),
+    );
+
+    const yaml = `
+adplVersion: 1
+name: parallel-fail-fast
+triggers:
+  - id: t1
+    type: task_created
+pipeline:
+  - id: checks
+    type: parallel
+    branches:
+      - id: lint
+        nodes:
+          - id: lint-run
+            type: shell
+            command: pnpm lint
+      - id: test
+        nodes:
+          - id: test-run
+            type: shell
+            command: pnpm test
+      - id: tsc
+        nodes:
+          - id: tsc-run
+            type: shell
+            command: pnpm tsc
+settings:
+  maxParallel: 4
+`;
+
+    const result = await executor.run({
+      pipelineYaml: yaml,
+      projectId: 'e2e-p',
+      pipelineVersionId: 'parallel-fail-fast-v1',
+      taskId: 'e2e-t',
+      triggerContext: TRIGGER,
+      worktreeRoot: '/tmp/test-worktree',
+    });
+
+    expect(result.status).toBe('failed');
+    expect(result.failedNodes).toBeGreaterThanOrEqual(1);
+  });
+
+  // ─────────────────────────────────────────────────────
+  // 시나리오 11: parallel continueOnBranchFailure E2E
+  // 1 branch 실패 → 나머지 계속, branchFailures 저장
+  // ─────────────────────────────────────────────────────
+  it('11. parallel continueOnBranchFailure: 1 branch 실패 → 나머지 완료, 파이프라인 계속', async () => {
+    const executedNodes: string[] = [];
+
+    registry.register(
+      new MockAdapter({
+        type: 'shell',
+        behavior: {
+          executeCallback: async (spec): Promise<NodeOutput> => {
+            executedNodes.push(spec.id);
+            if (spec.id === 'test-run') {
+              return {
+                status: 'failure',
+                error: { code: 'test_fail', message: 'tests failed', category: 'persistent' },
+              };
+            }
+            return { status: 'success', data: null };
+          },
+        },
+      }),
+    );
+
+    const yaml = `
+adplVersion: 1
+name: parallel-continue
+triggers:
+  - id: t1
+    type: task_created
+pipeline:
+  - id: checks
+    type: parallel
+    onError: continue
+    branches:
+      - id: lint
+        nodes:
+          - id: lint-run
+            type: shell
+            command: pnpm lint
+      - id: test
+        nodes:
+          - id: test-run
+            type: shell
+            command: pnpm test
+      - id: tsc
+        nodes:
+          - id: tsc-run
+            type: shell
+            command: pnpm tsc
+  - id: notify
+    type: agent
+    role: planner
+settings:
+  maxParallel: 4
+`;
+
+    const result = await executor.run({
+      pipelineYaml: yaml,
+      projectId: 'e2e-p',
+      pipelineVersionId: 'parallel-continue-v1',
+      taskId: 'e2e-t',
+      triggerContext: TRIGGER,
+      worktreeRoot: '/tmp/test-worktree',
+    });
+
+    // lint-run, tsc-run 은 실행됨
+    expect(executedNodes).toContain('lint-run');
+    expect(executedNodes).toContain('tsc-run');
+    expect(executedNodes).toContain('test-run');
+
+    // parallel 자체가 failure(partial) → 파이프라인은 failed
+    expect(result.status).toBe('failed');
+
+    // parallel 노드 output 에 branchFailures 존재 확인
+    const parallelNodeState = Array.from(result.state.nodes.values()).find(
+      (n) => n.nodeId === 'pipeline.0',
+    );
+    expect(parallelNodeState).toBeDefined();
+    const data = parallelNodeState!.output?.data as Record<string, unknown> | undefined;
+    expect(data?.branchFailures).toBeDefined();
+    expect((data?.branchFailures as Array<{ branchId: string }>).some((f) => f.branchId === 'test')).toBe(true);
+  });
+
+  // ─────────────────────────────────────────────────────
   // 추가: 10 샘플 YAML smoke test
   // executor.run() 으로 전수 실행 — throw 없이 완료/실패 반환 확인
   // ─────────────────────────────────────────────────────

@@ -1,5 +1,5 @@
 import type { TaskContext, ProjectContext, TriggerContext, NodeOutput } from '@/lib/adpl/types';
-import type { ExecutionContext } from '../adapters/types';
+import type { ExecutionContext, FlowContext } from '../adapters/types';
 import type { CompiledNode, ExecutionPlan } from '../compiler/types';
 import type { PipelineRunState } from '../state/types';
 
@@ -46,7 +46,7 @@ export function buildExecutionContext(
     $nodes: collectCompletedNodeOutputs(plan, state),
     $prev: findPrevNodeOutput(node, plan, state),
     $loop: null,
-    $flow: null,
+    $flow: buildFlowContext(node, plan, state),
     $variables: plan.context.variables,
     worktreeRoot,
   };
@@ -95,4 +95,45 @@ function findPrevNodeOutput(
 
   if (!prevPathId) return null;
   return state.nodes.get(prevPathId)?.output ?? null;
+}
+
+/**
+ * $flow: parallel flow node 컨텍스트 채우기 (parallel 전용, branch/loop 는 추후).
+ *
+ * - parallel 내 sub-node: { parentUserId, parentType: 'parallel' }
+ * - parallel 완료 후 downstream 노드: { parentUserId, parentType: 'parallel', branches }
+ */
+function buildFlowContext(
+  node: CompiledNode,
+  plan: ExecutionPlan,
+  state: PipelineRunState,
+): FlowContext | null {
+  // 이 노드가 parallel branch 내부인지 확인: pathId 패턴 *.branches.N.nodes...
+  const inBranchMatch = node.pathId.match(/^(.+)\.branches\.\d+\.nodes/);
+  if (inBranchMatch) {
+    const parentPathId = inBranchMatch[1];
+    const parentNode = plan.nodes.get(parentPathId);
+    if (parentNode?.spec.type === 'parallel') {
+      return { parentUserId: parentNode.userId, parentType: 'parallel' };
+    }
+  }
+
+  // 직전 prerequisite 중 완료된 parallel 노드가 있으면 branches 결과 제공
+  for (const prereqPathId of node.prerequisites) {
+    const prereqNode = plan.nodes.get(prereqPathId);
+    if (prereqNode?.spec.type !== 'parallel') continue;
+    const prereqOutput = state.nodes.get(prereqPathId)?.output;
+    if (!prereqOutput) continue;
+
+    const rawBranches = (prereqOutput.data as Record<string, unknown> | null | undefined)?.branches;
+    const branches: Record<string, { data: unknown }> = {};
+    if (rawBranches && typeof rawBranches === 'object') {
+      for (const [id, val] of Object.entries(rawBranches as Record<string, unknown>)) {
+        branches[id] = { data: (val as Record<string, unknown> | null | undefined)?.data };
+      }
+    }
+    return { parentUserId: prereqNode.userId, parentType: 'parallel', branches };
+  }
+
+  return null;
 }
