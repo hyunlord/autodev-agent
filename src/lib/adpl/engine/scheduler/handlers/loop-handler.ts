@@ -5,6 +5,22 @@ import type { StructuredCondition } from '@/lib/adpl/types/expression';
 import { evaluateCondition } from '../condition-evaluator';
 import type { ExecutionContext, LoopContext } from '../../adapters/types';
 
+type NodesMap = Record<string, NodeOutput>;
+type SetLoopCtxFn = (loopNodePathId: string, ctx: LoopContext | null) => void;
+
+/**
+ * Scheduler 가 FlowNodeOptions 에 확장 필드로 주입하는 $nodes / setLoopCtx 를 추출.
+ * FlowNodeOptions 타입 자체에는 이 필드가 없으므로 runtime 추출.
+ */
+function extractNodes(options: FlowNodeOptions): NodesMap {
+  const nodes = (options as unknown as { $nodes?: NodesMap }).$nodes;
+  return nodes ?? {};
+}
+
+function extractSetLoopCtx(options: FlowNodeOptions): SetLoopCtxFn | undefined {
+  return (options as unknown as { setLoopCtx?: SetLoopCtxFn }).setLoopCtx;
+}
+
 const DEFAULT_MAX_ITERATIONS = 1000;
 
 /**
@@ -31,19 +47,31 @@ function makeCtxWithLoop(loopCtx: LoopContext | null): ExecutionContext {
 /**
  * forEach 의 over 필드를 resolve.
  * '$nodes.X.Y.Z' 형태의 dot-access 지원 (간이 파서).
- * 리터럴 값은 그대로 반환 (Stage 5 이전 Jexl 미지원).
+ * 리터럴 값은 JSON.parse 시도 (Stage 5 이전 Jexl 미지원).
+ *
+ * - `$nodes.foo.bar.baz` → nodes.foo.bar.baz 경로 탐색
+ * - `$task.*`, `$loop.*` 등 기타 `$` prefix → undefined (아직 미지원)
+ * - `$` 미시작: JSON.parse → 실패 시 원본 문자열 그대로 반환
  */
-function resolveOverExpression(over: string): unknown {
+function resolveOverExpression(over: string, $nodes: NodesMap): unknown {
   if (!over.startsWith('$')) {
-    // 리터럴 문자열 — array JSON parse 시도
     try {
       return JSON.parse(over);
     } catch {
       return over;
     }
   }
-  // $ 경로: 현재 handler 컨텍스트에서 $nodes 는 빈 객체 → 해석 불가 → undefined
-  return undefined;
+  if (!over.startsWith('$nodes.')) {
+    return undefined;
+  }
+  const segments = over.slice('$nodes.'.length).split('.');
+  let current: unknown = $nodes;
+  for (const seg of segments) {
+    if (current === null || current === undefined) return undefined;
+    if (typeof current !== 'object') return undefined;
+    current = (current as Record<string, unknown>)[seg];
+  }
+  return current;
 }
 
 interface IterationResult {
@@ -71,77 +99,83 @@ export const loopHandler: FlowNodeHandler<LoopNodeSpec> = {
 
     let terminated: 'complete' | 'max_iterations' | 'error' = 'complete';
     const iterations: IterationResult[] = [];
+    const setLoopCtxFn = extractSetLoopCtx(options);
 
     try {
-      if (mode === 'forEach') {
-        terminated = await runForEach(
-          spec, nodePathId, runSubNode, options, maxIterations, iterations,
-        );
-      } else if (mode === 'while') {
-        terminated = await runWhile(
-          spec, nodePathId, runSubNode, options, maxIterations, iterations,
-        );
-      } else if (mode === 'times') {
-        terminated = await runTimes(
-          spec, nodePathId, runSubNode, options, maxIterations, iterations,
-        );
-      } else {
-        throw new Error(`[LoopHandler] Unknown loop mode: ${String(mode)}`);
-      }
-    } catch (err) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      const isMaxIter = errMsg.startsWith('LOOP_MAX_ITERATIONS_EXCEEDED');
+      try {
+        if (mode === 'forEach') {
+          terminated = await runForEach(
+            spec, nodePathId, runSubNode, options, maxIterations, iterations,
+          );
+        } else if (mode === 'while') {
+          terminated = await runWhile(
+            spec, nodePathId, runSubNode, options, maxIterations, iterations,
+          );
+        } else if (mode === 'times') {
+          terminated = await runTimes(
+            spec, nodePathId, runSubNode, options, maxIterations, iterations,
+          );
+        } else {
+          throw new Error(`[LoopHandler] Unknown loop mode: ${String(mode)}`);
+        }
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        const isMaxIter = errMsg.startsWith('LOOP_MAX_ITERATIONS_EXCEEDED');
 
+        eventBus.emit({
+          type: 'flow.loop.complete',
+          timestamp: new Date(),
+          runId,
+          parentId: nodePathId,
+          iterationCount: iterations.length,
+          terminated: isMaxIter ? 'max_iterations' : 'error',
+        });
+
+        // LOOP_MAX_ITERATIONS_EXCEEDED → 상위로 전파 (throw)
+        if (isMaxIter) {
+          throw err;
+        }
+
+        return {
+          status: 'failure',
+          data: {
+            iterations,
+            iterationCount: iterations.length,
+            terminated: 'error',
+          },
+          error: {
+            code: 'loop_iteration_failure',
+            message: errMsg,
+            category: 'persistent',
+          },
+        };
+      }
+
+      // flow.loop.complete 이벤트
       eventBus.emit({
         type: 'flow.loop.complete',
         timestamp: new Date(),
         runId,
         parentId: nodePathId,
         iterationCount: iterations.length,
-        terminated: isMaxIter ? 'max_iterations' : 'error',
+        terminated,
       });
 
-      // LOOP_MAX_ITERATIONS_EXCEEDED → 상위로 전파 (throw)
-      if (isMaxIter) {
-        throw err;
-      }
-
       return {
-        status: 'failure',
+        status: 'success',
         data: {
           iterations,
           iterationCount: iterations.length,
-          terminated: 'error',
+          terminated,
         },
-        error: {
-          code: 'loop_iteration_failure',
-          message: errMsg,
-          category: 'persistent',
+        metrics: {
+          durationMs: 0, // Scheduler 레이어에서 덮어씀
         },
       };
+    } finally {
+      // 모든 iteration 종료 후 loopCtx 정리 (성공/실패/throw 무관)
+      setLoopCtxFn?.(nodePathId, null);
     }
-
-    // flow.loop.complete 이벤트
-    eventBus.emit({
-      type: 'flow.loop.complete',
-      timestamp: new Date(),
-      runId,
-      parentId: nodePathId,
-      iterationCount: iterations.length,
-      terminated,
-    });
-
-    return {
-      status: 'success',
-      data: {
-        iterations,
-        iterationCount: iterations.length,
-        terminated,
-      },
-      metrics: {
-        durationMs: 0, // Scheduler 레이어에서 덮어씀
-      },
-    };
   },
 };
 
@@ -157,10 +191,12 @@ async function runForEach(
   iterations: IterationResult[],
 ): Promise<'complete' | 'max_iterations' | 'error'> {
   const { eventBus, token, runId } = options;
+  const $nodes = extractNodes(options);
+  const setLoopCtxFn = extractSetLoopCtx(options);
 
-  // over 필드에서 items 배열 resolve
+  // over 필드에서 items 배열 resolve ($nodes.X.Y 경로 탐색 지원)
   const overExpr = spec.over ?? '';
-  const resolved = overExpr ? resolveOverExpression(overExpr) : [];
+  const resolved = overExpr ? resolveOverExpression(overExpr, $nodes) : [];
   const items = Array.isArray(resolved) ? resolved : [];
 
   // items.length > maxIterations → throw before running
@@ -191,6 +227,9 @@ async function runForEach(
       ...(asKey ? { [asKey]: item } : {}),
     };
 
+    // 현재 iteration 의 loopCtx 를 FlowRunState 에 주입 — sub-node 의 ExecutionContext.$loop 로 전달됨
+    setLoopCtxFn?.(nodePathId, loopCtx);
+
     eventBus.emit({
       type: 'flow.loop.iteration',
       timestamp: new Date(),
@@ -218,9 +257,6 @@ async function runForEach(
     }
 
     iterations.push({ index, item, data: lastData });
-
-    // loopCtx 사용 확인 (unused variable 방지)
-    void loopCtx;
   }
 
   return 'complete';
@@ -238,6 +274,7 @@ async function runWhile(
   iterations: IterationResult[],
 ): Promise<'complete' | 'max_iterations' | 'error'> {
   const { eventBus, token, runId } = options;
+  const setLoopCtxFn = extractSetLoopCtx(options);
   const doNodes = spec.do ?? [];
   let index = 0;
 
@@ -267,6 +304,9 @@ async function runWhile(
       isFirst: index === 0,
       isLast: false, // while 은 마지막 여부 미리 알 수 없음
     };
+
+    // 현재 iteration 의 loopCtx 주입
+    setLoopCtxFn?.(nodePathId, loopCtx);
 
     // doNodes 순차 실행
     let lastData: unknown = null;
@@ -318,6 +358,7 @@ async function runTimes(
   iterations: IterationResult[],
 ): Promise<'complete' | 'max_iterations' | 'error'> {
   const { eventBus, token, runId } = options;
+  const setLoopCtxFn = extractSetLoopCtx(options);
   const count = spec.count ?? 0;
   const doNodes = spec.do ?? [];
 
@@ -329,6 +370,14 @@ async function runTimes(
 
   for (let index = 0; index < count; index++) {
     if (token.isCancelled) break;
+
+    const loopCtx: LoopContext = {
+      index,
+      total: count,
+      isFirst: index === 0,
+      isLast: index === count - 1,
+    };
+    setLoopCtxFn?.(nodePathId, loopCtx);
 
     eventBus.emit({
       type: 'flow.loop.iteration',

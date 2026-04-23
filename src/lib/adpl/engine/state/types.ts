@@ -1,4 +1,5 @@
 import type { NodeStatus, NodeOutput, NodeError } from '@/lib/adpl/types';
+import type { LoopContext } from '../adapters/types';
 
 export type { NodeStatus } from '@/lib/adpl/types';
 
@@ -33,6 +34,12 @@ export interface FlowRunState {
   iterationResults?: NodeOutput[];
   gateWaitId?: string;
   decision?: string;
+  /**
+   * Transient: active loop iteration context.
+   * Set by loop-handler before each iteration, cleared after the loop completes.
+   * Used by Worker.buildExecutionContext to inject $loop into sub-nodes' ExecutionContext.
+   */
+  currentLoopCtx?: LoopContext;
 }
 
 export interface PipelineRunState {

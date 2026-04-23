@@ -1213,6 +1213,148 @@ settings:
   });
 
   // ─────────────────────────────────────────────────────
+  // 시나리오 22 (Stage 5 E1): $nodes propagation through 3-node sequential pipeline
+  // A→B→C: 각 leaf 노드는 ExecutionContext.$nodes 에서 이전 노드 output 접근 가능
+  // ─────────────────────────────────────────────────────
+  it('22. $nodes propagation: 3-node pipeline A→B→C, each sees previous nodes outputs', async () => {
+    const bCtxNodes: Record<string, unknown> = {};
+    const cCtxNodes: Record<string, unknown> = {};
+
+    registry.register(
+      new MockAdapter({
+        type: 'agent',
+        behavior: {
+          executeCallback: async (spec, context): Promise<NodeOutput> => {
+            if (spec.id === 'a') {
+              return { status: 'success', data: { value: 42 } };
+            }
+            if (spec.id === 'b') {
+              Object.assign(bCtxNodes, context.$nodes);
+              return { status: 'success', data: { derived: 'from-b' } };
+            }
+            if (spec.id === 'c') {
+              Object.assign(cCtxNodes, context.$nodes);
+              return { status: 'success', data: null };
+            }
+            return { status: 'success', data: null };
+          },
+        },
+      }),
+    );
+
+    const yaml = `
+adplVersion: 1
+name: nodes-propagation
+triggers:
+  - id: t1
+    type: task_created
+pipeline:
+  - id: a
+    type: agent
+    role: planner
+  - id: b
+    type: agent
+    role: planner
+  - id: c
+    type: agent
+    role: planner
+settings:
+  maxParallel: 3
+`;
+
+    const result = await executor.run({
+      pipelineYaml: yaml,
+      projectId: 'e2e-p',
+      pipelineVersionId: 'nodes-prop-v1',
+      taskId: 'e2e-t',
+      triggerContext: TRIGGER,
+      worktreeRoot: '/tmp/test-worktree',
+    });
+
+    expect(result.status).toBe('completed');
+
+    // B 실행 시점: a 는 완료됨 → $nodes.a 존재
+    const bA = bCtxNodes.a as NodeOutput | undefined;
+    expect(bA).toBeDefined();
+    expect(bA!.status).toBe('success');
+    expect((bA!.data as { value: number }).value).toBe(42);
+
+    // C 실행 시점: a, b 모두 완료 → $nodes.a, $nodes.b 존재
+    const cA = cCtxNodes.a as NodeOutput | undefined;
+    const cB = cCtxNodes.b as NodeOutput | undefined;
+    expect(cA).toBeDefined();
+    expect(cB).toBeDefined();
+    expect(cB!.status).toBe('success');
+    expect((cB!.data as { derived: string }).derived).toBe('from-b');
+  });
+
+  // ─────────────────────────────────────────────────────
+  // 시나리오 23 (Stage 5 E1): forEach loop over $nodes.plan.data.tasks
+  // plan 노드 output 의 tasks 배열을 실제 over 에서 resolve → 3회 loop
+  // ─────────────────────────────────────────────────────
+  it('23. forEach over $nodes.plan.data.tasks: plan output tasks 배열 → 3회 반복', async () => {
+    registry.register(
+      new MockAdapter({
+        type: 'agent',
+        behavior: {
+          executeCallback: async (spec): Promise<NodeOutput> => {
+            if (spec.id === 'plan') {
+              return {
+                status: 'success',
+                data: { tasks: ['task-a', 'task-b', 'task-c'] },
+              };
+            }
+            return { status: 'success', data: null };
+          },
+        },
+      }),
+    );
+
+    const yaml = `
+adplVersion: 1
+name: foreach-nodes-resolve
+triggers:
+  - id: t1
+    type: task_created
+pipeline:
+  - id: plan
+    type: agent
+    role: planner
+  - id: process
+    type: loop
+    mode: forEach
+    over: '$nodes.plan.data.tasks'
+    dependsOn: [plan]
+    do:
+      - id: step
+        type: agent
+        role: planner
+settings:
+  maxParallel: 1
+`;
+
+    const result = await executor.run({
+      pipelineYaml: yaml,
+      projectId: 'e2e-p',
+      pipelineVersionId: 'foreach-nodes-v1',
+      taskId: 'e2e-t',
+      triggerContext: TRIGGER,
+      worktreeRoot: '/tmp/test-worktree',
+    });
+
+    expect(result.status).toBe('completed');
+
+    // loop 노드(pipeline.1) 성공 + 3회 반복 확인
+    const loopState = Array.from(result.state.nodes.values()).find(
+      (n) => n.nodeId === 'pipeline.1',
+    );
+    expect(loopState?.status).toBe('success');
+    const data = loopState?.output?.data as Record<string, unknown> | undefined;
+    expect(data?.iterationCount).toBe(3);
+    expect(data?.terminated).toBe('complete');
+  });
+
+  // ─────────────────────────────────────────────────────
   // 추가: 10 샘플 YAML smoke test
   // executor.run() 으로 전수 실행 — throw 없이 완료/실패 반환 확인
   // ─────────────────────────────────────────────────────

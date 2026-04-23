@@ -1,5 +1,5 @@
 import type { TaskContext, ProjectContext, TriggerContext, NodeOutput } from '@/lib/adpl/types';
-import type { ExecutionContext, FlowContext } from '../adapters/types';
+import type { ExecutionContext, FlowContext, LoopContext } from '../adapters/types';
 import type { CompiledNode, ExecutionPlan } from '../compiler/types';
 import type { PipelineRunState } from '../state/types';
 
@@ -45,7 +45,7 @@ export function buildExecutionContext(
     $self: node,
     $nodes: collectCompletedNodeOutputs(plan, state),
     $prev: findPrevNodeOutput(node, plan, state),
-    $loop: null,
+    $loop: findActiveLoopContext(node, state),
     $flow: buildFlowContext(node, plan, state),
     $variables: plan.context.variables,
     worktreeRoot,
@@ -55,8 +55,10 @@ export function buildExecutionContext(
 /**
  * $nodes: userId 기준, 완료(success/failure) 노드만 포함.
  * 표현식 파서(Stage 5)가 $nodes.<userId> 로 참조.
+ *
+ * Exported (Stage 5 E1): Scheduler 에서 FlowNodeHandler 에 $nodes 를 주입할 때 사용.
  */
-function collectCompletedNodeOutputs(
+export function collectCompletedNodeOutputs(
   plan: ExecutionPlan,
   state: PipelineRunState,
 ): Record<string, NodeOutput> {
@@ -68,6 +70,26 @@ function collectCompletedNodeOutputs(
     }
   }
   return out;
+}
+
+/**
+ * Loop sub-node 의 경우, 부모 loop 노드의 FlowRunState.currentLoopCtx 를 $loop 로 주입.
+ *
+ * pathId 패턴: `{loopPathId}.do.{iterIdx}.{nodeIdx}`
+ *               → `.do.` 좌측이 loop 노드의 pathId
+ *
+ * loop 안에 없으면 null.
+ * 중첩 loop 의 경우 가장 가까운 부모 loop (마지막 `.do.` 기준) 의 context 반환.
+ */
+function findActiveLoopContext(
+  node: CompiledNode,
+  state: PipelineRunState,
+): LoopContext | null {
+  const doMarker = '.do.';
+  const doIdx = node.pathId.lastIndexOf(doMarker);
+  if (doIdx === -1) return null;
+  const loopPathId = node.pathId.slice(0, doIdx);
+  return state.flowStates.get(loopPathId)?.currentLoopCtx ?? null;
 }
 
 /**

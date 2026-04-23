@@ -5,7 +5,10 @@ import type { EventBus } from '../events/bus';
 import type { CancellationToken } from '../cancel/token';
 import type { Worker, SchedulerResult, SchedulerOptions } from './types';
 import type { NodeOutput } from '@/lib/adpl/types';
+import type { FlowNodeOptions } from './flow-handler';
+import type { LoopContext } from '../adapters/types';
 import { isFlowNode, FlowRegistry, createDefaultFlowRegistry } from './flow-registry';
+import { collectCompletedNodeOutputs } from '../worker/context-builder';
 
 export class Scheduler {
   private readyQueue: string[] = [];
@@ -136,6 +139,35 @@ export class Scheduler {
     });
   }
 
+  /**
+   * FlowNodeHandler 에 전달할 options 구성.
+   * 기본 { runId, eventBus, token } 외에 $nodes 및 setLoopCtx 콜백 주입.
+   *
+   * FlowNodeOptions 타입은 flow-handler.ts 에서 정의되어 있어 (확장 불가),
+   * 추가 필드는 as cast 로 전달. Handler 는 필요 시 `options as Record<string,unknown>` 로
+   * 필드 추출.
+   */
+  private buildFlowHandlerOptions(): FlowNodeOptions {
+    const $nodes = collectCompletedNodeOutputs(this.plan, this.state);
+    const setLoopCtx = (loopNodePathId: string, ctx: LoopContext | null): void => {
+      const flowState = this.state.flowStates.get(loopNodePathId);
+      if (!flowState) return;
+      if (ctx) {
+        flowState.currentLoopCtx = ctx;
+      } else {
+        delete flowState.currentLoopCtx;
+      }
+    };
+    const opts = {
+      runId: this.state.id,
+      eventBus: this.eventBus,
+      token: this.token,
+      $nodes,
+      setLoopCtx,
+    };
+    return opts as FlowNodeOptions;
+  }
+
   private async executeNode(nodeId: string): Promise<void> {
     const node = this.plan.nodes.get(nodeId);
     let output: NodeOutput;
@@ -147,11 +179,7 @@ export class Scheduler {
         node.spec,
         nodeId,
         (subPathId) => this.runSubNodeDirectly(subPathId),
-        {
-          runId: this.state.id,
-          eventBus: this.eventBus,
-          token: this.token,
-        },
+        this.buildFlowHandlerOptions(),
       );
     } else {
       // leaf node → Worker 경로 (기존)
@@ -225,11 +253,7 @@ export class Scheduler {
           subNode.spec,
           pathId,
           (innerPathId) => this.runSubNodeDirectly(innerPathId),
-          {
-            runId: this.state.id,
-            eventBus: this.eventBus,
-            token: this.token,
-          },
+          this.buildFlowHandlerOptions(),
         );
       } else {
         output = await this.worker.execute(pathId, this.plan, this.state, this.token);
