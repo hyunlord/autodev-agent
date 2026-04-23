@@ -139,7 +139,7 @@ async function runPhasePPipeline(task: TaskRow, emit: EmitFn): Promise<void> {
       triggerContext,
       worktreeRoot,
     }, {
-      worker: { triggerContext: taskTriggerCtx as unknown as Record<string, unknown> },
+      worker: { triggerContext: taskTriggerCtx },
     });
 
     const success = result.status === 'completed';

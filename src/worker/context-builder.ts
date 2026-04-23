@@ -10,6 +10,7 @@ export interface TriggerContext {
   createdAt: string;
   category?: string;
   priority?: string;
+  [key: string]: unknown;
 }
 
 export function buildTriggerContext(task: TaskRow): TriggerContext {

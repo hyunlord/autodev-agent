@@ -377,6 +377,7 @@ describe('Stage 3 C9-1 — facade routes phase_p task to PipelineExecutor', () =
         pipelineVersionId: 'v1',
         worktreeRoot: '/tmp/facade-e2e',
       }),
+      expect.anything(), // E3: options.worker.triggerContext 주입으로 2번째 인자 추가됨
     );
     expect(emits.some((e) => e.type === 'task_complete' && e.success === true)).toBe(true);
   });
