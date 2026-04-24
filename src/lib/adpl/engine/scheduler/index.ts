@@ -18,6 +18,7 @@ export class Scheduler {
   private readonly debug: boolean;
   private readonly flowRegistry: FlowRegistry;
   private hasFailure = false;
+  private fatalError: Error | null = null;
   private startTime = 0;
 
   constructor(
@@ -54,6 +55,7 @@ export class Scheduler {
 
     while (!this.isDone()) {
       await this.schedulerTick();
+      if (this.fatalError) throw this.fatalError;
     }
 
     await this.finalize();
@@ -134,6 +136,10 @@ export class Scheduler {
       // executeNode 내부에서 worker crash 는 try/catch 로 failure 로 변환된다.
       // 여기서 catch 되는 건 handleNodeComplete 단계의 에러 — 이미 terminal 이므로 로깅만.
       this.executeNode(nodeId).catch((err) => {
+        if (err instanceof Error && err.message.startsWith('CHECKPOINT_PERSIST_FAILED')) {
+          this.fatalError = err;
+          return;
+        }
         if (this.debug) {
           console.error(`[Scheduler] handleNodeComplete threw for ${nodeId}:`, err);
         }
@@ -204,6 +210,9 @@ export class Scheduler {
         output = await this.worker.execute(nodeId, this.plan, this.state, this.token);
       }
     } catch (err) {
+      if (err instanceof Error && err.message.startsWith('CHECKPOINT_PERSIST_FAILED')) {
+        throw err;
+      }
       output = {
         status: 'failure',
         error: {
@@ -221,6 +230,10 @@ export class Scheduler {
    * FlowNodeHandler 가 sub-node 를 직접 실행할 때 호출하는 콜백.
    * 상태 전이 (pending→ready→running→terminal) + node 이벤트 emit 담당.
    * Scheduler 의 ready queue 를 거치지 않음.
+   *
+   * Checkpoint policy: sub-node 완료(성공·실패 무관) 후 store.persist() 호출.
+   * persist 실패는 CHECKPOINT_PERSIST_FAILED 에러로 throw — node.completed emit 후
+   * re-throw 하여 waitForAnyComplete 를 깨운 뒤 executeNode catch → fatalError 경로로 전파.
    */
   private async runSubNodeDirectly(pathId: string): Promise<NodeOutput> {
     // 동적 서브노드(loop 반복 생성 pathId)는 컴파일 타임에 없을 수 있으므로 lazy 등록
@@ -314,7 +327,17 @@ export class Scheduler {
       error: output.error,
     }));
 
-    await this.store.persist(this.state.id);
+    let subPersistError: Error | null = null;
+    try {
+      await this.store.persist(this.state.id);
+    } catch (persistErr) {
+      const msg = persistErr instanceof Error ? persistErr.message : String(persistErr);
+      subPersistError = new Error(
+        `CHECKPOINT_PERSIST_FAILED: runId=${this.state.id} nodeId=${pathId} cause=${msg}`,
+      );
+      // emit 전에 설정해야 waitForAnyComplete resolve 후 run() 루프에서 즉시 감지됨
+      this.fatalError = subPersistError;
+    }
 
     this.eventBus.emit({
       type: 'node.completed',
@@ -325,9 +348,17 @@ export class Scheduler {
       durationMs,
     });
 
+    if (subPersistError) throw subPersistError;
     return output;
   }
 
+  /**
+   * 노드 완료 처리. 상태 갱신 후 DB persist.
+   *
+   * Checkpoint policy: 노드 완료(성공·실패 무관) 후 store.persist() 호출.
+   * persist 실패는 CHECKPOINT_PERSIST_FAILED 에러로 throw — node.completed emit 후
+   * re-throw 하여 waitForAnyComplete 를 깨운 뒤 startExecution catch → fatalError 경로로 전파.
+   */
   private async handleNodeComplete(nodeId: string, output: NodeOutput): Promise<void> {
     this.running.delete(nodeId);
 
@@ -347,7 +378,17 @@ export class Scheduler {
       error: output.error,
     }));
 
-    await this.store.persist(this.state.id);
+    let persistError: Error | null = null;
+    try {
+      await this.store.persist(this.state.id);
+    } catch (persistErr) {
+      const msg = persistErr instanceof Error ? persistErr.message : String(persistErr);
+      persistError = new Error(
+        `CHECKPOINT_PERSIST_FAILED: runId=${this.state.id} nodeId=${nodeId} cause=${msg}`,
+      );
+      // emit 전에 설정해야 waitForAnyComplete resolve 후 run() 루프에서 즉시 감지됨
+      this.fatalError = persistError;
+    }
 
     if (targetStatus === 'failure') {
       this.hasFailure = true;
@@ -357,8 +398,9 @@ export class Scheduler {
     // emit 이 waitForAnyComplete 를 resolve 시키면 scheduler 가 즉시 isDone() 을 평가하므로,
     // 의존 노드를 ready 로 marking 하기 전에 loop 가 종료되면 후속 노드가 실행되지 못한다.
     if (
-      targetStatus === 'success' ||
-      (targetStatus === 'failure' && this.defaultOnError === 'continue')
+      !persistError &&
+      (targetStatus === 'success' ||
+        (targetStatus === 'failure' && this.defaultOnError === 'continue'))
     ) {
       await this.unlockDependents(nodeId);
     }
@@ -371,6 +413,8 @@ export class Scheduler {
       output,
       durationMs,
     });
+
+    if (persistError) throw persistError;
   }
 
   private async unlockDependents(nodeId: string): Promise<void> {
