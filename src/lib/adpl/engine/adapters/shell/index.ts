@@ -1,11 +1,12 @@
 import type { ShellNodeSpec } from '@/lib/adpl/types/nodes/shell';
 import type { NodeAdapter, ExecutionContext, ExecutionOptions, ValidationResult } from '../types';
 import type { NodeOutput } from '@/lib/adpl/types';
-import type { ShellOutputEvent } from '../../events/types';
+import type { ShellOutputEvent, WorktreeIsolatedEvent } from '../../events/types';
 import { validateShellCommand, ShellPolicyError } from './policy';
 import { buildShellEnv } from './env-builder';
 import { parseOutput, MAX_OUTPUT_BYTES } from './output-parser';
 import { spawnWithKillGroup } from '../../utils/spawn-with-kill-group';
+import { computeIsolatedCwd } from './isolation';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
@@ -32,11 +33,36 @@ export const shellAdapter: NodeAdapter<ShellNodeSpec> = {
     }
 
     const startMs = Date.now();
-    const env = buildShellEnv(spec, ctx);
     const taskAny = ctx.$task as unknown as Record<string, unknown>;
-    const runId = (taskAny?.id as string) ?? 'unknown';
+    // Prefer explicit runId from ExecutionContext (injected by context-builder in F4).
+    // Fallback to $task.id for tests that construct ExecutionContext inline without runId.
+    const runId = ctx.runId ?? ((taskAny?.id as string) ?? 'unknown');
     const nodeId = spec.id;
-    const cwd = spec.cwd ?? ctx.worktreeRoot;
+
+    // Stage 6 F4 — Worktree isolation. Skip when:
+    //   - user opts out via spec.useIsolatedWorktree === false
+    //   - user explicitly set spec.cwd (user intent wins)
+    //   - ExecutionContext has no runId (standalone/test contexts without context-builder)
+    const useIsolation =
+      spec.useIsolatedWorktree !== false && !spec.cwd && !!ctx.runId;
+    const isolation = await computeIsolatedCwd({
+      worktreeRoot: ctx.worktreeRoot,
+      runId: ctx.runId,
+      useIsolation,
+    });
+
+    if (isolation.isolated && isolation.isolatedPath) {
+      options.eventBus.emit({
+        type: 'worktree.isolated',
+        timestamp: new Date(),
+        runId,
+        nodeId,
+        isolatedPath: isolation.isolatedPath,
+      } as WorktreeIsolatedEvent);
+    }
+
+    const cwd = spec.cwd ?? isolation.cwd;
+    const env = buildShellEnv(spec, ctx, cwd);
     const timeoutMs = spec.timeout != null ? spec.timeout * 1000 : DEFAULT_TIMEOUT_MS;
     const isShellMode = (spec.mode ?? 'shell') === 'shell';
 

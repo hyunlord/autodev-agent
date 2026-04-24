@@ -35,6 +35,13 @@ export interface ExecutionContext {
   $variables: Record<string, unknown>;
   /** Absolute path to worktree root. All side effects MUST stay inside this directory. */
   worktreeRoot: string;
+  /**
+   * Stage 6 F4 — Pipeline run identifier. Optional because many unit tests
+   * construct ExecutionContext inline without runId; production `buildExecutionContext`
+   * always injects `state.id`. Consumers that need it (e.g. shell isolation) must
+   * fall back when undefined.
+   */
+  runId?: string;
 }
 
 export interface ValidationError {

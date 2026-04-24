@@ -1,10 +1,13 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { mkdtemp, rm, stat, realpath } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { shellAdapter } from '../index';
 import { CancellationToken } from '../../../cancel/token';
 import { EventBus } from '../../../events/bus';
 import type { ShellNodeSpec } from '@/lib/adpl/types/nodes/shell';
 import type { ExecutionContext, ExecutionOptions } from '../../types';
-import type { ShellOutputEvent } from '../../../events/types';
+import type { ShellOutputEvent, WorktreeIsolatedEvent } from '../../../events/types';
 
 function makeCtx(worktreeRoot = process.cwd()): ExecutionContext {
   return {
@@ -201,5 +204,119 @@ describe('shellAdapter — validate()', () => {
 describe('shellAdapter — defaultTimeout()', () => {
   it('returns 30 seconds', () => {
     expect(shellAdapter.defaultTimeout()).toBe(30);
+  });
+});
+
+// ─── Stage 6 F4 — worktree isolation ──────────────────────────────────────────
+describe('shellAdapter — worktree isolation (F4)', () => {
+  let workRoot: string;
+
+  beforeEach(async () => {
+    workRoot = await mkdtemp(join(tmpdir(), 'phase-p-shell-iso-'));
+  });
+
+  afterEach(async () => {
+    await rm(workRoot, { recursive: true, force: true }).catch(() => undefined);
+  });
+
+  function makeIsoCtx(runId: string): ExecutionContext {
+    const c = makeCtx(workRoot);
+    c.runId = runId;
+    return c;
+  }
+
+  it('default (useIsolatedWorktree omitted) → emits worktree.isolated + cwd under .phase-p-runs', async () => {
+    const bus = new EventBus();
+    const emitted: WorktreeIsolatedEvent[] = [];
+    bus.on('worktree.isolated', (e) => { emitted.push(e as WorktreeIsolatedEvent); });
+
+    const localOpts = makeOptions({ eventBus: bus });
+    const ctx = makeIsoCtx('run-iso-1');
+    // pwd inside shell = isolated cwd (realpath on macOS to handle /var → /private/var)
+    const result = await shellAdapter.execute(spec('pwd'), ctx, localOpts);
+
+    expect(result.status).toBe('success');
+    const data = result.data as Record<string, unknown>;
+    const expectedCwd = resolve(workRoot, '.phase-p-runs', 'run-iso-1');
+    expect(String(data.stdout).trim()).toBe(await realpath(expectedCwd));
+
+    // Namespace directory created
+    expect((await stat(expectedCwd)).isDirectory()).toBe(true);
+
+    // Exactly one worktree.isolated event emitted
+    expect(emitted).toHaveLength(1);
+    expect(emitted[0].runId).toBe('run-iso-1');
+    expect(emitted[0].nodeId).toBe('test');
+    expect(emitted[0].isolatedPath).toBe(expectedCwd);
+  });
+
+  it('useIsolatedWorktree=false → cwd is worktreeRoot, no isolation event', async () => {
+    const bus = new EventBus();
+    const emitted: WorktreeIsolatedEvent[] = [];
+    bus.on('worktree.isolated', (e) => { emitted.push(e as WorktreeIsolatedEvent); });
+
+    const localOpts = makeOptions({ eventBus: bus });
+    const ctx = makeIsoCtx('run-iso-2');
+    const result = await shellAdapter.execute(
+      spec('pwd', { useIsolatedWorktree: false }),
+      ctx,
+      localOpts,
+    );
+
+    expect(result.status).toBe('success');
+    const data = result.data as Record<string, unknown>;
+    expect(String(data.stdout).trim()).toBe(await realpath(workRoot));
+
+    // No namespace directory, no event
+    await expect(stat(join(workRoot, '.phase-p-runs'))).rejects.toThrow();
+    expect(emitted).toHaveLength(0);
+  });
+
+  it('AUTODEV_WORKTREE env reflects isolated path when isolation active', async () => {
+    const ctx = makeIsoCtx('run-env-iso');
+    const result = await shellAdapter.execute(
+      spec('echo "$AUTODEV_WORKTREE"'),
+      ctx,
+      makeOptions(),
+    );
+
+    expect(result.status).toBe('success');
+    const data = result.data as Record<string, unknown>;
+    const expected = resolve(workRoot, '.phase-p-runs', 'run-env-iso');
+    expect(String(data.stdout).trim()).toBe(expected);
+  });
+
+  it('explicit spec.cwd wins over isolation default (no event, no namespace dir)', async () => {
+    const bus = new EventBus();
+    const emitted: WorktreeIsolatedEvent[] = [];
+    bus.on('worktree.isolated', (e) => { emitted.push(e as WorktreeIsolatedEvent); });
+
+    const localOpts = makeOptions({ eventBus: bus });
+    const ctx = makeIsoCtx('run-explicit-cwd');
+    const result = await shellAdapter.execute(
+      spec('pwd', { cwd: workRoot }),
+      ctx,
+      localOpts,
+    );
+
+    expect(result.status).toBe('success');
+    const data = result.data as Record<string, unknown>;
+    expect(String(data.stdout).trim()).toBe(await realpath(workRoot));
+    expect(emitted).toHaveLength(0);
+    await expect(stat(join(workRoot, '.phase-p-runs'))).rejects.toThrow();
+  });
+
+  it('no runId in ctx → isolation silently skipped (backwards compat for inline ExecutionContext)', async () => {
+    const bus = new EventBus();
+    const emitted: WorktreeIsolatedEvent[] = [];
+    bus.on('worktree.isolated', (e) => { emitted.push(e as WorktreeIsolatedEvent); });
+
+    const localOpts = makeOptions({ eventBus: bus });
+    const ctx = makeCtx(workRoot); // no runId
+    const result = await shellAdapter.execute(spec('pwd'), ctx, localOpts);
+
+    expect(result.status).toBe('success');
+    expect(emitted).toHaveLength(0);
+    await expect(stat(join(workRoot, '.phase-p-runs'))).rejects.toThrow();
   });
 });

@@ -50,6 +50,7 @@ export function buildExecutionContext(
     $flow: buildFlowContext(node, plan, state),
     $variables: plan.context.variables,
     worktreeRoot,
+    runId: state.id,
   };
 }
 

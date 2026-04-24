@@ -15,4 +15,12 @@ export interface ShellNodeSpec extends NodeSpecBase {
   failOnNonZero?: boolean; // default: true
   allowExitCodes?: number[]; // 성공으로 처리할 추가 exit codes
   idempotencyKey?: string;
+  /**
+   * Stage 6 F4 — opt-out for per-run worktree isolation.
+   * `undefined` or `true` → shell cwd is `${worktreeRoot}/.phase-p-runs/${runId}`.
+   * `false` → shell cwd is `ctx.worktreeRoot` (legacy behavior).
+   * When `spec.cwd` is explicitly set, user intent wins and isolation is skipped
+   * regardless of this flag (see shell/index.ts).
+   */
+  useIsolatedWorktree?: boolean;
 }

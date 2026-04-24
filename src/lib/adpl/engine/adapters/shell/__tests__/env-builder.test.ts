@@ -79,4 +79,15 @@ describe('buildShellEnv', () => {
     const env = buildShellEnv(makeSpec(), ctx);
     expect(env.AUTODEV_PROJECT_ID).toBe('');
   });
+
+  // Stage 6 F4 — effectiveCwd override
+  it('effectiveCwd arg overrides AUTODEV_WORKTREE (isolation path)', () => {
+    const env = buildShellEnv(makeSpec(), makeCtx(), '/tmp/worktree/.phase-p-runs/r1');
+    expect(env.AUTODEV_WORKTREE).toBe('/tmp/worktree/.phase-p-runs/r1');
+  });
+
+  it('effectiveCwd omitted → AUTODEV_WORKTREE falls back to ctx.worktreeRoot', () => {
+    const env = buildShellEnv(makeSpec(), makeCtx());
+    expect(env.AUTODEV_WORKTREE).toBe('/tmp/worktree');
+  });
 });

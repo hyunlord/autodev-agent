@@ -36,7 +36,8 @@ export type EngineEvent =
   | HttpResponseEvent
   | HttpRetryEvent
   | WebhookSentEvent
-  | WebhookRateLimitedEvent;
+  | WebhookRateLimitedEvent
+  | WorktreeIsolatedEvent;
 
 interface EventBase {
   timestamp: Date;
@@ -240,6 +241,16 @@ export interface WebhookRateLimitedEvent extends EventBase {
   type: 'webhook.rate_limited';
   provider: string;
   waitMs: number;
+}
+
+/**
+ * Stage 6 F4 — Emitted when shell adapter activates per-run isolation namespace
+ * (`.phase-p-runs/{runId}`). `runId` inherited from `EventBase`.
+ */
+export interface WorktreeIsolatedEvent extends EventBase {
+  type: 'worktree.isolated';
+  nodeId: string;
+  isolatedPath: string;
 }
 
 export type EngineEventType = EngineEvent['type'];

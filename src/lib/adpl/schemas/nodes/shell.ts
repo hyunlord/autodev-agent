@@ -23,4 +23,5 @@ export const ShellNodeSpecSchema = NodeSpecBaseSchema.extend({
   failOnNonZero: z.boolean().optional(),
   allowExitCodes: z.array(z.number().int()).optional(),
   idempotencyKey: z.string().optional(),
+  useIsolatedWorktree: z.boolean().optional(),
 });
