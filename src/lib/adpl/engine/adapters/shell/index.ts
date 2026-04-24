@@ -1,11 +1,13 @@
 import type { ShellNodeSpec } from '@/lib/adpl/types/nodes/shell';
 import type { NodeAdapter, ExecutionContext, ExecutionOptions, ValidationResult } from '../types';
 import type { NodeOutput } from '@/lib/adpl/types';
+import type { ShellOutputEvent } from '../../events/types';
 import { validateShellCommand, ShellPolicyError } from './policy';
 import { buildShellEnv } from './env-builder';
-import { buildStdin } from './stdin-injector';
-import { runSpawn } from './spawner';
-import { parseOutput } from './output-parser';
+import { parseOutput, MAX_OUTPUT_BYTES } from './output-parser';
+import { spawnWithKillGroup } from '../../utils/spawn-with-kill-group';
+
+const DEFAULT_TIMEOUT_MS = 30_000;
 
 export const shellAdapter: NodeAdapter<ShellNodeSpec> = {
   type: 'shell',
@@ -31,29 +33,86 @@ export const shellAdapter: NodeAdapter<ShellNodeSpec> = {
 
     const startMs = Date.now();
     const env = buildShellEnv(spec, ctx);
-    const stdin = buildStdin(spec);
+    const taskAny = ctx.$task as unknown as Record<string, unknown>;
+    const runId = (taskAny?.id as string) ?? 'unknown';
+    const nodeId = spec.id;
+    const cwd = spec.cwd ?? ctx.worktreeRoot;
+    const timeoutMs = spec.timeout != null ? spec.timeout * 1000 : DEFAULT_TIMEOUT_MS;
+    const isShellMode = (spec.mode ?? 'shell') === 'shell';
 
-    const spawnResult = await runSpawn(spec, { env, stdin, ctx, options });
-    const durationMs = Date.now() - startMs;
+    let spawnResult: Awaited<ReturnType<typeof spawnWithKillGroup>>;
+    try {
+      spawnResult = await spawnWithKillGroup({
+        command: spec.command,
+        args: isShellMode ? [] : (spec.args ?? []),
+        cwd,
+        env: env as NodeJS.ProcessEnv,
+        stdin: spec.stdin,
+        timeoutMs,
+        signal: options.cancellationToken.signal,
+        shell: isShellMode,
+        maxOutputBytes: MAX_OUTPUT_BYTES,
+        onStdout: (chunk) => options.eventBus.emit({
+          type: 'shell.output',
+          timestamp: new Date(),
+          runId,
+          nodeId,
+          stream: 'stdout',
+          chunk: chunk.toString('utf-8'),
+        } as ShellOutputEvent),
+        onStderr: (chunk) => options.eventBus.emit({
+          type: 'shell.output',
+          timestamp: new Date(),
+          runId,
+          nodeId,
+          stream: 'stderr',
+          chunk: chunk.toString('utf-8'),
+        } as ShellOutputEvent),
+      });
+    } catch (err) {
+      const durationMs = Date.now() - startMs;
+      const msg = err instanceof Error ? err.message : String(err);
 
-    if (spawnResult.timedOut) {
-      return {
-        status: 'failure',
-        error: {
-          code: 'timeout',
-          message: `Shell command timed out after ${spec.timeout ?? 30}s`,
-          category: 'timeout',
-        },
-        data: {
-          stdout: null,
-          stderr: spawnResult.stderr.toString('utf-8'),
-          exitCode: spawnResult.exitCode,
-          outputTruncated: spawnResult.outputTruncated,
-        },
-        metrics: { durationMs, outputTruncated: spawnResult.outputTruncated },
-      };
+      if (msg.startsWith('SPAWN_TIMEOUT')) {
+        return {
+          status: 'failure',
+          error: {
+            code: 'timeout',
+            message: `Shell command timed out after ${spec.timeout ?? 30}s`,
+            category: 'timeout',
+          },
+          data: {
+            stdout: null,
+            stderr: '',
+            exitCode: 124,
+            outputTruncated: false,
+          },
+          metrics: { durationMs, outputTruncated: false },
+        };
+      }
+
+      if (msg.startsWith('SPAWN_ABORTED')) {
+        return {
+          status: 'failure',
+          error: {
+            code: 'cancelled',
+            message: 'Shell command was cancelled',
+            category: 'cancellation',
+          },
+          data: {
+            stdout: null,
+            stderr: '',
+            exitCode: 130,
+            outputTruncated: false,
+          },
+          metrics: { durationMs, outputTruncated: false },
+        };
+      }
+
+      throw err;
     }
 
+    const durationMs = Date.now() - startMs;
     const parsed = parseOutput(spawnResult.stdout, spec.outputFormat ?? 'auto');
     const allowedCodes = spec.allowExitCodes ?? [];
     const failOnNonZero = spec.failOnNonZero ?? true;
@@ -65,9 +124,9 @@ export const shellAdapter: NodeAdapter<ShellNodeSpec> = {
       stdout: parsed,
       stderr: spawnResult.stderr.toString('utf-8'),
       exitCode: spawnResult.exitCode,
-      outputTruncated: spawnResult.outputTruncated,
+      outputTruncated: spawnResult.truncated,
     };
-    const metrics = { durationMs, outputTruncated: spawnResult.outputTruncated };
+    const metrics = { durationMs, outputTruncated: spawnResult.truncated };
 
     if (!ok) {
       return {
