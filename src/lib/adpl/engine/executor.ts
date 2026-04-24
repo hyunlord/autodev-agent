@@ -107,7 +107,7 @@ export class PipelineExecutor {
     const compileDurationMs = Date.now() - compileStart;
 
     // 2. State 생성
-    const state = this.store.create(plan);
+    const state = await this.store.create(plan);
 
     // 3. Cancellation token (run 당 하나)
     const token = new CancellationToken();
@@ -148,7 +148,7 @@ export class PipelineExecutor {
         totalDurationMs: Date.now() - totalStart,
         compileDurationMs,
         executionDurationMs,
-        state: this.store.get(state.id)!,
+        state: (await this.store.get(state.id))!,
         plan,
       };
     } finally {
@@ -175,8 +175,8 @@ export class PipelineExecutor {
   }
 
   /** 상태 조회 (요약). */
-  getStatus(runId: string): RunStatus | null {
-    const state = this.store.get(runId);
+  async getStatus(runId: string): Promise<RunStatus | null> {
+    const state = await this.store.get(runId);
     if (!state) return null;
 
     const count = (s: string) =>
@@ -198,7 +198,7 @@ export class PipelineExecutor {
   }
 
   /** 전체 state 조회 (디버깅용). */
-  getState(runId: string): PipelineRunState | null {
+  async getState(runId: string): Promise<PipelineRunState | null> {
     return this.store.get(runId);
   }
 

@@ -18,7 +18,7 @@ async function setup(sampleFile: string, adapterBehavior?: ConstructorParameters
 
   const plan = result.plan;
   const store = new StateStore();
-  const state = store.create(plan);
+  const state = await store.create(plan);
   const bus = new EventBus();
   const token = new CancellationToken();
   const collector = new MemoryEventCollector();

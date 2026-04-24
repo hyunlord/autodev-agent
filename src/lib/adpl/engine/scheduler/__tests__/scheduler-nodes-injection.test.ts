@@ -74,7 +74,7 @@ settings:
 
     const plan = await compilePipeline(yaml);
     const store = new StateStore();
-    const state = store.create(plan);
+    const state = await store.create(plan);
     const bus = new EventBus();
     const token = new CancellationToken();
     const registry = new FlowRegistry();
@@ -115,7 +115,7 @@ settings:
 `;
     const plan = await compilePipeline(yaml);
     const store = new StateStore();
-    const state = store.create(plan);
+    const state = await store.create(plan);
     const bus = new EventBus();
     const token = new CancellationToken();
     const registry = new FlowRegistry();
@@ -160,7 +160,7 @@ settings:
 `;
     const plan = await compilePipeline(yaml);
     const store = new StateStore();
-    const state = store.create(plan);
+    const state = await store.create(plan);
     const bus = new EventBus();
     const token = new CancellationToken();
     const registry = new FlowRegistry();
@@ -211,7 +211,7 @@ settings:
 `;
     const plan = await compilePipeline(yaml);
     const store = new StateStore();
-    const state = store.create(plan);
+    const state = await store.create(plan);
     const bus = new EventBus();
     const token = new CancellationToken();
     const registry = new FlowRegistry();
@@ -271,7 +271,7 @@ settings:
 `;
     const plan = await compilePipeline(yaml);
     const store = new StateStore();
-    const state = store.create(plan);
+    const state = await store.create(plan);
     const bus = new EventBus();
     const token = new CancellationToken();
     const registry = new FlowRegistry();
@@ -328,7 +328,7 @@ settings:
 `;
     const plan = await compilePipeline(yaml);
     const store = new StateStore();
-    const state = store.create(plan);
+    const state = await store.create(plan);
     const bus = new EventBus();
     const token = new CancellationToken();
     const registry = new FlowRegistry();

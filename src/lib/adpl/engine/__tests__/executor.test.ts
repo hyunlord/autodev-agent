@@ -282,7 +282,7 @@ describe('PipelineExecutor', () => {
         worktreeRoot: '/tmp/test-worktree',
       });
 
-      const status = executor.getStatus(result.runId);
+      const status = await executor.getStatus(result.runId);
       expect(status).not.toBeNull();
       expect(status!.status).toBe('completed');
       expect(status!.nodesCompleted).toBe(1);
@@ -290,8 +290,8 @@ describe('PipelineExecutor', () => {
       expect(status!.completedAt).toBeDefined();
     });
 
-    it('getStatus for unknown runId → null', () => {
-      expect(executor.getStatus('unknown-id')).toBeNull();
+    it('getStatus for unknown runId → null', async () => {
+      expect(await executor.getStatus('unknown-id')).toBeNull();
     });
 
     it('getState returns full PipelineRunState', async () => {
@@ -304,14 +304,14 @@ describe('PipelineExecutor', () => {
         worktreeRoot: '/tmp/test-worktree',
       });
 
-      const state = executor.getState(result.runId);
+      const state = await executor.getState(result.runId);
       expect(state).not.toBeNull();
       expect(state!.id).toBe(result.runId);
       expect(state!.nodes.size).toBeGreaterThan(0);
     });
 
-    it('getState for unknown runId → null', () => {
-      expect(executor.getState('unknown-id')).toBeNull();
+    it('getState for unknown runId → null', async () => {
+      expect(await executor.getState('unknown-id')).toBeNull();
     });
   });
 
@@ -418,7 +418,7 @@ describe('PipelineExecutor', () => {
         worktreeRoot: '/tmp/test-worktree',
       });
 
-      const state = executor.getState(result.runId);
+      const state = await executor.getState(result.runId);
       expect(result.state).toBe(state);
     });
   });

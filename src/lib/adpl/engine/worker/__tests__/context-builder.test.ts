@@ -13,14 +13,14 @@ async function setupPlan(sampleFile: string) {
   if (!result.ok) throw new Error(`Compile failed: ${result.errors.map((e) => e.message).join(', ')}`);
   const plan = result.plan;
   const store = new StateStore();
-  const state = store.create(plan);
+  const state = await store.create(plan);
   return { plan, state, store };
 }
 
-function transitionToSuccess(store: StateStore, runId: string, nodeId: string, data: unknown = null) {
-  store.updateNode(runId, nodeId, () => ({ status: 'ready' }));
-  store.updateNode(runId, nodeId, () => ({ status: 'running', startedAt: new Date() }));
-  store.updateNode(runId, nodeId, () => ({
+async function transitionToSuccess(store: StateStore, runId: string, nodeId: string, data: unknown = null) {
+  await store.updateNode(runId, nodeId, () => ({ status: 'ready' }));
+  await store.updateNode(runId, nodeId, () => ({ status: 'running', startedAt: new Date() }));
+  await store.updateNode(runId, nodeId, () => ({
     status: 'success',
     completedAt: new Date(),
     output: { status: 'success', data },
@@ -82,7 +82,7 @@ describe('buildExecutionContext', () => {
     const { plan, state, store } = await setupPlan('02-plan-code-verify.yaml');
     const [planNode, codeNode, verifyNode] = plan.topologicalOrder.map((id) => plan.nodes.get(id)!);
 
-    transitionToSuccess(store, state.id, planNode.pathId, 'plan-result');
+    await transitionToSuccess(store, state.id, planNode.pathId, 'plan-result');
 
     // For verify node, $nodes should include plan but not code (still pending)
     const ctx = buildExecutionContext(verifyNode, plan, state, {}, TEST_WORKTREE);
@@ -96,9 +96,9 @@ describe('buildExecutionContext', () => {
     const { plan, state, store } = await setupPlan('02-plan-code-verify.yaml');
     const [planNode] = plan.topologicalOrder.map((id) => plan.nodes.get(id)!);
 
-    store.updateNode(state.id, planNode.pathId, () => ({ status: 'ready' }));
-    store.updateNode(state.id, planNode.pathId, () => ({ status: 'running', startedAt: new Date() }));
-    store.updateNode(state.id, planNode.pathId, () => ({
+    await store.updateNode(state.id, planNode.pathId, () => ({ status: 'ready' }));
+    await store.updateNode(state.id, planNode.pathId, () => ({ status: 'running', startedAt: new Date() }));
+    await store.updateNode(state.id, planNode.pathId, () => ({
       status: 'failure',
       completedAt: new Date(),
       output: { status: 'failure', error: { code: 'test', message: 'fail', category: 'persistent' } },
@@ -120,7 +120,7 @@ describe('buildExecutionContext', () => {
     const { plan, state, store } = await setupPlan('02-plan-code-verify.yaml');
     const [planNode, codeNode] = plan.topologicalOrder.map((id) => plan.nodes.get(id)!);
 
-    transitionToSuccess(store, state.id, planNode.pathId, 'plan-output');
+    await transitionToSuccess(store, state.id, planNode.pathId, 'plan-output');
 
     const ctx = buildExecutionContext(codeNode, plan, state, {}, TEST_WORKTREE);
     expect(ctx.$prev).toBeDefined();

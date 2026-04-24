@@ -12,8 +12,13 @@ vi.mock('@/lib/db/client', () => ({
     update: () => ({ set: () => ({ where: () => ({ run: facadeMocks.dbRun }) }) }),
   },
 }));
-vi.mock('@/lib/db/schema', () => ({ tasks: {}, events: {}, pipelineVersions: {} }));
-vi.mock('drizzle-orm', () => ({ eq: vi.fn() }));
+vi.mock('@/lib/db/schema', () => ({
+  tasks: {},
+  events: {},
+  pipelineVersions: {},
+  pipelineRunState: { runId: {}, stateJson: {}, version: {}, updatedAt: {} },
+}));
+vi.mock('drizzle-orm', () => ({ eq: vi.fn(), and: vi.fn() }));
 vi.mock('nanoid', () => ({ nanoid: () => 'facade-e2e-id' }));
 vi.mock('@/worker/pipeline', () => ({ runLegacyPipeline: vi.fn() }));
 import { createServer } from 'http';

@@ -38,7 +38,7 @@ export class Scheduler {
   async run(): Promise<SchedulerResult> {
     this.startTime = Date.now();
 
-    this.store.updatePipeline(this.state.id, 'running');
+    await this.store.updatePipeline(this.state.id, 'running');
     this.eventBus.emit({
       type: 'run.started',
       timestamp: new Date(),
@@ -48,7 +48,7 @@ export class Scheduler {
 
     if (!this.token.isCancelled) {
       for (const rootId of this.getRootNodeIds()) {
-        this.markReady(rootId);
+        await this.markReady(rootId);
       }
     }
 
@@ -56,7 +56,7 @@ export class Scheduler {
       await this.schedulerTick();
     }
 
-    this.finalize();
+    await this.finalize();
 
     const result = this.buildResult();
 
@@ -64,7 +64,7 @@ export class Scheduler {
       result.status === 'completed' ? 'completed' as const :
       result.status === 'failed' ? 'failed' as const :
       'cancelled' as const;
-    this.store.updatePipeline(this.state.id, pipelineStatus);
+    await this.store.updatePipeline(this.state.id, pipelineStatus);
 
     const eventStatus =
       result.status === 'completed' ? 'success' as const :
@@ -87,7 +87,7 @@ export class Scheduler {
       (this.hasFailure && this.defaultOnError === 'abort');
 
     if (shouldAbort) {
-      this.cancelReadyNodes();
+      await this.cancelReadyNodes();
       if (this.running.size > 0) {
         await this.waitForAnyComplete();
       }
@@ -100,7 +100,7 @@ export class Scheduler {
       !this.token.isCancelled
     ) {
       const nodeId = this.readyQueue.shift()!;
-      this.startExecution(nodeId);
+      void this.startExecution(nodeId);
     }
 
     if (this.running.size === 0) return;
@@ -108,35 +108,49 @@ export class Scheduler {
     await this.waitForAnyComplete();
   }
 
-  private startExecution(nodeId: string): void {
-    this.store.updateNode(this.state.id, nodeId, (n) => ({
-      status: 'running',
-      startedAt: new Date(),
-      attemptNumber: n.attemptNumber + 1,
-    }));
-
+  private async startExecution(nodeId: string): Promise<void> {
+    // Mark node as running BEFORE any await to avoid a race where schedulerTick
+    // (which calls `void startExecution(...)`) sees `running.size === 0` and
+    // exits the loop before this method resumes past its first await.
     this.running.add(nodeId);
 
-    const attempt = this.store.getNode(this.state.id, nodeId)!.attemptNumber;
-    this.eventBus.emit({
-      type: 'node.started',
-      timestamp: new Date(),
-      runId: this.state.id,
-      nodeId,
-      attempt,
-    });
+    try {
+      await this.store.updateNode(this.state.id, nodeId, (n) => ({
+        status: 'running',
+        startedAt: new Date(),
+        attemptNumber: n.attemptNumber + 1,
+      }));
 
-    this.executeNode(nodeId).catch((err) => {
-      if (this.debug) console.error(`[Scheduler] Worker threw for ${nodeId}:`, err);
-      this.handleNodeComplete(nodeId, {
+      const nodeState = await this.store.getNode(this.state.id, nodeId);
+      const attempt = nodeState!.attemptNumber;
+      this.eventBus.emit({
+        type: 'node.started',
+        timestamp: new Date(),
+        runId: this.state.id,
+        nodeId,
+        attempt,
+      });
+
+      // executeNode 내부에서 worker crash 는 try/catch 로 failure 로 변환된다.
+      // 여기서 catch 되는 건 handleNodeComplete 단계의 에러 — 이미 terminal 이므로 로깅만.
+      this.executeNode(nodeId).catch((err) => {
+        if (this.debug) {
+          console.error(`[Scheduler] handleNodeComplete threw for ${nodeId}:`, err);
+        }
+      });
+    } catch (err) {
+      // store.updateNode / store.getNode / eventBus.emit 이 throw 하면
+      // running 에서 제거하고 노드를 failure 로 정리해야 스케줄러가 hang 하지 않는다.
+      this.running.delete(nodeId);
+      await this.handleNodeComplete(nodeId, {
         status: 'failure',
         error: {
-          code: 'worker_crash',
+          code: 'scheduler_internal_error',
           message: err instanceof Error ? err.message : String(err),
           category: 'persistent',
         },
       });
-    });
+    }
   }
 
   /**
@@ -172,21 +186,35 @@ export class Scheduler {
     const node = this.plan.nodes.get(nodeId);
     let output: NodeOutput;
 
-    if (node && isFlowNode(node.spec.type) && this.flowRegistry.has(node.spec.type)) {
-      // flow node → FlowNodeHandler 경로 (Executor.run() 수정 없음)
-      const handler = this.flowRegistry.get(node.spec.type);
-      output = await handler.handle(
-        node.spec,
-        nodeId,
-        (subPathId) => this.runSubNodeDirectly(subPathId),
-        this.buildFlowHandlerOptions(),
-      );
-    } else {
-      // leaf node → Worker 경로 (기존)
-      output = await this.worker.execute(nodeId, this.plan, this.state, this.token);
+    // worker/flow 경로만 catch 로 감싼다. handleNodeComplete 단계에서 발생한 에러는
+    // 이미 node 가 terminal 상태일 수 있으므로 다시 handleNodeComplete(failure) 를 부르면
+    // success→failure 같은 무효 전이로 이어진다. 이 단계의 에러는 상위 Promise.reject 로 전파.
+    try {
+      if (node && isFlowNode(node.spec.type) && this.flowRegistry.has(node.spec.type)) {
+        // flow node → FlowNodeHandler 경로 (Executor.run() 수정 없음)
+        const handler = this.flowRegistry.get(node.spec.type);
+        output = await handler.handle(
+          node.spec,
+          nodeId,
+          (subPathId) => this.runSubNodeDirectly(subPathId),
+          this.buildFlowHandlerOptions(),
+        );
+      } else {
+        // leaf node → Worker 경로 (기존)
+        output = await this.worker.execute(nodeId, this.plan, this.state, this.token);
+      }
+    } catch (err) {
+      output = {
+        status: 'failure',
+        error: {
+          code: 'worker_crash',
+          message: err instanceof Error ? err.message : String(err),
+          category: 'persistent',
+        },
+      };
     }
 
-    this.handleNodeComplete(nodeId, output);
+    await this.handleNodeComplete(nodeId, output);
   }
 
   /**
@@ -196,10 +224,10 @@ export class Scheduler {
    */
   private async runSubNodeDirectly(pathId: string): Promise<NodeOutput> {
     // 동적 서브노드(loop 반복 생성 pathId)는 컴파일 타임에 없을 수 있으므로 lazy 등록
-    this.store.registerDynamicNode(this.state.id, pathId);
+    await this.store.registerDynamicNode(this.state.id, pathId);
 
     // pending → ready
-    this.store.updateNode(this.state.id, pathId, () => ({ status: 'ready' }));
+    await this.store.updateNode(this.state.id, pathId, () => ({ status: 'ready' }));
     this.eventBus.emit({
       type: 'node.ready',
       timestamp: new Date(),
@@ -208,12 +236,13 @@ export class Scheduler {
     });
 
     // ready → running
-    this.store.updateNode(this.state.id, pathId, (n) => ({
+    await this.store.updateNode(this.state.id, pathId, (n) => ({
       status: 'running',
       startedAt: new Date(),
       attemptNumber: n.attemptNumber + 1,
     }));
-    const attempt = this.store.getNode(this.state.id, pathId)!.attemptNumber;
+    const runningNodeState = await this.store.getNode(this.state.id, pathId);
+    const attempt = runningNodeState!.attemptNumber;
     this.eventBus.emit({
       type: 'node.started',
       timestamp: new Date(),
@@ -274,15 +303,18 @@ export class Scheduler {
       output.status === 'cancelled' ? 'cancelled' as const :
       'failure' as const;
 
-    const startedAt = this.store.getNode(this.state.id, pathId)?.startedAt;
+    const preCompleteNodeState = await this.store.getNode(this.state.id, pathId);
+    const startedAt = preCompleteNodeState?.startedAt;
     const durationMs = startedAt ? Date.now() - startedAt.getTime() : 0;
 
-    this.store.updateNode(this.state.id, pathId, () => ({
+    await this.store.updateNode(this.state.id, pathId, () => ({
       status: targetStatus,
       completedAt: new Date(),
       output,
       error: output.error,
     }));
+
+    await this.store.persist(this.state.id);
 
     this.eventBus.emit({
       type: 'node.completed',
@@ -296,10 +328,11 @@ export class Scheduler {
     return output;
   }
 
-  private handleNodeComplete(nodeId: string, output: NodeOutput): void {
+  private async handleNodeComplete(nodeId: string, output: NodeOutput): Promise<void> {
     this.running.delete(nodeId);
 
-    const startedAt = this.store.getNode(this.state.id, nodeId)?.startedAt;
+    const preCompleteNodeState = await this.store.getNode(this.state.id, nodeId);
+    const startedAt = preCompleteNodeState?.startedAt;
     const durationMs = startedAt ? Date.now() - startedAt.getTime() : 0;
 
     const targetStatus =
@@ -307,12 +340,28 @@ export class Scheduler {
       output.status === 'failure' ? 'failure' as const :
       'cancelled' as const;
 
-    this.store.updateNode(this.state.id, nodeId, () => ({
+    await this.store.updateNode(this.state.id, nodeId, () => ({
       status: targetStatus,
       completedAt: new Date(),
       output,
       error: output.error,
     }));
+
+    await this.store.persist(this.state.id);
+
+    if (targetStatus === 'failure') {
+      this.hasFailure = true;
+    }
+
+    // unlockDependents 는 `node.completed` emit 이전에 완료되어야 한다.
+    // emit 이 waitForAnyComplete 를 resolve 시키면 scheduler 가 즉시 isDone() 을 평가하므로,
+    // 의존 노드를 ready 로 marking 하기 전에 loop 가 종료되면 후속 노드가 실행되지 못한다.
+    if (
+      targetStatus === 'success' ||
+      (targetStatus === 'failure' && this.defaultOnError === 'continue')
+    ) {
+      await this.unlockDependents(nodeId);
+    }
 
     this.eventBus.emit({
       type: 'node.completed',
@@ -322,37 +371,26 @@ export class Scheduler {
       output,
       durationMs,
     });
-
-    if (targetStatus === 'failure') {
-      this.hasFailure = true;
-    }
-
-    if (
-      targetStatus === 'success' ||
-      (targetStatus === 'failure' && this.defaultOnError === 'continue')
-    ) {
-      this.unlockDependents(nodeId);
-    }
   }
 
-  private unlockDependents(nodeId: string): void {
+  private async unlockDependents(nodeId: string): Promise<void> {
     const dependents = this.plan.graph.forward.get(nodeId) ?? new Set<string>();
     for (const depId of dependents) {
-      const depState = this.store.getNode(this.state.id, depId);
+      const depState = await this.store.getNode(this.state.id, depId);
       // 이미 terminal 이거나 ready/running 상태이면 skip
       if (!depState || depState.status !== 'pending') continue;
-      if (this.allDependenciesSatisfied(depId)) {
-        this.markReady(depId);
+      if (await this.allDependenciesSatisfied(depId)) {
+        await this.markReady(depId);
       }
     }
   }
 
-  private allDependenciesSatisfied(nodeId: string): boolean {
+  private async allDependenciesSatisfied(nodeId: string): Promise<boolean> {
     const prereqs = this.plan.graph.reverse.get(nodeId);
     if (!prereqs || prereqs.size === 0) return true;
 
     for (const prereqId of prereqs) {
-      const s = this.store.getNode(this.state.id, prereqId);
+      const s = await this.store.getNode(this.state.id, prereqId);
       if (!s) return false;
       if (s.status === 'success' || s.status === 'skipped') continue;
       if (s.status === 'failure' && this.defaultOnError === 'continue') continue;
@@ -361,11 +399,11 @@ export class Scheduler {
     return true;
   }
 
-  private markReady(nodeId: string): void {
-    const current = this.store.getNode(this.state.id, nodeId);
+  private async markReady(nodeId: string): Promise<void> {
+    const current = await this.store.getNode(this.state.id, nodeId);
     if (!current || current.status !== 'pending') return;
 
-    this.store.updateNode(this.state.id, nodeId, () => ({ status: 'ready' }));
+    await this.store.updateNode(this.state.id, nodeId, () => ({ status: 'ready' }));
     this.readyQueue.push(nodeId);
 
     this.eventBus.emit({
@@ -376,10 +414,10 @@ export class Scheduler {
     });
   }
 
-  private cancelReadyNodes(): void {
+  private async cancelReadyNodes(): Promise<void> {
     while (this.readyQueue.length > 0) {
       const nodeId = this.readyQueue.shift()!;
-      this.store.updateNode(this.state.id, nodeId, () => ({
+      await this.store.updateNode(this.state.id, nodeId, () => ({
         status: 'cancelled',
         completedAt: new Date(),
       }));
@@ -415,7 +453,7 @@ export class Scheduler {
    * - cancel 요청: pending/ready → cancelled
    * - abort 정책: pending → skipped, ready → cancelled (ready→skipped 전이 무효)
    */
-  private finalize(): void {
+  private async finalize(): Promise<void> {
     const snapshot = Array.from(this.state.nodes.values());
 
     for (const nodeState of snapshot) {
@@ -425,7 +463,7 @@ export class Scheduler {
       const nodeId = nodeState.nodeId;
 
       if (this.token.isCancelled) {
-        this.store.updateNode(this.state.id, nodeId, () => ({
+        await this.store.updateNode(this.state.id, nodeId, () => ({
           status: 'cancelled',
           completedAt: new Date(),
         }));
@@ -438,7 +476,7 @@ export class Scheduler {
       } else if (this.hasFailure && this.defaultOnError === 'abort') {
         // pending → skipped (valid), ready → cancelled (ready→skipped 무효)
         const targetStatus = nodeState.status === 'pending' ? 'skipped' as const : 'cancelled' as const;
-        this.store.updateNode(this.state.id, nodeId, () => ({
+        await this.store.updateNode(this.state.id, nodeId, () => ({
           status: targetStatus,
           completedAt: new Date(),
         }));

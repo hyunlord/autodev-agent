@@ -217,6 +217,13 @@ export const pipelineRuns = sqliteTable('pipeline_runs', {
   index('pipeline_runs_version_idx').on(table.pipelineVersionId),
 ]);
 
+export const pipelineRunState = sqliteTable('pipeline_run_state', {
+  runId:     text('run_id').primaryKey(),
+  stateJson: text('state_json').notNull(),
+  version:   integer('version').notNull().default(1),
+  updatedAt: text('updated_at').notNull(),
+});
+
 export const nodeRuns = sqliteTable('node_runs', {
   id:             text('id').primaryKey(),
   pipelineRunId:  text('pipeline_run_id').notNull().references(() => pipelineRuns.id, { onDelete: 'cascade' }),

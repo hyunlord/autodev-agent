@@ -18,7 +18,7 @@ async function setupRun(sampleFile: string) {
   const plan = result.plan;
 
   const store = new StateStore();
-  const state = store.create(plan);
+  const state = await store.create(plan);
   const bus = new EventBus();
   const token = new CancellationToken();
   const collector = new MemoryEventCollector();
@@ -40,7 +40,7 @@ describe('Scheduler — basic execution', () => {
     expect(result.status).toBe('completed');
     expect(result.completedNodes).toBe(1);
     expect(worker.executeCount).toBe(1);
-    expect(store.get(state.id)!.status).toBe('completed');
+    expect((await store.get(state.id))!.status).toBe('completed');
   });
 
   it('02-plan-code-verify: sequential 3 nodes in order', async () => {
@@ -99,7 +99,7 @@ describe('Scheduler — failure handling', () => {
 
     expect(result.status).toBe('failed');
     expect(result.failedNodes).toBe(1);
-    expect(store.get(state.id)!.status).toBe('failed');
+    expect((await store.get(state.id))!.status).toBe('failed');
   });
 
   it('abort policy: downstream nodes skipped on failure', async () => {
@@ -159,7 +159,7 @@ describe('Scheduler — failure handling', () => {
     const result = await scheduler.run();
 
     expect(result.status).toBe('failed');
-    expect(store.getNode(state.id, 'pipeline.0')!.error?.code).toBe('worker_crash');
+    expect((await store.getNode(state.id, 'pipeline.0'))!.error?.code).toBe('worker_crash');
   });
 });
 
