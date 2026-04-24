@@ -109,6 +109,20 @@ export class PipelineExecutor {
     // 2. State 생성
     const state = await this.store.create(plan);
 
+    // 2b. Stage 6 F3 — Resume context 저장 (첫 persist 시 DB 에 함께 직렬화됨).
+    //     triggerContext 는 Worker 가 실제 사용하는 값(options.worker?.triggerContext) 우선,
+    //     fallback 으로 RunInput.triggerContext.
+    const triggerForResume =
+      (options.worker?.triggerContext as Record<string, unknown> | undefined) ??
+      (input.triggerContext as unknown as Record<string, unknown>);
+    await this.store.setResumeContext(state.id, {
+      triggerContext: triggerForResume,
+      taskId: input.taskId,
+      pipelineVersionId: input.pipelineVersionId,
+      projectId: input.projectId,
+      worktreeRoot: input.worktreeRoot,
+    });
+
     // 3. Cancellation token (run 당 하나)
     const token = new CancellationToken();
     this.activeTokens.set(state.id, token);
@@ -154,6 +168,123 @@ export class PipelineExecutor {
     } finally {
       // run 종료 후 반드시 정리 (예외 발생해도)
       this.activeTokens.delete(state.id);
+    }
+  }
+
+  /**
+   * Stage 6 F3 — Resume a previously persisted run.
+   *
+   * Prerequisites: `this.store` must already contain the restored state for `input.runId`
+   * (typically created by `StateStore.restore(runId)` before constructing this Executor).
+   * The YAML passed here should correspond to the same pipelineVersionId recorded in
+   * state, otherwise node pathIds may mismatch.
+   *
+   * Flow:
+   *  1. Validate state + required resume context fields (triggerContext, worktreeRoot).
+   *  2. Compile the YAML into an ExecutionPlan.
+   *  3. Mark any node still in `running` as `failure` with code `ORPHANED_ON_RESUME`
+   *     (worker crashed mid-execution; we cannot safely re-execute side-effectful nodes).
+   *  4. Persist the orphan markings once.
+   *  5. Build worker+scheduler with `resumeMode: true` and run — scheduler seeds from
+   *     pending-with-satisfied-deps, completed/failed are untouched.
+   */
+  async resumeRun(input: { runId: string; pipelineYaml: string }): Promise<RunResult> {
+    const totalStart = Date.now();
+
+    const state = await this.store.get(input.runId);
+    if (!state) {
+      throw new Error(`RESUME_STATE_MISSING: ${input.runId}`);
+    }
+    if (!state.triggerContext) {
+      throw new Error(`RESUME_MISSING_TRIGGER: runId=${input.runId}`);
+    }
+    if (!state.worktreeRoot) {
+      throw new Error(`RESUME_MISSING_WORKTREE_ROOT: runId=${input.runId}`);
+    }
+    if (!path.isAbsolute(state.worktreeRoot)) {
+      throw new ExecutionContextError(
+        `worktreeRoot must be an absolute path, got: ${state.worktreeRoot}`,
+      );
+    }
+
+    // 1. Compile — reuse pipelineVersionId for cache stability when available
+    const compileStart = Date.now();
+    const sourcePath = state.pipelineVersionId
+      ? `${state.projectId ?? ''}:${state.pipelineVersionId}`
+      : undefined;
+    const compileResult = await this.compiler.compile(input.pipelineYaml, sourcePath);
+    if (!compileResult.ok) {
+      throw new Error(
+        `[PipelineExecutor.resumeRun] Compile failed: ${compileResult.errors.map((e) => e.message).join('; ')}`,
+      );
+    }
+    const plan = compileResult.plan;
+    const compileDurationMs = Date.now() - compileStart;
+
+    // 2. Orphan running nodes → failure (ORPHANED_ON_RESUME)
+    let orphanedCount = 0;
+    for (const [nodeId, nodeState] of state.nodes.entries()) {
+      if (nodeState.status === 'running') {
+        await this.store.updateNode(input.runId, nodeId, () => ({
+          status: 'failure',
+          completedAt: new Date(),
+          error: {
+            code: 'ORPHANED_ON_RESUME',
+            message:
+              'Node was running when worker crashed; marked failed to prevent duplicate side effects.',
+            category: 'persistent',
+          },
+        }));
+        orphanedCount++;
+      }
+    }
+    if (orphanedCount > 0) {
+      await this.store.persist(input.runId);
+    }
+
+    // 3. Cancellation token
+    const token = new CancellationToken();
+    this.activeTokens.set(input.runId, token);
+
+    try {
+      // 4. Worker + Scheduler 조립 (resumeMode)
+      const workerOptions: WorkerOptions = {
+        triggerContext: state.triggerContext,
+        worktreeRoot: state.worktreeRoot,
+      };
+      const worker = new RealWorker(this.registry, this.bus, workerOptions);
+
+      const scheduler = new Scheduler(
+        plan,
+        state,
+        this.store,
+        worker,
+        this.bus,
+        token,
+        { resumeMode: true },
+      );
+
+      // 5. 실행
+      const execStart = Date.now();
+      const schedResult = await scheduler.run();
+      const executionDurationMs = Date.now() - execStart;
+
+      return {
+        runId: state.id,
+        pipelineVersionId: state.pipelineVersionId ?? '',
+        status: schedResult.status,
+        completedNodes: schedResult.completedNodes,
+        failedNodes: schedResult.failedNodes,
+        skippedNodes: schedResult.skippedNodes,
+        cancelledNodes: schedResult.cancelledNodes,
+        totalDurationMs: Date.now() - totalStart,
+        compileDurationMs,
+        executionDurationMs,
+        state: (await this.store.get(state.id))!,
+        plan,
+      };
+    } finally {
+      this.activeTokens.delete(input.runId);
     }
   }
 

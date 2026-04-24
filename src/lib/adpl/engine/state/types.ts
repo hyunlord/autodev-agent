@@ -53,6 +53,19 @@ export interface PipelineRunState {
   totalCostUsd: number;
   totalTokensIn: number;
   totalTokensOut: number;
+
+  /**
+   * Stage 6 F3 — Resume context. Preserved across persists so resume can
+   * rebuild ExecutionContext (`$trigger`) and re-fetch the pipeline YAML
+   * without needing the original task object to exist.
+   *
+   * Set once at the start of a run via StateStore.setResumeContext().
+   */
+  triggerContext?: Record<string, unknown>;
+  taskId?: string;
+  pipelineVersionId?: string;
+  projectId?: string;
+  worktreeRoot?: string;
 }
 
 export class InvalidTransitionError extends Error {

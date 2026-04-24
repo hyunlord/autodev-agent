@@ -37,4 +37,10 @@ export interface SchedulerOptions {
   debug?: boolean;
   /** Flow node handler registry. default: parallelHandler 포함 기본 registry */
   flowRegistry?: FlowRegistry;
+  /**
+   * Stage 6 F3 — Resume mode. Fresh run (default, false) 은 root 노드들만 ready queue 에 시드.
+   * Resume (true) 는 이미 state 에 부분 진행이 있으므로, pending 이면서 모든 prereq 가 이미 완료된
+   * 모든 노드를 ready queue 에 시드. completed / failed 노드는 그대로 보존.
+   */
+  resumeMode?: boolean;
 }

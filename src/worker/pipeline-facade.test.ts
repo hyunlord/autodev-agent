@@ -4,10 +4,13 @@ const mocks = vi.hoisted(() => ({
   runLegacyPipeline: vi.fn<() => Promise<void>>(),
   runShadow: vi.fn<() => Promise<void>>(),
   executorRun: vi.fn(),
+  executorResumeRun: vi.fn(),
   dbGet: vi.fn(),
   dbRun: vi.fn(),
   busOn: vi.fn(),
   ensureDefaultPipelineVersion: vi.fn<() => Promise<string>>(),
+  stateStoreRestore: vi.fn(),
+  storeGet: vi.fn(),
 }));
 
 vi.mock('./pipeline', () => ({
@@ -29,11 +32,19 @@ vi.mock('@/lib/db/client', () => ({
 vi.mock('@/lib/adpl/engine/executor', () => ({
   PipelineExecutor: class {
     run = mocks.executorRun;
+    resumeRun = mocks.executorResumeRun;
   },
 }));
 
 vi.mock('@/lib/adpl/engine/compiler', () => ({ PipelineCompiler: vi.fn() }));
-vi.mock('@/lib/adpl/engine/state/store', () => ({ StateStore: vi.fn() }));
+vi.mock('@/lib/adpl/engine/state/store', () => ({
+  StateStore: Object.assign(
+    class {
+      get = mocks.storeGet;
+    },
+    { restore: mocks.stateStoreRestore },
+  ),
+}));
 vi.mock('@/lib/adpl/engine/events/bus', () => ({
   EventBus: class {
     on = mocks.busOn;
@@ -47,7 +58,7 @@ vi.mock('@/lib/adpl/legacy-bridge', () => ({
   ensureDefaultPipelineVersion: mocks.ensureDefaultPipelineVersion,
 }));
 
-import { runPipeline } from './pipeline-facade';
+import { runPipeline, resumePhasePPipeline } from './pipeline-facade';
 
 const baseTask = {
   id: 'task-1',
@@ -183,5 +194,135 @@ describe('pipeline facade', () => {
     expect(mocks.executorRun).not.toHaveBeenCalled();
     expect(mocks.runLegacyPipeline).not.toHaveBeenCalled();
     expect(emits.some((e) => e.message?.includes('UNKNOWN_PIPELINE_MODE'))).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Stage 6 F3 — resumePhasePPipeline
+// ─────────────────────────────────────────────────────────────────────────────
+describe('resumePhasePPipeline (Stage 6 F3)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.executorResumeRun.mockResolvedValue({
+      runId: 'run-1',
+      pipelineVersionId: 'v1',
+      status: 'completed',
+      completedNodes: 3,
+      failedNodes: 0,
+      skippedNodes: 0,
+      cancelledNodes: 0,
+      totalDurationMs: 1,
+      compileDurationMs: 0,
+      executionDurationMs: 1,
+    });
+  });
+
+  test('1. 정상 resume: StateStore.restore → tasks 업데이트 + executor.resumeRun 호출', async () => {
+    mocks.stateStoreRestore.mockResolvedValueOnce({
+      get: () => Promise.resolve({
+        id: 'run-1',
+        taskId: 'task-R1',
+        pipelineVersionId: 'v-R1',
+        triggerContext: { triggerId: 'x', type: 'task_created', firedAt: '...' },
+        worktreeRoot: '/tmp/wt',
+        nodes: new Map(),
+        flowStates: new Map(),
+      }),
+    });
+    // task row + pipelineVersion row
+    mocks.dbGet
+      .mockReturnValueOnce({ id: 'task-R1', pipelineVersionId: 'v-R1', resumeCount: 0 })  // task lookup for versionId
+      .mockReturnValueOnce({ id: 'v-R1', pipelineYaml: 'adplVersion: 1\nname: r\n' })      // pipelineVersion
+      .mockReturnValueOnce({ id: 'task-R1', resumeCount: 0 });                              // task lookup for resumeCount
+
+    const emits: Array<{ type: string; message?: string }> = [];
+    await resumePhasePPipeline('run-1', (e) => emits.push(e as { type: string; message?: string }));
+
+    expect(mocks.executorResumeRun).toHaveBeenCalledWith(
+      expect.objectContaining({ runId: 'run-1', pipelineYaml: 'adplVersion: 1\nname: r\n' }),
+    );
+    // tasks update 는 여러 번 호출됨 (resumed metadata + completed)
+    expect(mocks.dbRun).toHaveBeenCalled();
+    expect(emits.some((e) => e.type === 'task_complete')).toBe(true);
+  });
+
+  test('2. StateStore.restore throw → PHASE_P_RESUME_FAILED (taskId 없이 rawEmit 에만 로그)', async () => {
+    mocks.stateStoreRestore.mockRejectedValueOnce(new Error('RUN_STATE_NOT_FOUND: run-invalid'));
+
+    const emits: Array<{ type: string; message?: string }> = [];
+    await resumePhasePPipeline('run-invalid', (e) => emits.push(e as { type: string; message?: string }));
+
+    expect(emits.some((e) => e.message?.includes('PHASE_P_RESUME_FAILED'))).toBe(true);
+    expect(emits.some((e) => e.message?.includes('RUN_STATE_NOT_FOUND'))).toBe(true);
+    expect(mocks.executorResumeRun).not.toHaveBeenCalled();
+  });
+
+  test('3. executor.resumeRun throw → PHASE_P_EXECUTOR_FAILED (RESUME_FAILED 아님)', async () => {
+    mocks.stateStoreRestore.mockResolvedValueOnce({
+      get: () => Promise.resolve({
+        id: 'run-2',
+        taskId: 'task-R2',
+        pipelineVersionId: 'v-R2',
+        triggerContext: { triggerId: 'x', type: 'task_created', firedAt: '...' },
+        worktreeRoot: '/tmp/wt',
+        nodes: new Map(),
+        flowStates: new Map(),
+      }),
+    });
+    mocks.dbGet
+      .mockReturnValueOnce({ id: 'task-R2', pipelineVersionId: 'v-R2', resumeCount: 0 })
+      .mockReturnValueOnce({ id: 'v-R2', pipelineYaml: 'adplVersion: 1\nname: r\n' })
+      .mockReturnValueOnce({ id: 'task-R2', resumeCount: 0 });
+    mocks.executorResumeRun.mockRejectedValueOnce(new Error('scheduler exploded'));
+
+    const emits: Array<{ type: string; message?: string }> = [];
+    await resumePhasePPipeline('run-2', (e) => emits.push(e as { type: string; message?: string }));
+
+    expect(emits.some((e) => e.message?.includes('PHASE_P_EXECUTOR_FAILED'))).toBe(true);
+    expect(emits.every((e) => !e.message?.includes('PHASE_P_RESUME_FAILED'))).toBe(true);
+    expect(emits.some((e) => e.message?.includes('scheduler exploded'))).toBe(true);
+  });
+
+  test('4. state 에 taskId 없음 → PHASE_P_RESUME_FAILED (task lookup 전 조기 reject)', async () => {
+    mocks.stateStoreRestore.mockResolvedValueOnce({
+      get: () => Promise.resolve({
+        id: 'run-3',
+        // taskId 누락
+        pipelineVersionId: 'v-R3',
+        nodes: new Map(),
+        flowStates: new Map(),
+      }),
+    });
+
+    const emits: Array<{ type: string; message?: string }> = [];
+    await resumePhasePPipeline('run-3', (e) => emits.push(e as { type: string; message?: string }));
+
+    expect(emits.some((e) => e.message?.includes('PHASE_P_RESUME_FAILED'))).toBe(true);
+    expect(emits.some((e) => e.message?.includes('no taskId'))).toBe(true);
+    expect(mocks.executorResumeRun).not.toHaveBeenCalled();
+  });
+
+  test('5. pipelineVersion 없음 → PHASE_P_RESUME_FAILED + failTask', async () => {
+    mocks.stateStoreRestore.mockResolvedValueOnce({
+      get: () => Promise.resolve({
+        id: 'run-4',
+        taskId: 'task-R4',
+        pipelineVersionId: 'v-missing',
+        triggerContext: { triggerId: 'x', type: 'task_created', firedAt: '...' },
+        worktreeRoot: '/tmp/wt',
+        nodes: new Map(),
+        flowStates: new Map(),
+      }),
+    });
+    mocks.dbGet
+      .mockReturnValueOnce({ id: 'task-R4', pipelineVersionId: 'v-missing', resumeCount: 0 })
+      .mockReturnValueOnce(null);  // pipelineVersion not found
+
+    const emits: Array<{ type: string; message?: string }> = [];
+    await resumePhasePPipeline('run-4', (e) => emits.push(e as { type: string; message?: string }));
+
+    expect(emits.some((e) => e.message?.includes('PHASE_P_RESUME_FAILED'))).toBe(true);
+    expect(emits.some((e) => e.message?.includes('pipelineVersion not found'))).toBe(true);
+    expect(mocks.executorResumeRun).not.toHaveBeenCalled();
   });
 });

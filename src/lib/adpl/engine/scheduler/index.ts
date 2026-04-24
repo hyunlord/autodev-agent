@@ -17,6 +17,7 @@ export class Scheduler {
   private readonly defaultOnError: 'abort' | 'continue';
   private readonly debug: boolean;
   private readonly flowRegistry: FlowRegistry;
+  private readonly resumeMode: boolean;
   private hasFailure = false;
   private fatalError: Error | null = null;
   private startTime = 0;
@@ -34,6 +35,7 @@ export class Scheduler {
     this.defaultOnError = options.defaultOnError ?? 'abort';
     this.debug = options.debug ?? false;
     this.flowRegistry = options.flowRegistry ?? createDefaultFlowRegistry();
+    this.resumeMode = options.resumeMode ?? false;
   }
 
   async run(): Promise<SchedulerResult> {
@@ -48,8 +50,20 @@ export class Scheduler {
     });
 
     if (!this.token.isCancelled) {
-      for (const rootId of this.getRootNodeIds()) {
-        await this.markReady(rootId);
+      if (this.resumeMode) {
+        // Stage 6 F3 — pending 이면서 prereq 가 모두 만족된 모든 노드를 시드.
+        // Fresh run 과 달리 root 만이 아닌 중간 노드도 ready 가 될 수 있다.
+        for (const nodeId of this.plan.graph.allNodes) {
+          const nodeState = await this.store.getNode(this.state.id, nodeId);
+          if (nodeState?.status !== 'pending') continue;
+          if (await this.allDependenciesSatisfied(nodeId)) {
+            await this.markReady(nodeId);
+          }
+        }
+      } else {
+        for (const rootId of this.getRootNodeIds()) {
+          await this.markReady(rootId);
+        }
       }
     }
 

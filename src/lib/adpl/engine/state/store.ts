@@ -30,6 +30,7 @@ interface SerializedFlowRunState extends Omit<FlowRunState, 'branchResults'> {
 
 /**
  * Serialized shape of a PipelineRunState — Map 타입을 plain object 로, Date 를 ISO 문자열로 저장.
+ * Stage 6 F3: resume context 필드(triggerContext/taskId/pipelineVersionId/projectId/worktreeRoot) 추가.
  */
 interface SerializedPipelineRunState {
   id: string;
@@ -42,6 +43,11 @@ interface SerializedPipelineRunState {
   totalCostUsd: number;
   totalTokensIn: number;
   totalTokensOut: number;
+  triggerContext?: Record<string, unknown>;
+  taskId?: string;
+  pipelineVersionId?: string;
+  projectId?: string;
+  worktreeRoot?: string;
 }
 
 export class StateStore {
@@ -140,6 +146,31 @@ export class StateStore {
     const next: FlowRunState = { ...current, ...updater(current) };
     state.flowStates.set(flowNodeId, next);
     return Promise.resolve(next);
+  }
+
+  /**
+   * Stage 6 F3 — Resume context 필드 설정. 한 번에 여러 필드를 세팅할 수 있으며,
+   * `undefined` 필드는 무시(기존 값 보존). state.triggerContext 등은 첫 node 완료 시
+   * Scheduler 가 자동으로 persist (F2 정책).
+   */
+  async setResumeContext(
+    runId: string,
+    ctx: {
+      triggerContext?: Record<string, unknown>;
+      taskId?: string;
+      pipelineVersionId?: string;
+      projectId?: string;
+      worktreeRoot?: string;
+    },
+  ): Promise<void> {
+    const state = this.runs.get(runId);
+    if (!state) throw new Error(`PipelineRun "${runId}" 가 존재하지 않습니다`);
+    if (ctx.triggerContext !== undefined) state.triggerContext = ctx.triggerContext;
+    if (ctx.taskId !== undefined) state.taskId = ctx.taskId;
+    if (ctx.pipelineVersionId !== undefined) state.pipelineVersionId = ctx.pipelineVersionId;
+    if (ctx.projectId !== undefined) state.projectId = ctx.projectId;
+    if (ctx.worktreeRoot !== undefined) state.worktreeRoot = ctx.worktreeRoot;
+    return Promise.resolve();
   }
 
   async updatePipeline(runId: string, status: PipelineStatus): Promise<PipelineRunState> {
@@ -352,6 +383,11 @@ export function serializePipelineRunState(state: PipelineRunState): SerializedPi
     totalCostUsd: state.totalCostUsd,
     totalTokensIn: state.totalTokensIn,
     totalTokensOut: state.totalTokensOut,
+    triggerContext: state.triggerContext,
+    taskId: state.taskId,
+    pipelineVersionId: state.pipelineVersionId,
+    projectId: state.projectId,
+    worktreeRoot: state.worktreeRoot,
   };
 }
 
@@ -376,5 +412,10 @@ export function deserializePipelineRunState(serialized: SerializedPipelineRunSta
     totalTokensOut: serialized.totalTokensOut,
   };
   if (serialized.completedAt) state.completedAt = new Date(serialized.completedAt);
+  if (serialized.triggerContext !== undefined) state.triggerContext = serialized.triggerContext;
+  if (serialized.taskId !== undefined) state.taskId = serialized.taskId;
+  if (serialized.pipelineVersionId !== undefined) state.pipelineVersionId = serialized.pipelineVersionId;
+  if (serialized.projectId !== undefined) state.projectId = serialized.projectId;
+  if (serialized.worktreeRoot !== undefined) state.worktreeRoot = serialized.worktreeRoot;
   return state;
 }

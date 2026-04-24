@@ -73,6 +73,134 @@ export async function runPipeline(
   }
 }
 
+/**
+ * Stage 6 F3 — Resume a persisted Phase P pipeline run from its last checkpoint.
+ *
+ * 진입 지점. `runId` 는 persist 된 PipelineRunState 의 key.
+ *
+ * Error taxonomy:
+ *  - `PHASE_P_RESUME_FAILED` — 복원 단계 실패 (state 없음, trigger 없음, task/version 조회 실패 등)
+ *  - `PHASE_P_EXECUTOR_FAILED` — 복원 이후 실행 단계 실패
+ *
+ * tasks 테이블 업데이트(resume 시작 시):
+ *  - `resumedFromRunId = runId`
+ *  - `resumeCount = resumeCount + 1`
+ *  - `lastResumedAt = now`
+ *  - `status = 'resumed'`
+ */
+export async function resumePhasePPipeline(runId: string, rawEmit: EmitFn): Promise<void> {
+  // Step 1: Restore state (standalone try — 실패 시 taskId 없어 wrapEmit/failTask 불가)
+  let store;
+  let state;
+  try {
+    store = await StateStore.restore(runId);
+    state = await store.get(runId);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    rawEmit({ type: 'log', level: 'error', message: `[PHASE_P_RESUME_FAILED] ${msg}` });
+    return;
+  }
+
+  if (!state) {
+    rawEmit({ type: 'log', level: 'error', message: `[PHASE_P_RESUME_FAILED] state empty for runId=${runId}` });
+    return;
+  }
+  const taskId = state.taskId;
+  if (!taskId) {
+    rawEmit({
+      type: 'log',
+      level: 'error',
+      message: `[PHASE_P_RESUME_FAILED] state has no taskId (runId=${runId})`,
+    });
+    return;
+  }
+
+  // 이후 로그는 taskId 컨텍스트로 write 가능.
+  const emit = wrapEmit(taskId, rawEmit);
+
+  // Step 2: task + pipelineVersion 조회
+  let versionId: string | null | undefined = state.pipelineVersionId;
+  try {
+    const taskRow = db.select().from(tasks).where(eq(tasks.id, taskId)).get();
+    if (taskRow && !versionId) {
+      versionId = taskRow.pipelineVersionId;
+    }
+  } catch (err) {
+    failTask(taskId, emit, 'PHASE_P_RESUME_FAILED', err instanceof Error ? err.message : String(err));
+    return;
+  }
+
+  if (!versionId) {
+    failTask(taskId, emit, 'PHASE_P_RESUME_FAILED', `no pipelineVersionId for runId=${runId}`);
+    return;
+  }
+
+  let version;
+  try {
+    version = db.select().from(pipelineVersions).where(eq(pipelineVersions.id, versionId)).get();
+  } catch (err) {
+    failTask(taskId, emit, 'PHASE_P_RESUME_FAILED', err instanceof Error ? err.message : String(err));
+    return;
+  }
+
+  if (!version) {
+    failTask(taskId, emit, 'PHASE_P_RESUME_FAILED', `pipelineVersion not found: ${versionId}`);
+    return;
+  }
+
+  // Step 3: Executor 조립 + tasks 테이블 resume 메타데이터 갱신
+  const bus = new EventBus();
+  bus.on('*', (event) => {
+    emit({ type: 'log', level: 'info', message: `[phase_p:${event.type}]` });
+  });
+
+  const executor = new PipelineExecutor(
+    new PipelineCompiler(),
+    new AdapterRegistry(),
+    store,
+    bus,
+  );
+
+  try {
+    const currentTask = db.select().from(tasks).where(eq(tasks.id, taskId)).get();
+    const nextResumeCount = (currentTask?.resumeCount ?? 0) + 1;
+    const nowIso = new Date().toISOString();
+    db.update(tasks)
+      .set({
+        status: 'resumed',
+        resumedFromRunId: runId,
+        lastResumedAt: nowIso,
+        resumeCount: nextResumeCount,
+        updatedAt: nowIso,
+      })
+      .where(eq(tasks.id, taskId))
+      .run();
+  } catch {
+    // non-critical; 실패 시 로그만
+    emit({ type: 'log', level: 'warn', message: `[resume] tasks row update failed for ${taskId}` });
+  }
+
+  // Step 4: resumeRun 실행
+  try {
+    const result = await executor.resumeRun({
+      runId,
+      pipelineYaml: version.pipelineYaml,
+    });
+
+    const success = result.status === 'completed';
+    try {
+      db.update(tasks)
+        .set({ status: success ? 'completed' : 'failed', updatedAt: new Date().toISOString() })
+        .where(eq(tasks.id, taskId))
+        .run();
+    } catch { /* non-critical */ }
+
+    emit({ type: 'task_complete', success, summary: `Phase P pipeline resumed → ${result.status}` });
+  } catch (err) {
+    failTask(taskId, emit, 'PHASE_P_EXECUTOR_FAILED', err instanceof Error ? err.message : String(err));
+  }
+}
+
 async function runPhasePPipeline(task: TaskRow, emit: EmitFn): Promise<void> {
   const { id: taskId } = task;
 

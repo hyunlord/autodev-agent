@@ -4,7 +4,7 @@ export const tasks = sqliteTable('tasks', {
   id:          text('id').primaryKey(),
   prompt:      text('prompt').notNull(),
   status:      text('status', {
-    enum: ['pending', 'planning', 'plan_review', 'coding', 'verifying', 'retrying', 'completed', 'failed', 'escalated', 'interview'],
+    enum: ['pending', 'planning', 'plan_review', 'coding', 'verifying', 'retrying', 'completed', 'failed', 'escalated', 'interview', 'resumed'],
   }).notNull().default('pending'),
   planningMode: text('planning_mode', {
     enum: ['auto', 'claude-cli', 'gemini-cli', 'codex-cli', 'api', 'manual', 'debate'],
@@ -27,6 +27,10 @@ export const tasks = sqliteTable('tasks', {
   pipelineMode: text('pipeline_mode').notNull().default('legacy'),
   pipelineVersionId: text('pipeline_version_id').references(() => pipelineVersions.id),
   projectId:   text('project_id').references(() => projects.id),
+  // Stage 6 F3 — Resume metadata (tasks.status='resumed' 와 세트)
+  resumedFromRunId: text('resumed_from_run_id'),
+  lastResumedAt:    text('last_resumed_at'),
+  resumeCount:      integer('resume_count').default(0),
   createdAt:   text('created_at').notNull(),
   updatedAt:   text('updated_at').notNull(),
 }, (table) => [
