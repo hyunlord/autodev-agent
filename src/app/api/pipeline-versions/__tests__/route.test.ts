@@ -65,4 +65,28 @@ describe('POST /api/pipeline-versions', () => {
     const body = await res.json() as { error: string };
     expect(body.error).toBe('INVALID_BODY');
   });
+
+  it('malformed JSON body → 400 INVALID_BODY', async () => {
+    const req = new Request('http://x/api/pipeline-versions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{not-valid-json',
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(400);
+    const body = await res.json() as { error: string };
+    expect(body.error).toBe('INVALID_BODY');
+  });
+
+  it('non-existent projectId → 404 PROJECT_NOT_FOUND', async () => {
+    const req = new Request('http://x/api/pipeline-versions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId: 'does-not-exist', yaml: VALID_YAML }),
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(404);
+    const body = await res.json() as { error: string };
+    expect(body.error).toBe('PROJECT_NOT_FOUND');
+  });
 });

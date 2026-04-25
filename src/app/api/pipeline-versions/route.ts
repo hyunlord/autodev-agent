@@ -1,12 +1,30 @@
+import { eq } from 'drizzle-orm';
+import { db } from '@/lib/db/client';
+import { projects } from '@/lib/db/schema';
 import { validateYaml } from '@/lib/utils/yaml-validate';
 import { createPipelineVersion } from '@/lib/db/queries/pipeline-versions';
 
 export async function POST(req: Request) {
-  const body = await req.json() as Record<string, unknown>;
+  let body: Record<string, unknown>;
+  try {
+    body = (await req.json()) as Record<string, unknown>;
+  } catch {
+    return Response.json({ error: 'INVALID_BODY' }, { status: 400 });
+  }
+
   const { projectId, yaml } = body;
 
   if (!projectId || typeof projectId !== 'string' || typeof yaml !== 'string') {
     return Response.json({ error: 'INVALID_BODY' }, { status: 400 });
+  }
+
+  const project = db
+    .select({ id: projects.id })
+    .from(projects)
+    .where(eq(projects.id, projectId))
+    .get();
+  if (!project) {
+    return Response.json({ error: 'PROJECT_NOT_FOUND' }, { status: 404 });
   }
 
   const validation = validateYaml(yaml);
