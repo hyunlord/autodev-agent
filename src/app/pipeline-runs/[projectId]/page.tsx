@@ -86,7 +86,7 @@ export default async function PipelineRunsPage({ params, searchParams }: PagePro
         {runs.length === 0 ? (
           <EmptyState hasFilter={!!status || !!taskIdLike} />
         ) : (
-          <RunsTable runs={runs} />
+          <RunsTable runs={runs} projectId={projectId} />
         )}
       </div>
 
@@ -114,7 +114,7 @@ function EmptyState({ hasFilter }: { hasFilter: boolean }) {
   );
 }
 
-function RunsTable({ runs }: { runs: PipelineRunRow[] }) {
+function RunsTable({ runs, projectId }: { runs: PipelineRunRow[]; projectId: string }) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
@@ -137,7 +137,7 @@ function RunsTable({ runs }: { runs: PipelineRunRow[] }) {
         </thead>
         <tbody>
           {runs.map((run) => (
-            <RunRow key={run.id} run={run} />
+            <RunRow key={run.id} run={run} projectId={projectId} />
           ))}
         </tbody>
       </table>
@@ -145,7 +145,7 @@ function RunsTable({ runs }: { runs: PipelineRunRow[] }) {
   );
 }
 
-function RunRow({ run }: { run: PipelineRunRow }) {
+function RunRow({ run, projectId }: { run: PipelineRunRow; projectId: string }) {
   const duration = computeDurationMs(run.startedAt, run.completedAt);
   const errorMsg = extractErrorMessage(run.error);
   const nodes = `${run.nodesCompleted ?? 0}/${run.nodesFailed ?? 0}`;
@@ -154,8 +154,14 @@ function RunRow({ run }: { run: PipelineRunRow }) {
       className="hover:bg-[color:var(--bg-primary)]/40"
       style={{ borderBottom: '1px solid var(--border-color)' }}
     >
-      <td className="py-2 px-3 font-mono text-xs" style={{ color: 'var(--text-primary)' }}>
-        {truncateId(run.id)}
+      <td className="py-2 px-3 font-mono text-xs">
+        <Link
+          href={`/pipeline-runs/${projectId}/${run.id}`}
+          className="text-blue-400 hover:underline"
+          title={run.id}
+        >
+          {truncateId(run.id)}
+        </Link>
       </td>
       <td className="py-2 px-3 font-mono text-xs">
         <Link
