@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 import {
   listPipelineRunsByProject,
   countPipelineRunsByProject,
@@ -8,6 +9,7 @@ import { formatDuration, formatRelativeTime, truncateId } from '@/lib/utils/form
 import { StatusBadge } from './_components/StatusBadge';
 import { FilterBar } from './_components/FilterBar';
 import { Pagination } from './_components/Pagination';
+import { clampPageRedirectTarget } from './_lib/clamp-page';
 
 const PAGE_SIZE = 20;
 
@@ -29,7 +31,25 @@ export default async function PipelineRunsPage({ params, searchParams }: PagePro
 
   const status = sp.status && sp.status !== 'all' ? sp.status : undefined;
   const taskIdLike = sp.taskId?.trim() || undefined;
-  const page = Math.max(1, parseInt(sp.page ?? '1', 10) || 1);
+  const requestedPage = Math.max(1, parseInt(sp.page ?? '1', 10) || 1);
+
+  // count() first so we can clamp out-of-range page requests before fetching.
+  const total = countPipelineRunsByProject(projectId, { status, taskIdLike });
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  // G1 micro-fix — when requestedPage exceeds totalPages AND there are rows,
+  // redirect to the last valid page (URL stays in sync with what's rendered).
+  const redirectTarget = clampPageRedirectTarget({
+    projectId,
+    requestedPage,
+    totalPages,
+    total,
+    status: sp.status,
+    taskId: sp.taskId,
+  });
+  if (redirectTarget) redirect(redirectTarget);
+
+  const page = requestedPage;
   const offset = (page - 1) * PAGE_SIZE;
 
   const runs = listPipelineRunsByProject(projectId, {
@@ -38,8 +58,6 @@ export default async function PipelineRunsPage({ params, searchParams }: PagePro
     limit: PAGE_SIZE,
     offset,
   });
-  const total = countPipelineRunsByProject(projectId, { status, taskIdLike });
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
     <div className="min-h-screen p-6 max-w-7xl mx-auto">
