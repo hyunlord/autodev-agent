@@ -228,6 +228,23 @@ export const pipelineRunState = sqliteTable('pipeline_run_state', {
   updatedAt: text('updated_at').notNull(),
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Stage 6 F5 — Observability: every engine event persisted as JSON payload.
+// Subscribed by DbEventSink (events/subscribers/db-event-sink.ts), attached
+// in pipeline-facade.run/resume entries. Pipeline execution is never affected
+// by sink failures (errors are isolated through errorReporter).
+// ─────────────────────────────────────────────────────────────────────────────
+export const pipelineEvents = sqliteTable('pipeline_events', {
+  id:          text('id').primaryKey(),
+  runId:       text('run_id').notNull(),
+  type:        text('type').notNull(),
+  payloadJson: text('payload_json').notNull(),
+  createdAt:   text('created_at').notNull(),
+}, (table) => [
+  index('pipeline_events_run_idx').on(table.runId),
+  index('pipeline_events_type_idx').on(table.type),
+]);
+
 export const nodeRuns = sqliteTable('node_runs', {
   id:             text('id').primaryKey(),
   pipelineRunId:  text('pipeline_run_id').notNull().references(() => pipelineRuns.id, { onDelete: 'cascade' }),

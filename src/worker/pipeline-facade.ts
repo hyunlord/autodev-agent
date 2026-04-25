@@ -14,6 +14,7 @@ import { resolve } from 'path';
 import type { EmitFn } from './pipeline-types';
 import type { TriggerContextBase } from '@/lib/adpl/types';
 import { buildTriggerContext } from './context-builder';
+import { DbEventSink } from '@/lib/adpl/engine/events/subscribers/db-event-sink';
 
 type TaskRow = typeof tasks.$inferSelect;
 
@@ -154,6 +155,17 @@ export async function resumePhasePPipeline(runId: string, rawEmit: EmitFn): Prom
     emit({ type: 'log', level: 'info', message: `[phase_p:${event.type}]` });
   });
 
+  // Stage 6 F5 — Observability sink: persist every event to pipeline_events.
+  // Resume path knows runId up front, so DbEventSink uses it as fallback.
+  const dbSink = new DbEventSink(runId, (err) =>
+    emit({
+      type: 'log',
+      level: 'warn',
+      message: `[OBSERVABILITY_DB_FAIL] ${err instanceof Error ? err.message : String(err)}`,
+    }),
+  );
+  dbSink.attach(bus);
+
   const executor = new PipelineExecutor(
     new PipelineCompiler(),
     new AdapterRegistry(),
@@ -198,6 +210,8 @@ export async function resumePhasePPipeline(runId: string, rawEmit: EmitFn): Prom
     emit({ type: 'task_complete', success, summary: `Phase P pipeline resumed → ${result.status}` });
   } catch (err) {
     failTask(taskId, emit, 'PHASE_P_EXECUTOR_FAILED', err instanceof Error ? err.message : String(err));
+  } finally {
+    dbSink.detach();
   }
 }
 
@@ -249,6 +263,19 @@ async function runPhasePPipeline(task: TaskRow, emit: EmitFn): Promise<void> {
     emit({ type: 'log', level: 'info', message: `[phase_p:${event.type}]` });
   });
 
+  // Stage 6 F5 — Observability sink. runId is allocated inside executor.run()
+  // (StateStore.create), so we attach with a placeholder fallback. Every actual
+  // EngineEvent already carries `runId` on EventBase, so DbEventSink prefers
+  // that over the fallback when it persists.
+  const dbSink = new DbEventSink('unknown', (err) =>
+    emit({
+      type: 'log',
+      level: 'warn',
+      message: `[OBSERVABILITY_DB_FAIL] ${err instanceof Error ? err.message : String(err)}`,
+    }),
+  );
+  dbSink.attach(bus);
+
   const executor = new PipelineExecutor(
     new PipelineCompiler(),
     new AdapterRegistry(),
@@ -281,5 +308,7 @@ async function runPhasePPipeline(task: TaskRow, emit: EmitFn): Promise<void> {
     emit({ type: 'task_complete', success, summary: `Phase P pipeline ${result.status}` });
   } catch (err) {
     failTask(taskId, emit, 'PHASE_P_EXECUTOR_FAILED', err instanceof Error ? err.message : String(err));
+  } finally {
+    dbSink.detach();
   }
 }
