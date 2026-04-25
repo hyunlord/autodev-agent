@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { eq } from 'drizzle-orm';
 import { PipelineCompiler } from './compiler';
 import { StateStore } from './state/store';
 import { EventBus } from './events/bus';
@@ -7,10 +8,28 @@ import { Scheduler } from './scheduler';
 import { RealWorker, WorkerOptions } from './worker';
 import { AdapterRegistry } from './adapters/registry';
 import { ExecutionContextError } from './worker/context-builder';
+import { db } from '@/lib/db/client';
+import { pipelineRuns } from '@/lib/db/schema';
 import type { ExecutionPlan } from './compiler/types';
 import type { PipelineRunState } from './state/types';
 import type { TriggerContext } from '@/lib/adpl/types';
 import type { SchedulerOptions } from './scheduler/types';
+
+// Stage 7 G0 — pipeline_runs lifecycle helpers
+type SchedulerTerminalStatus = 'completed' | 'failed' | 'cancelled';
+type PipelineRunStatus = 'running' | 'completed' | 'failed' | 'cancelled' | 'resumed';
+
+interface RunCompletionFields {
+  status: PipelineRunStatus;
+  completedAt: string | null;
+  nodesCompleted?: number;
+  nodesFailed?: number;
+  totalCostUsd?: number;
+  totalTokensIn?: number;
+  totalTokensOut?: number;
+  error?: { code: string; message: string } | null;
+  failedNodeId?: string | null;
+}
 
 export interface RunInput {
   pipelineYaml: string;
@@ -82,6 +101,79 @@ export class PipelineExecutor {
     private readonly bus: EventBus,
   ) {}
 
+  /**
+   * Stage 7 G0 — pipeline_runs row 생성 (run 진입). 동일 runId 가 있으면 무시
+   * (resumeRun 의 _markRunResuming 으로 별도 처리). 실패는 swallow — pipeline 실행은
+   * observability layer 결함에 영향 받지 않음 (F5 정책 동일).
+   */
+  private _insertRunRow(args: {
+    runId: string;
+    taskId: string;
+    projectId: string;
+    pipelineVersionId: string;
+    triggerContext: Record<string, unknown> | undefined;
+  }): void {
+    try {
+      db.insert(pipelineRuns)
+        .values({
+          id: args.runId,
+          taskId: args.taskId,
+          projectId: args.projectId,
+          pipelineVersionId: args.pipelineVersionId,
+          status: 'running',
+          startedAt: new Date().toISOString(),
+          triggerContext: (args.triggerContext ?? null) as object | null,
+        })
+        .onConflictDoNothing()
+        .run();
+    } catch (err) {
+      console.error('[PipelineExecutor] _insertRunRow failed:', err);
+    }
+  }
+
+  /** Resume 진입 시 기존 row 를 'running' 으로 reset (completedAt clear). */
+  private _markRunResuming(runId: string): void {
+    try {
+      db.update(pipelineRuns)
+        .set({
+          status: 'running',
+          completedAt: null,
+          lastResumedAt: new Date().toISOString(),
+        })
+        .where(eq(pipelineRuns.id, runId))
+        .run();
+    } catch (err) {
+      console.error('[PipelineExecutor] _markRunResuming failed:', err);
+    }
+  }
+
+  /** 종료 update — try-finally 안에서 호출. error 도 swallow (lifecycle 은 observability). */
+  private _completeRun(runId: string, fields: RunCompletionFields): void {
+    try {
+      db.update(pipelineRuns)
+        .set({
+          status: fields.status,
+          completedAt: fields.completedAt,
+          ...(fields.nodesCompleted !== undefined ? { nodesCompleted: fields.nodesCompleted } : {}),
+          ...(fields.nodesFailed !== undefined ? { nodesFailed: fields.nodesFailed } : {}),
+          ...(fields.totalCostUsd !== undefined ? { totalCostUsd: fields.totalCostUsd } : {}),
+          ...(fields.totalTokensIn !== undefined ? { totalTokensIn: fields.totalTokensIn } : {}),
+          ...(fields.totalTokensOut !== undefined ? { totalTokensOut: fields.totalTokensOut } : {}),
+          ...(fields.error !== undefined ? { error: fields.error as object | null } : {}),
+          ...(fields.failedNodeId !== undefined ? { failedNodeId: fields.failedNodeId } : {}),
+        })
+        .where(eq(pipelineRuns.id, runId))
+        .run();
+    } catch (err) {
+      console.error('[PipelineExecutor] _completeRun failed:', err);
+    }
+  }
+
+  /** SchedulerResult.status → pipeline_runs.status 매핑 (cancelled 도 별도 enum 값). */
+  private _mapSchedulerStatus(s: SchedulerTerminalStatus): PipelineRunStatus {
+    return s; // 'completed' | 'failed' | 'cancelled' 모두 enum 일치
+  }
+
   async run(input: RunInput, options: RunOptions = {}): Promise<RunResult> {
     const totalStart = Date.now();
 
@@ -123,6 +215,15 @@ export class PipelineExecutor {
       worktreeRoot: input.worktreeRoot,
     });
 
+    // 2c. Stage 7 G0 — pipeline_runs row 생성 (status='running').
+    this._insertRunRow({
+      runId: state.id,
+      taskId: input.taskId,
+      projectId: input.projectId,
+      pipelineVersionId: input.pipelineVersionId,
+      triggerContext: triggerForResume,
+    });
+
     // 3. Cancellation token (run 당 하나)
     const token = new CancellationToken();
     this.activeTokens.set(state.id, token);
@@ -150,6 +251,18 @@ export class PipelineExecutor {
       const execStart = Date.now();
       const schedResult = await scheduler.run();
       const executionDurationMs = Date.now() - execStart;
+      const finalState = (await this.store.get(state.id))!;
+
+      // 5b. Stage 7 G0 — 종료 update (성공 경로)
+      this._completeRun(state.id, {
+        status: this._mapSchedulerStatus(schedResult.status),
+        completedAt: new Date().toISOString(),
+        nodesCompleted: schedResult.completedNodes,
+        nodesFailed: schedResult.failedNodes,
+        totalCostUsd: finalState.totalCostUsd,
+        totalTokensIn: finalState.totalTokensIn,
+        totalTokensOut: finalState.totalTokensOut,
+      });
 
       return {
         runId: state.id,
@@ -162,9 +275,20 @@ export class PipelineExecutor {
         totalDurationMs: Date.now() - totalStart,
         compileDurationMs,
         executionDurationMs,
-        state: (await this.store.get(state.id))!,
+        state: finalState,
         plan,
       };
+    } catch (err) {
+      // Stage 7 G0 — 종료 update (실패 경로). 에러 메타 기록 후 re-throw.
+      this._completeRun(state.id, {
+        status: 'failed',
+        completedAt: new Date().toISOString(),
+        error: {
+          code: 'PIPELINE_EXECUTOR_ERROR',
+          message: err instanceof Error ? err.message : String(err),
+        },
+      });
+      throw err;
     } finally {
       // run 종료 후 반드시 정리 (예외 발생해도)
       this.activeTokens.delete(state.id);
@@ -242,6 +366,9 @@ export class PipelineExecutor {
       await this.store.persist(input.runId);
     }
 
+    // 2b. Stage 7 G0 — pipeline_runs row 를 'running' 으로 reset (이전에 completed/failed 였더라도).
+    this._markRunResuming(input.runId);
+
     // 3. Cancellation token
     const token = new CancellationToken();
     this.activeTokens.set(input.runId, token);
@@ -268,6 +395,18 @@ export class PipelineExecutor {
       const execStart = Date.now();
       const schedResult = await scheduler.run();
       const executionDurationMs = Date.now() - execStart;
+      const finalState = (await this.store.get(state.id))!;
+
+      // 5b. Stage 7 G0 — 종료 update (성공 경로)
+      this._completeRun(input.runId, {
+        status: this._mapSchedulerStatus(schedResult.status),
+        completedAt: new Date().toISOString(),
+        nodesCompleted: schedResult.completedNodes,
+        nodesFailed: schedResult.failedNodes,
+        totalCostUsd: finalState.totalCostUsd,
+        totalTokensIn: finalState.totalTokensIn,
+        totalTokensOut: finalState.totalTokensOut,
+      });
 
       return {
         runId: state.id,
@@ -280,9 +419,20 @@ export class PipelineExecutor {
         totalDurationMs: Date.now() - totalStart,
         compileDurationMs,
         executionDurationMs,
-        state: (await this.store.get(state.id))!,
+        state: finalState,
         plan,
       };
+    } catch (err) {
+      // Stage 7 G0 — 종료 update (실패 경로)
+      this._completeRun(input.runId, {
+        status: 'failed',
+        completedAt: new Date().toISOString(),
+        error: {
+          code: 'PIPELINE_EXECUTOR_ERROR',
+          message: err instanceof Error ? err.message : String(err),
+        },
+      });
+      throw err;
     } finally {
       this.activeTokens.delete(input.runId);
     }
