@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import { eq } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
 import {
   pipelineRuns,
@@ -11,6 +12,7 @@ import {
   getPipelineRun,
   listPipelineRunsByTask,
   listPipelineRunsByProject,
+  countPipelineRunsByProject,
   getPipelineRunState,
   listPipelineEvents,
 } from '../pipeline-runs';
@@ -94,6 +96,44 @@ describe('queries/pipeline-runs', () => {
     // limit cap (100): even when 200 requested, returns at most existing rows
     const huge = listPipelineRunsByProject(PROJECT_ID, { limit: 200 });
     expect(huge.length).toBeLessThanOrEqual(100);
+  });
+
+  it('listPipelineRunsByProject: status filter scopes to that status only', () => {
+    seedRun('s-r1', 't-s', '2026-04-25T00:00:00.000Z');
+    db.update(pipelineRuns).set({ status: 'completed' }).where(eq(pipelineRuns.id, 's-r1')).run();
+    seedRun('s-r2', 't-s', '2026-04-25T00:01:00.000Z'); // status='running' default
+    seedRun('s-r3', 't-s', '2026-04-25T00:02:00.000Z');
+    db.update(pipelineRuns).set({ status: 'failed' }).where(eq(pipelineRuns.id, 's-r3')).run();
+
+    const completed = listPipelineRunsByProject(PROJECT_ID, { status: 'completed' });
+    expect(completed.map((r) => r.id)).toEqual(['s-r1']);
+
+    const running = listPipelineRunsByProject(PROJECT_ID, { status: 'running' });
+    expect(running.map((r) => r.id)).toEqual(['s-r2']);
+  });
+
+  it('listPipelineRunsByProject: taskIdLike LIKE filter', () => {
+    seedRun('like-1', 'task-alpha-12', '2026-04-25T00:00:00.000Z');
+    seedRun('like-2', 'task-beta-34',  '2026-04-25T00:01:00.000Z');
+    seedRun('like-3', 'task-alpha-99', '2026-04-25T00:02:00.000Z');
+
+    const alphas = listPipelineRunsByProject(PROJECT_ID, { taskIdLike: 'alpha' });
+    expect(alphas.map((r) => r.id).sort()).toEqual(['like-1', 'like-3']);
+
+    const exact = listPipelineRunsByProject(PROJECT_ID, { taskIdLike: 'beta-34' });
+    expect(exact.map((r) => r.id)).toEqual(['like-2']);
+  });
+
+  it('countPipelineRunsByProject: respects status + taskIdLike filters', () => {
+    seedRun('c-1', 'task-x', '2026-04-25T00:00:00.000Z');
+    seedRun('c-2', 'task-x', '2026-04-25T00:01:00.000Z');
+    seedRun('c-3', 'task-y', '2026-04-25T00:02:00.000Z');
+    db.update(pipelineRuns).set({ status: 'failed' }).where(eq(pipelineRuns.id, 'c-3')).run();
+
+    expect(countPipelineRunsByProject(PROJECT_ID)).toBe(3);
+    expect(countPipelineRunsByProject(PROJECT_ID, { status: 'running' })).toBe(2);
+    expect(countPipelineRunsByProject(PROJECT_ID, { taskIdLike: 'task-x' })).toBe(2);
+    expect(countPipelineRunsByProject(PROJECT_ID, { status: 'failed', taskIdLike: 'task-y' })).toBe(1);
   });
 
   it('getPipelineRunState: parses stateJson to object', () => {

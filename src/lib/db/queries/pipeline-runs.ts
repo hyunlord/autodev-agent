@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gt, like } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
 import { pipelineRuns, pipelineRunState, pipelineEvents } from '@/lib/db/schema';
 
@@ -32,20 +32,58 @@ export function listPipelineRunsByTask(taskId: string): PipelineRunRow[] {
     .all();
 }
 
+export interface ListProjectRunsOptions {
+  /** Exact-match status filter (running/completed/failed/cancelled/resumed). */
+  status?: string;
+  /** Substring match on taskId (LIKE %taskIdLike%). */
+  taskIdLike?: string;
+  limit?: number;
+  offset?: number;
+}
+
 export function listPipelineRunsByProject(
   projectId: string,
-  options: { limit?: number; offset?: number } = {},
+  options: ListProjectRunsOptions = {},
 ): PipelineRunRow[] {
   const limit = clamp(options.limit ?? RUNS_LIMIT_DEFAULT, 1, RUNS_LIMIT_MAX);
   const offset = Math.max(0, options.offset ?? 0);
+  const filters = buildProjectRunFilters(projectId, options);
   return db
     .select()
     .from(pipelineRuns)
-    .where(eq(pipelineRuns.projectId, projectId))
+    .where(and(...filters))
     .orderBy(desc(pipelineRuns.startedAt))
     .limit(limit)
     .offset(offset)
     .all();
+}
+
+/** Stage 7 G1 — Total count for paginated views (status + taskIdLike honored). */
+export function countPipelineRunsByProject(
+  projectId: string,
+  options: Pick<ListProjectRunsOptions, 'status' | 'taskIdLike'> = {},
+): number {
+  const filters = buildProjectRunFilters(projectId, options);
+  const row = db
+    .select({ value: count() })
+    .from(pipelineRuns)
+    .where(and(...filters))
+    .get();
+  return row?.value ?? 0;
+}
+
+function buildProjectRunFilters(
+  projectId: string,
+  options: Pick<ListProjectRunsOptions, 'status' | 'taskIdLike'>,
+) {
+  const filters = [eq(pipelineRuns.projectId, projectId)];
+  if (options.status) {
+    // status column is a literal enum union; user input arrives as plain string.
+    // Drizzle accepts this at runtime — cast through a typed enum guard.
+    filters.push(eq(pipelineRuns.status, options.status as typeof pipelineRuns.status._.data));
+  }
+  if (options.taskIdLike) filters.push(like(pipelineRuns.taskId, `%${options.taskIdLike}%`));
+  return filters;
 }
 
 export interface PipelineRunStateView {
