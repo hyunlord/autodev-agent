@@ -67,7 +67,7 @@ export default async function PipelineRunDetailPage({ params, searchParams }: Pa
           pageSize={EVENTS_PAGE_SIZE}
         />
       )}
-      <PipelineYamlViewer yaml={yaml} />
+      <PipelineYamlViewer yaml={yaml} projectId={projectId} />
       <StateJsonViewer state={stateView?.state ?? null} />
     </div>
   );

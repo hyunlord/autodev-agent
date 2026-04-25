@@ -1,15 +1,22 @@
+'use client';
+import { useState } from 'react';
 import { CodeBlock } from '@/app/tasks/[id]/components/CodeBlock';
+import { PipelineYamlEditor } from './PipelineYamlEditor';
 
 /**
- * Stage 7 G4 — Read-only viewer for the pipeline YAML that produced a run.
- *
- * Reuses the existing `CodeBlock` (Client Component) instead of redoing the
- * highlight.js wiring + github-dark.css import — same syntax-highlighting
- * pipeline, no new theme assets, no new dependency. The collapsible
- * `<details>` element matches StateJsonViewer's interaction pattern so the
- * detail page stays visually consistent.
+ * Stage 7 G5 — Adds Edit toggle to the G4 read-only viewer.
+ * Converted to Client Component to hold editing state.
+ * In read mode renders CodeBlock as before; in edit mode swaps to
+ * PipelineYamlEditor (textarea + save/cancel).
  */
-export function PipelineYamlViewer({ yaml }: { yaml: string | null }) {
+export function PipelineYamlViewer({
+  yaml,
+  projectId,
+}: {
+  yaml: string | null;
+  projectId: string;
+}) {
+  const [editing, setEditing] = useState(false);
   if (!yaml) return null;
   const lineCount = yaml.split('\n').length;
 
@@ -24,12 +31,38 @@ export function PipelineYamlViewer({ yaml }: { yaml: string | null }) {
           style={{ color: 'var(--text-primary)' }}
         >
           <span>Pipeline YAML</span>
-          <span className="text-xs font-normal" style={{ color: 'var(--text-secondary)' }}>
-            ({lineCount} line{lineCount === 1 ? '' : 's'})
-          </span>
+          {!editing && (
+            <span className="text-xs font-normal" style={{ color: 'var(--text-secondary)' }}>
+              ({lineCount} line{lineCount === 1 ? '' : 's'})
+            </span>
+          )}
+          {!editing && (
+            <button
+              onClick={(e) => {
+                e.preventDefault();
+                setEditing(true);
+              }}
+              className="ml-auto text-xs px-2 py-1 border rounded"
+              style={{ color: 'var(--text-secondary)', borderColor: 'var(--border-color)' }}
+            >
+              Edit
+            </button>
+          )}
         </summary>
         <div className="mt-3">
-          <CodeBlock code={yaml} language="yaml" maxHeight={600} />
+          {editing ? (
+            <PipelineYamlEditor
+              initialYaml={yaml}
+              projectId={projectId}
+              onCancel={() => setEditing(false)}
+              onSaved={() => {
+                setEditing(false);
+                window.location.reload();
+              }}
+            />
+          ) : (
+            <CodeBlock code={yaml} language="yaml" maxHeight={600} />
+          )}
         </div>
       </details>
     </section>
