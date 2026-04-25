@@ -1,6 +1,11 @@
 import { and, asc, count, desc, eq, gt, like, or } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
-import { pipelineRuns, pipelineRunState, pipelineEvents } from '@/lib/db/schema';
+import {
+  pipelineRuns,
+  pipelineRunState,
+  pipelineEvents,
+  pipelineVersions,
+} from '@/lib/db/schema';
 
 /**
  * Stage 7 G0 — Pipeline runs / state / events read layer.
@@ -164,6 +169,20 @@ export function listPipelineEvents(
     .limit(limit)
     .offset(offset)
     .all();
+}
+
+/**
+ * Stage 7 G4 — Returns the YAML source for a given pipeline_versions row,
+ * or null when the version id is unknown. Used by the G2 detail page to
+ * show a read-only viewer of the pipeline definition that produced a run.
+ */
+export function getPipelineVersionYaml(versionId: string): string | null {
+  const row = db
+    .select({ yaml: pipelineVersions.pipelineYaml })
+    .from(pipelineVersions)
+    .where(eq(pipelineVersions.id, versionId))
+    .get();
+  return row?.yaml ?? null;
 }
 
 function clamp(n: number, lo: number, hi: number): number {

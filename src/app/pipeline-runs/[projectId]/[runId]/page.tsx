@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation';
 import {
   getPipelineRun,
   getPipelineRunState,
+  getPipelineVersionYaml,
   listPipelineEvents,
 } from '@/lib/db/queries/pipeline-runs';
 import { RunHeader } from './_components/RunHeader';
@@ -9,6 +10,7 @@ import { NodesTable } from './_components/NodesTable';
 import { EventsTimeline } from './_components/EventsTimeline';
 import { StateJsonViewer } from './_components/StateJsonViewer';
 import { LiveEventsFeed } from './_components/LiveEventsFeed';
+import { PipelineYamlViewer } from './_components/PipelineYamlViewer';
 import { parseEventsPage } from './_lib/events-pagination';
 
 const EVENTS_PAGE_SIZE = 50;
@@ -44,6 +46,12 @@ export default async function PipelineRunDetailPage({ params, searchParams }: Pa
     notFound();
   }
 
+  // Stage 7 G4 — only fetch yaml when a versionId is recorded; missing version
+  // (legacy or fixture) gracefully degrades to "no YAML available".
+  const yaml = run.pipelineVersionId
+    ? getPipelineVersionYaml(run.pipelineVersionId)
+    : null;
+
   return (
     <div className="min-h-screen p-6 max-w-7xl mx-auto space-y-6">
       <RunHeader run={run} projectId={projectId} />
@@ -59,6 +67,7 @@ export default async function PipelineRunDetailPage({ params, searchParams }: Pa
           pageSize={EVENTS_PAGE_SIZE}
         />
       )}
+      <PipelineYamlViewer yaml={yaml} />
       <StateJsonViewer state={stateView?.state ?? null} />
     </div>
   );

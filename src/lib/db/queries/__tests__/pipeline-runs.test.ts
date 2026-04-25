@@ -15,6 +15,7 @@ import {
   countPipelineRunsByProject,
   getPipelineRunState,
   listPipelineEvents,
+  getPipelineVersionYaml,
 } from '../pipeline-runs';
 
 const PROJECT_ID = 'q-proj';
@@ -151,6 +152,13 @@ describe('queries/pipeline-runs', () => {
     expect(view!.state).toEqual({ status: 'running', nodes: { a: 'pending' } });
 
     expect(getPipelineRunState('absent')).toBeNull();
+  });
+
+  it('getPipelineVersionYaml: existing version → yaml string, missing → null (G4)', () => {
+    const yaml = getPipelineVersionYaml(VERSION_ID);
+    expect(yaml).toBe('adplVersion: 1\nname: q\n');
+
+    expect(getPipelineVersionYaml('nonexistent-version')).toBeNull();
   });
 
   it('listPipelineEvents afterCursor: same-createdAt rows fully drained across two ticks (G3 micro-fix)', () => {
