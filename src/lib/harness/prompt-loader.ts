@@ -36,7 +36,8 @@ export type PromptRole =
   | 'evaluator'
   | 'debate-drafter'
   | 'debate-challenger'
-  | 'ai-builder-classifier';
+  | 'ai-builder-classifier'
+  | 'ai-builder-base-spec';
 
 export interface LoadedPrompt {
   content: string;
@@ -305,6 +306,7 @@ function getDefaultFrontmatter(role: PromptRole): Record<string, any> {
     'debate-drafter': { role: 'debate-drafter', description: 'Debate mode draft plan generator' },
     'debate-challenger': { role: 'debate-challenger', description: 'Debate mode plan challenger' },
     'ai-builder-classifier': { role: 'ai-builder-classifier', description: 'AI Builder intent classification' },
+    'ai-builder-base-spec': { role: 'ai-builder-base-spec', description: 'ADPL v1.0 compressed reference for AI Builder LLM context' },
   };
   return map[role];
 }
@@ -318,6 +320,7 @@ function getDefaultPrompt(role: PromptRole): string {
     case 'debate-drafter':    return DEFAULT_DEBATE_DRAFTER_PROMPT;
     case 'debate-challenger': return DEFAULT_DEBATE_CHALLENGER_PROMPT;
     case 'ai-builder-classifier': return DEFAULT_AI_BUILDER_CLASSIFIER_PROMPT;
+    case 'ai-builder-base-spec':  return DEFAULT_AI_BUILDER_BASE_SPEC;
   }
 }
 
@@ -666,6 +669,54 @@ Has existing YAML: {{hasCurrentYaml}}
 ## Output (MANDATORY)
 Respond with ONLY a JSON object — no markdown fences, no prose:
 {"intent":"new"|"modify"|"clarify"|"explain","confidence":0.0-1.0,"reason":"one short sentence"}`;
+
+const DEFAULT_AI_BUILDER_BASE_SPEC = `ADPL v1.0 compressed reference. The full spec lives at docs/adpl-spec/v1.0.md.
+
+## Top-level
+adplVersion (int, required, =1) | name (string, required, ^[a-z0-9][a-z0-9-]{0,62}$) | description | triggers (default [{type: manual}]) | pipeline (required, >=1 node) | settings | metadata
+settings keys: maxParallel, totalTimeout, nodeTimeout, onNodeFailure, totalCostLimit, retryPolicy, allowedEnvKeys
+
+## Context variables
+$task.{id, prompt, tags, createdAt, projectId, config}
+$project.{id, name, path, description}
+$nodes.<id>.output.{status, data, error, duration, costUsd}
+$loop.{index, total, isFirst, isLast, <as>}    (only inside loop)
+$flow.{matchedBranch | parallelIndex/parallelTotal | gateStatus/gateRespondedBy}
+$env.<KEY>                                     (must be in settings.allowedEnvKeys)
+$trigger.{type, firedAt, payload, scheduledAt}
+
+## Expressions
+Slot 1 (interpolation): \${expr}, \${expr | filter}, \${expr ?? fallback}
+Filters: truncate(n), lower, upper, json, round, toFixed(n), replace, slice, default(v), join(sep), length, escape, urlencode, jsonParse, toDate, toTime, padStart, trim, capitalize
+Slot 2 (conditions): { field: <path>, <op>: <value> } | { all: [...] } | { any: [...] } | { not: {...} }
+Operators: eq, neq, lt, lte, gt, gte, in, nin, contains, startsWith, endsWith, matches, exists, empty, truthy
+NO ternary. NO method calls (use contains/in instead).
+
+## Node types (11)
+- agent: role (planner|coder|verifier|reviewer|custom), model, prompt, output.schema, maxTokens, retryPolicy, fallback
+- shell: command, mode (shell|exec), args, cwd, env, outputFormat (auto|text|json|lines|binary), failOnNonZero
+- http: url, method (GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS), headers, queryParams, body, bodyFormat (json|form|text|binary|multipart)
+- webhook_out: provider (slack|discord|teams|generic), url, body, silentFail
+- branch: cases [{ when | default: true, then: [nodes] }], evaluationMode (first_match|all_match)
+- parallel: branches [{ id, nodes }], mergeStrategy (all_must_pass|any_pass|first_success|best_effort), maxConcurrent
+- loop: mode (forEach|times|while), over (forEach), as, count (times), condition + maxIterations (while), do
+- gate: prompt, options, timeout, defaultOption
+- mcp: server, tool, args, sessionMode (per_task|shared|per_node)
+- set: values (Record<string, expression>)
+- transform: input, operation (filter|map|pluck), params
+
+## Triggers (5)
+- manual: inputSchema (form fields), confirmMessage
+- task_created: tags, filter
+- schedule: mode (cron|interval|once), cron (5-field), interval (sec), at (ISO), timezone, overlap (skip|queue|concurrent)
+- webhook_in: path, method, auth (none|hmac|bearer)
+- git_event: eventType (pull_request|push|issues|...), branches, paths, actions
+
+## Anti-patterns
+- \${tags.includes('ui')} → use { field: $task.tags, contains: ui }
+- \${x ? a : b} → use branch node or set with when
+- shell command with \${$task.prompt} → use mode: exec + args
+- \${$env.X} without settings.allowedEnvKeys.includes('X') → security error`;
 
 const DEFAULT_DEBATE_CHALLENGER_PROMPT = `You are a plan challenger in Debate Mode. Review the draft plan critically.
 
