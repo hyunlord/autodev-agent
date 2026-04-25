@@ -2,18 +2,17 @@ import type {
   AIBuilderRequest,
   AIBuilderResult,
   AIBuilderStep,
-  Intent,
 } from './types';
 import { AIBuilderError } from './types';
+import { classifyIntent } from './intent/classifier';
 
 /**
- * Stage 7 G6 G19-1 — AI Builder orchestrator skeleton.
+ * Stage 7 G6 G19-1 / G19-2 — AI Builder orchestrator.
  *
- * Defines the 6-step pipeline contract that subsequent PRs (G19-2 through
- * G20-3) progressively wire up. This PR keeps every step as a placeholder:
- * `classifyIntent` uses a one-line heuristic; `callLlm` throws to short-
- * circuit the pipeline before any real LLM dependency lands. The shape of
- * `AIBuilderResult` is the contract callers depend on.
+ * Defines the 6-step pipeline contract that subsequent PRs (G19-3 through
+ * G20-3) progressively wire up. G19-2 wires the first real LLM call:
+ * `classifyIntent` (with heuristic fallback). The remaining steps still
+ * short-circuit at `callLlm` so the run() shape stays observable.
  */
 
 interface AssembledContext {
@@ -24,11 +23,16 @@ interface AssembledContext {
 export class AIBuilderOrchestrator {
   async run(req: AIBuilderRequest): Promise<AIBuilderResult> {
     const steps: AIBuilderStep[] = [];
+    const warnings: string[] = [];
 
-    const intent = this.classifyIntent(req);
+    const classification = await classifyIntent(req);
     steps.push('classify_intent');
+    if (classification.fallbackUsed) {
+      warnings.push('intent classification fallback used');
+    }
+    const intent = classification.intent;
 
-    const context = this.assembleContext(req, intent);
+    const context = this.assembleContext(req);
     steps.push('assemble_context');
 
     try {
@@ -48,7 +52,7 @@ export class AIBuilderOrchestrator {
           intent,
           needsClarification: false,
           explanation: 'Orchestrator skeleton — LLM not yet wired',
-          warnings: ['G19-1 skeleton: LLM call not implemented'],
+          warnings: [...warnings, 'G19-1 skeleton: LLM call not implemented'],
           attempts: 0,
           steps,
         };
@@ -60,18 +64,13 @@ export class AIBuilderOrchestrator {
       intent,
       needsClarification: false,
       explanation: 'Pipeline executed (placeholder)',
-      warnings: [],
+      warnings,
       attempts: 1,
       steps,
     };
   }
 
-  private classifyIntent(req: AIBuilderRequest): Intent {
-    // G19-2 will replace with a real LLM-backed classifier.
-    return req.currentYaml ? 'modify' : 'new';
-  }
-
-  private assembleContext(_req: AIBuilderRequest, _intent: Intent): AssembledContext {
+  private assembleContext(_req: AIBuilderRequest): AssembledContext {
     return {};
   }
 

@@ -29,7 +29,14 @@ function resolveTemplate(template: string, vars: Record<string, string>): string
   return template.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] ?? `{{${key}}}`);
 }
 
-export type PromptRole = 'planner' | 'coder' | 'verifier' | 'evaluator' | 'debate-drafter' | 'debate-challenger';
+export type PromptRole =
+  | 'planner'
+  | 'coder'
+  | 'verifier'
+  | 'evaluator'
+  | 'debate-drafter'
+  | 'debate-challenger'
+  | 'ai-builder-classifier';
 
 export interface LoadedPrompt {
   content: string;
@@ -297,6 +304,7 @@ function getDefaultFrontmatter(role: PromptRole): Record<string, any> {
     evaluator: { role: 'evaluator', description: 'Evaluation criteria' },
     'debate-drafter': { role: 'debate-drafter', description: 'Debate mode draft plan generator' },
     'debate-challenger': { role: 'debate-challenger', description: 'Debate mode plan challenger' },
+    'ai-builder-classifier': { role: 'ai-builder-classifier', description: 'AI Builder intent classification' },
   };
   return map[role];
 }
@@ -309,6 +317,7 @@ function getDefaultPrompt(role: PromptRole): string {
     case 'evaluator':         return DEFAULT_EVALUATOR_PROMPT;
     case 'debate-drafter':    return DEFAULT_DEBATE_DRAFTER_PROMPT;
     case 'debate-challenger': return DEFAULT_DEBATE_CHALLENGER_PROMPT;
+    case 'ai-builder-classifier': return DEFAULT_AI_BUILDER_CLASSIFIER_PROMPT;
   }
 }
 
@@ -636,6 +645,27 @@ const DEFAULT_DEBATE_DRAFTER_PROMPT = `You are a planning drafter in Debate Mode
 ## Output
 Respond with valid JSON matching the standard plan schema (same as planner).
 Be specific about implementation details — the challenger will scrutinize vague plans.`;
+
+const DEFAULT_AI_BUILDER_CLASSIFIER_PROMPT = `You are an intent classifier for the AutoDev AI Builder. Classify the user message into exactly one of these intents:
+
+- new: user wants to create a brand-new pipeline
+- modify: user wants to change an existing pipeline (refers to nodes, add/remove/rename)
+- clarify: request is too vague to act on
+- explain: user asks to describe or debug an existing pipeline (why/how/what does this do)
+
+## Decision Hints
+- Has existing YAML: true + change words (add/remove/rename/swap) → modify
+- Has existing YAML: false + workflow description → new
+- Question about behavior, not a change request → explain
+- No concrete trigger/action/tool → clarify
+
+## Current Request
+User message: {{userMessage}}
+Has existing YAML: {{hasCurrentYaml}}
+
+## Output (MANDATORY)
+Respond with ONLY a JSON object — no markdown fences, no prose:
+{"intent":"new"|"modify"|"clarify"|"explain","confidence":0.0-1.0,"reason":"one short sentence"}`;
 
 const DEFAULT_DEBATE_CHALLENGER_PROMPT = `You are a plan challenger in Debate Mode. Review the draft plan critically.
 
