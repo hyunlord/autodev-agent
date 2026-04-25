@@ -8,6 +8,7 @@ import { RunHeader } from './_components/RunHeader';
 import { NodesTable } from './_components/NodesTable';
 import { EventsTimeline } from './_components/EventsTimeline';
 import { StateJsonViewer } from './_components/StateJsonViewer';
+import { LiveEventsFeed } from './_components/LiveEventsFeed';
 import { parseEventsPage } from './_lib/events-pagination';
 
 const EVENTS_PAGE_SIZE = 50;
@@ -47,13 +48,17 @@ export default async function PipelineRunDetailPage({ params, searchParams }: Pa
     <div className="min-h-screen p-6 max-w-7xl mx-auto space-y-6">
       <RunHeader run={run} projectId={projectId} />
       <NodesTable state={stateView?.state ?? null} />
-      <EventsTimeline
-        events={events}
-        projectId={projectId}
-        runId={runId}
-        currentPage={eventsPage}
-        pageSize={EVENTS_PAGE_SIZE}
-      />
+      {run.status === 'running' || run.status === 'initializing' ? (
+        <LiveEventsFeed runId={runId} />
+      ) : (
+        <EventsTimeline
+          events={events}
+          projectId={projectId}
+          runId={runId}
+          currentPage={eventsPage}
+          pageSize={EVENTS_PAGE_SIZE}
+        />
+      )}
       <StateJsonViewer state={stateView?.state ?? null} />
     </div>
   );
