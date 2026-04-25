@@ -7,7 +7,11 @@ import { createPipelineVersion } from '@/lib/db/queries/pipeline-versions';
 export async function POST(req: Request) {
   let body: Record<string, unknown>;
   try {
-    body = (await req.json()) as Record<string, unknown>;
+    const raw: unknown = await req.json();
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      return Response.json({ error: 'INVALID_BODY' }, { status: 400 });
+    }
+    body = raw as Record<string, unknown>;
   } catch {
     return Response.json({ error: 'INVALID_BODY' }, { status: 400 });
   }

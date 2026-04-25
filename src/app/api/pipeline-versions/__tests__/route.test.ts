@@ -89,4 +89,40 @@ describe('POST /api/pipeline-versions', () => {
     const body = await res.json() as { error: string };
     expect(body.error).toBe('PROJECT_NOT_FOUND');
   });
+
+  it('body is null → 400 INVALID_BODY', async () => {
+    const req = new Request('http://x/api/pipeline-versions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: 'null',
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(400);
+    const body = await res.json() as { error: string };
+    expect(body.error).toBe('INVALID_BODY');
+  });
+
+  it('body is array → 400 INVALID_BODY', async () => {
+    const req = new Request('http://x/api/pipeline-versions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '[]',
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(400);
+    const body = await res.json() as { error: string };
+    expect(body.error).toBe('INVALID_BODY');
+  });
+
+  it('body is string → 400 INVALID_BODY', async () => {
+    const req = new Request('http://x/api/pipeline-versions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '"hello"',
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(400);
+    const body = await res.json() as { error: string };
+    expect(body.error).toBe('INVALID_BODY');
+  });
 });
