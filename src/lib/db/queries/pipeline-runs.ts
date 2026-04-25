@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, gt, like } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gt, like, or } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
 import { pipelineRuns, pipelineRunState, pipelineEvents } from '@/lib/db/schema';
 
@@ -116,11 +116,22 @@ export function getPipelineRunState(runId: string): PipelineRunStateView | null 
 
 export type PipelineEventRow = typeof pipelineEvents.$inferSelect;
 
+/** Stage 7 G3 micro-fix — composite cursor for tie-safe pagination. */
+export interface EventCursor {
+  createdAt: string;
+  id: string;
+}
+
 export interface ListEventsOptions {
   /** Exact event type match (e.g. "node.completed"). */
   type?: string;
-  /** ISO timestamp (exclusive lower bound on createdAt). */
+  /** ISO timestamp (exclusive lower bound on createdAt). Coarse — use `afterCursor` when ties matter. */
   since?: string;
+  /**
+   * Composite cursor: returns rows where (createdAt, id) > (cursor.createdAt, cursor.id) lexicographically.
+   * Survives same-millisecond ties that `since` alone would lose.
+   */
+  afterCursor?: EventCursor;
   limit?: number;
   offset?: number;
 }
@@ -135,12 +146,21 @@ export function listPipelineEvents(
   const filters = [eq(pipelineEvents.runId, runId)];
   if (options.type) filters.push(eq(pipelineEvents.type, options.type));
   if (options.since) filters.push(gt(pipelineEvents.createdAt, options.since));
+  if (options.afterCursor) {
+    const c = options.afterCursor;
+    const tieBreak = and(
+      eq(pipelineEvents.createdAt, c.createdAt),
+      gt(pipelineEvents.id, c.id),
+    );
+    const composite = or(gt(pipelineEvents.createdAt, c.createdAt), tieBreak);
+    if (composite) filters.push(composite);
+  }
 
   return db
     .select()
     .from(pipelineEvents)
     .where(and(...filters))
-    .orderBy(asc(pipelineEvents.createdAt))
+    .orderBy(asc(pipelineEvents.createdAt), asc(pipelineEvents.id))
     .limit(limit)
     .offset(offset)
     .all();

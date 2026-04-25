@@ -34,6 +34,10 @@ export function formatHeartbeat(): string {
  * Given an ordered batch of events (asc by createdAt) and the previous "since"
  * cursor, returns the next cursor — newest createdAt seen, or the previous one
  * when the batch is empty.
+ *
+ * @deprecated Stage 7 G3 micro-fix introduced `computeNextCursor` that uses
+ * a composite (createdAt, id) cursor to survive same-millisecond ties. Kept
+ * for callers that only need coarse pagination.
  */
 export function computeNextSince(
   prev: string | undefined,
@@ -43,4 +47,25 @@ export function computeNextSince(
   // batch is asc by createdAt (G0 query layer guarantees this) — last element wins.
   const last = batch[batch.length - 1].createdAt;
   return last;
+}
+
+/** Composite cursor used by the SSE stream's polling loop (G3 micro-fix). */
+export interface EventCursor {
+  createdAt: string;
+  id: string;
+}
+
+/**
+ * Given an asc-ordered batch of `(createdAt, id)`, returns the cursor of the
+ * last row, or `prev` when the batch is empty. The query layer matches with
+ * `(row.createdAt, row.id) > (cursor.createdAt, cursor.id)` so same-millisecond
+ * ties are not lost across polling ticks.
+ */
+export function computeNextCursor(
+  prev: EventCursor | null,
+  batch: ReadonlyArray<{ createdAt: string; id: string }>,
+): EventCursor | null {
+  if (batch.length === 0) return prev;
+  const last = batch[batch.length - 1];
+  return { createdAt: last.createdAt, id: last.id };
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatSseEvent, formatHeartbeat, computeNextSince } from '../sse-format';
+import { formatSseEvent, formatHeartbeat, computeNextSince, computeNextCursor } from '../sse-format';
 
 describe('formatSseEvent — Stage 7 G3', () => {
   it('emits data-only frame when type/id omitted', () => {
@@ -52,5 +52,41 @@ describe('computeNextSince — Stage 7 G3', () => {
     expect(
       computeNextSince('1970-01-01T00:00:00.000Z', [{ createdAt: '2026-04-25T00:00:00.000Z' }]),
     ).toBe('2026-04-25T00:00:00.000Z');
+  });
+});
+
+describe('computeNextCursor — Stage 7 G3 micro-fix', () => {
+  it('empty batch returns the previous cursor verbatim', () => {
+    expect(computeNextCursor(null, [])).toBeNull();
+    const prev = { createdAt: '2026-04-25T00:00:00.000Z', id: 'evt-prev' };
+    expect(computeNextCursor(prev, [])).toEqual(prev);
+  });
+
+  it('returns last (createdAt, id) tuple from an asc-ordered batch', () => {
+    const batch = [
+      { createdAt: '2026-04-25T00:00:00.000Z', id: 'a' },
+      { createdAt: '2026-04-25T00:00:01.000Z', id: 'b' },
+      { createdAt: '2026-04-25T00:00:02.000Z', id: 'c' },
+    ];
+    expect(computeNextCursor(null, batch)).toEqual({ createdAt: '2026-04-25T00:00:02.000Z', id: 'c' });
+  });
+
+  it('survives same-createdAt ties (last id within tie wins)', () => {
+    const ts = '2026-04-25T00:00:00.000Z';
+    const batch = [
+      { createdAt: ts, id: 'a' },
+      { createdAt: ts, id: 'b' },
+      { createdAt: ts, id: 'c' },
+    ];
+    expect(computeNextCursor(null, batch)).toEqual({ createdAt: ts, id: 'c' });
+  });
+
+  it('overrides previous cursor when batch has rows', () => {
+    const prev = { createdAt: '1970-01-01T00:00:00.000Z', id: 'old' };
+    const batch = [{ createdAt: '2026-04-25T00:00:00.000Z', id: 'new' }];
+    expect(computeNextCursor(prev, batch)).toEqual({
+      createdAt: '2026-04-25T00:00:00.000Z',
+      id: 'new',
+    });
   });
 });

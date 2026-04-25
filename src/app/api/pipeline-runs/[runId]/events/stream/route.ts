@@ -1,5 +1,10 @@
 import { listPipelineEvents } from '@/lib/db/queries/pipeline-runs';
-import { formatSseEvent, formatHeartbeat, computeNextSince } from './_lib/sse-format';
+import {
+  formatSseEvent,
+  formatHeartbeat,
+  computeNextCursor,
+  type EventCursor,
+} from './_lib/sse-format';
 
 /**
  * Stage 7 G3 — Server-Sent Events stream for a pipeline run.
@@ -28,7 +33,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ runId: s
   const { runId } = await params;
   const encoder = new TextEncoder();
 
-  let since: string | undefined;
+  let cursor: EventCursor | null = null;
   let pollTimer: NodeJS.Timeout | null = null;
   let heartbeatTimer: NodeJS.Timeout | null = null;
   let closed = false;
@@ -50,7 +55,10 @@ export async function GET(req: Request, { params }: { params: Promise<{ runId: s
       const tick = () => {
         if (closed) return;
         try {
-          const batch = listPipelineEvents(runId, { since, limit: BATCH_LIMIT });
+          const batch = listPipelineEvents(runId, {
+            afterCursor: cursor ?? undefined,
+            limit: BATCH_LIMIT,
+          });
           for (const row of batch) {
             send(
               formatSseEvent({
@@ -66,7 +74,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ runId: s
               }),
             );
           }
-          since = computeNextSince(since, batch);
+          cursor = computeNextCursor(cursor, batch);
         } catch (err) {
           send(
             formatSseEvent({

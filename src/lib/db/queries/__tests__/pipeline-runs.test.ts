@@ -153,6 +153,42 @@ describe('queries/pipeline-runs', () => {
     expect(getPipelineRunState('absent')).toBeNull();
   });
 
+  it('listPipelineEvents afterCursor: same-createdAt rows fully drained across two ticks (G3 micro-fix)', () => {
+    const ts = '2026-04-25T00:00:00.000Z';
+    db.insert(pipelineEvents).values([
+      { id: 'a', runId: 'r-tie', type: 't', payloadJson: '{}', createdAt: ts },
+      { id: 'b', runId: 'r-tie', type: 't', payloadJson: '{}', createdAt: ts },
+      { id: 'c', runId: 'r-tie', type: 't', payloadJson: '{}', createdAt: ts },
+      { id: 'd', runId: 'r-tie', type: 't', payloadJson: '{}', createdAt: ts },
+    ]).run();
+
+    // Tick 1 (limit 2) — first two rows in id-asc order
+    const first = listPipelineEvents('r-tie', { limit: 2 });
+    expect(first.map((e) => e.id)).toEqual(['a', 'b']);
+
+    // Tick 2: cursor at last delivered (ts, 'b') — must NOT skip 'c' & 'd'
+    const second = listPipelineEvents('r-tie', { afterCursor: { createdAt: ts, id: 'b' }, limit: 10 });
+    expect(second.map((e) => e.id)).toEqual(['c', 'd']);
+
+    // Tick 3: cursor at 'd' — empty
+    const third = listPipelineEvents('r-tie', { afterCursor: { createdAt: ts, id: 'd' }, limit: 10 });
+    expect(third).toHaveLength(0);
+  });
+
+  it('listPipelineEvents afterCursor: crosses createdAt boundary correctly', () => {
+    db.insert(pipelineEvents).values([
+      { id: 'x1', runId: 'r-mix', type: 't', payloadJson: '{}', createdAt: '2026-04-25T00:00:00.000Z' },
+      { id: 'x2', runId: 'r-mix', type: 't', payloadJson: '{}', createdAt: '2026-04-25T00:00:00.000Z' },
+      { id: 'y1', runId: 'r-mix', type: 't', payloadJson: '{}', createdAt: '2026-04-25T00:00:01.000Z' },
+    ]).run();
+
+    const after = listPipelineEvents('r-mix', {
+      afterCursor: { createdAt: '2026-04-25T00:00:00.000Z', id: 'x2' },
+      limit: 10,
+    });
+    expect(after.map((e) => e.id)).toEqual(['y1']);
+  });
+
   it('listPipelineEvents: type filter + since timestamp filter + limit cap 1000', () => {
     const now = '2026-04-25T10:00:00.000Z';
     const before = '2026-04-25T09:00:00.000Z';
