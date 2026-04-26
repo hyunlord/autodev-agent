@@ -18,7 +18,7 @@ export interface DetectOptions {
  */
 export function detectFragments(
   userMessage: string,
-  fragments: Fragment[],
+  fragments: ReadonlyArray<Readonly<Fragment>>,
   options: DetectOptions = {},
 ): FragmentMatch[] {
   const max = options.maxFragments ?? 3;

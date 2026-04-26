@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { loadFragment, loadAllFragments, __resetFragmentCache } from '../fragment-loader';
+import {
+  loadFragment,
+  loadAllFragments,
+  __resetFragmentCache,
+  type Fragment,
+} from '../fragment-loader';
 
 beforeEach(() => {
   __resetFragmentCache();
@@ -49,5 +54,29 @@ describe('loadAllFragments', () => {
     for (const f of all) {
       expect(f.keywords.length, `${f.name} has no keywords`).toBeGreaterThan(0);
     }
+  });
+
+  it('cached array is frozen — push throws in strict mode', () => {
+    const fragments = loadAllFragments();
+    const before = fragments.length;
+    expect(() =>
+      (fragments as unknown as Fragment[]).push({
+        name: 'x',
+        description: '',
+        keywords: [],
+        body: '',
+        estimatedTokens: 0,
+      }),
+    ).toThrow();
+    expect(fragments.length).toBe(before);
+  });
+
+  it('cached fragment objects are frozen — property assignment throws', () => {
+    const fragments = loadAllFragments();
+    const original = fragments[0].body;
+    expect(() => {
+      (fragments[0] as Fragment).body = 'mutated';
+    }).toThrow();
+    expect(fragments[0].body).toBe(original);
   });
 });

@@ -30,25 +30,34 @@ function parseFragmentFile(filePath: string, name: string): Fragment {
   return { name, description, keywords, body, estimatedTokens: estimateTokens(body) };
 }
 
-export function loadFragment(name: string): Fragment {
+function freezeFragment(f: Fragment): Readonly<Fragment> {
+  Object.freeze(f.keywords);
+  return Object.freeze(f);
+}
+
+export function loadFragment(name: string): Readonly<Fragment> {
   const filePath = join(FRAGMENTS_DIR, `${name}.md`);
   if (!existsSync(filePath)) {
     throw new Error(`Fragment '${name}' not found at ${filePath}`);
   }
-  return parseFragmentFile(filePath, name);
+  return freezeFragment(parseFragmentFile(filePath, name));
 }
 
-let cached: Fragment[] | null = null;
+let cached: ReadonlyArray<Readonly<Fragment>> | null = null;
 
-export function loadAllFragments(): Fragment[] {
+export function loadAllFragments(): ReadonlyArray<Readonly<Fragment>> {
   if (cached) return cached;
-  if (!existsSync(FRAGMENTS_DIR)) return [];
+  if (!existsSync(FRAGMENTS_DIR)) {
+    cached = Object.freeze([]);
+    return cached;
+  }
   const result = readdirSync(FRAGMENTS_DIR)
     .filter((f) => f.endsWith('.md'))
     .sort()
-    .map((f) => parseFragmentFile(join(FRAGMENTS_DIR, f), f.replace(/\.md$/, '')));
-  cached = result;
-  return result;
+    .map((f) => parseFragmentFile(join(FRAGMENTS_DIR, f), f.replace(/\.md$/, '')))
+    .map(freezeFragment);
+  cached = Object.freeze(result);
+  return cached;
 }
 
 /** Test-only — clears the in-memory fragment cache. */
