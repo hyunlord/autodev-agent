@@ -6,6 +6,7 @@ import type {
   IntentClassification,
   Intent,
   GeneratorResponse,
+  AIBuilderDiff,
 } from './types';
 import { AIBuilderError, GeneratorResponseSchema } from './types';
 import { classifyIntent, computeCost } from './intent/classifier';
@@ -13,6 +14,7 @@ import { assembleSystemPrompt } from './context/assembler';
 import { extractJson } from '@/lib/utils/json-extractor';
 import { PipelineCompiler } from '@/lib/adpl/engine/compiler';
 import type { CompileError } from '@/lib/adpl/engine/compiler';
+import { parseYaml } from '@/lib/adpl/engine/compiler/yaml-parser';
 
 /**
  * Stage 7 G6 G20-2 — ADPL Compiler validation + validate-retry loop.
@@ -108,6 +110,8 @@ export class AIBuilderOrchestrator {
       lastValidationErrors = validation.errors;
 
       if (validation.ok) {
+        const diff = await this.computeDiff(parsed, req);
+        if (!steps.includes('compute_diff')) steps.push('compute_diff');
         return this.buildSuccessResult(
           parsed,
           classification,
@@ -118,6 +122,7 @@ export class AIBuilderOrchestrator {
           totalCostUsd,
           lastInputTokens,
           lastOutputTokens,
+          diff,
         );
       }
 
@@ -131,6 +136,8 @@ export class AIBuilderOrchestrator {
     }
 
     // Max retries exhausted
+    const diff = lastParsed ? await this.computeDiff(lastParsed, req) : undefined;
+    if (!steps.includes('compute_diff')) steps.push('compute_diff');
     return this.buildMaxRetryResult(
       lastParsed,
       intent,
@@ -141,6 +148,7 @@ export class AIBuilderOrchestrator {
       totalCostUsd,
       lastInputTokens,
       lastOutputTokens,
+      diff,
     );
   }
 
@@ -264,6 +272,7 @@ export class AIBuilderOrchestrator {
     totalCostUsd: number,
     inputTokens: number,
     outputTokens: number,
+    diff?: AIBuilderDiff,
   ): AIBuilderResult {
     return {
       intent: parsed.intent_recognized,
@@ -274,6 +283,7 @@ export class AIBuilderOrchestrator {
         isRequired: q.is_required,
       })),
       generatedYaml: parsed.generated_yaml,
+      diff,
       explanation: parsed.explanation,
       warnings: [
         ...preWarnings,
@@ -299,6 +309,7 @@ export class AIBuilderOrchestrator {
     totalCostUsd: number,
     inputTokens: number,
     outputTokens: number,
+    diff?: AIBuilderDiff,
   ): AIBuilderResult {
     const errorWarnings = validationErrors.map(
       (e) => `[${e.code}]${e.pathId ? ` (${e.pathId})` : ''}: ${e.message}`,
@@ -312,6 +323,7 @@ export class AIBuilderOrchestrator {
         isRequired: q.is_required,
       })),
       generatedYaml: lastParsed?.generated_yaml,
+      diff,
       explanation:
         lastParsed?.explanation ??
         'Max retry attempts reached without successful validation.',
@@ -330,8 +342,29 @@ export class AIBuilderOrchestrator {
     };
   }
 
-  // Placeholder — wired in G20-3.
-  private computeDiff(_parsed: unknown, _req: AIBuilderRequest): void {
-    throw new AIBuilderError('computeDiff not implemented', 'compute_diff');
+  private async computeDiff(
+    parsed: GeneratorResponse,
+    req: AIBuilderRequest,
+  ): Promise<AIBuilderDiff | undefined> {
+    if (parsed.intent_recognized !== 'modify' || !req.currentYaml || !parsed.generated_yaml) {
+      return undefined;
+    }
+    try {
+      const [oldPipeline, newPipeline] = await Promise.all([
+        parseYaml({ yaml: req.currentYaml }),
+        parseYaml({ yaml: parsed.generated_yaml }),
+      ]);
+      const oldNodes = new Map(oldPipeline.raw.pipeline.map((n) => [n.id, n]));
+      const newNodes = new Map(newPipeline.raw.pipeline.map((n) => [n.id, n]));
+      const addedNodes = [...newNodes.keys()].filter((id) => !oldNodes.has(id));
+      const removedNodes = [...oldNodes.keys()].filter((id) => !newNodes.has(id));
+      const modifiedNodes = [...newNodes.keys()].filter((id) => {
+        if (!oldNodes.has(id)) return false;
+        return JSON.stringify(oldNodes.get(id)) !== JSON.stringify(newNodes.get(id));
+      });
+      return { addedNodes, removedNodes, modifiedNodes };
+    } catch {
+      return undefined;
+    }
   }
 }

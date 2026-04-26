@@ -63,6 +63,11 @@ export const modifyResponse = JSON.stringify({
   explanation: '알림 노드를 파이프라인 끝에 추가했습니다.',
   warnings: [],
   suggested_next_steps: [],
+  diff: {
+    added_nodes: ['notify'],
+    removed_nodes: [],
+    modified_nodes: ['code'],
+  },
 });
 
 export const clarifyResponse = JSON.stringify({

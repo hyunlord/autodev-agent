@@ -8,11 +8,12 @@ import {
   missingRequiredField,
 } from '../__fixtures__/generator-response';
 
-const { mockClassify, mockAssemble, mockCreate, mockCompile } = vi.hoisted(() => ({
+const { mockClassify, mockAssemble, mockCreate, mockCompile, mockParseYaml } = vi.hoisted(() => ({
   mockClassify: vi.fn(),
   mockAssemble: vi.fn(),
   mockCreate: vi.fn(),
   mockCompile: vi.fn(),
+  mockParseYaml: vi.fn(),
 }));
 
 vi.mock('../intent/classifier', () => ({
@@ -40,6 +41,10 @@ vi.mock('@/lib/adpl/engine/compiler', () => ({
   ) {
     this.compile = mockCompile;
   }),
+}));
+
+vi.mock('@/lib/adpl/engine/compiler/yaml-parser', () => ({
+  parseYaml: mockParseYaml,
 }));
 
 function classified(intent: 'new' | 'modify' | 'clarify' | 'explain', fallbackUsed = false) {
@@ -77,10 +82,13 @@ beforeEach(() => {
   mockAssemble.mockReset();
   mockCreate.mockReset();
   mockCompile.mockReset();
+  mockParseYaml.mockReset();
   mockAssemble.mockReturnValue(assembled());
   mockCreate.mockResolvedValue(llmSdkResponse(newPipelineResponse));
   // 기본: Compiler 는 성공 반환 (happy path)
   mockCompile.mockResolvedValue({ ok: true, plan: {}, warnings: [] });
+  // 기본: parseYaml throw → computeDiff silent undefined (diff 미검증 테스트용)
+  mockParseYaml.mockRejectedValue(new Error('parseYaml not mocked'));
 });
 
 describe('AIBuilderOrchestrator (G20-1)', () => {
@@ -176,6 +184,7 @@ describe('AIBuilderOrchestrator (G20-1)', () => {
       'call_llm',
       'parse_response',
       'validate',
+      'compute_diff',
     ]);
   });
 
@@ -372,5 +381,91 @@ describe('AIBuilderOrchestrator (G20-1)', () => {
       projectId: 'p1',
     });
     expect(result.warnings).toContain('llm generated warning');
+  });
+
+  // ── New tests (G20-3) ─────────────────────────────────────────────────
+
+  it('computeDiff: modify + currentYaml → addedNodes detected, compute_diff in steps', async () => {
+    mockClassify.mockResolvedValueOnce(classified('modify'));
+    mockCreate.mockResolvedValueOnce(llmSdkResponse(modifyResponse));
+    mockParseYaml
+      .mockResolvedValueOnce({
+        raw: { pipeline: [{ id: 'plan' }, { id: 'code' }] },
+        sourceYaml: '',
+        parsedAt: new Date(),
+      })
+      .mockResolvedValueOnce({
+        raw: { pipeline: [{ id: 'plan' }, { id: 'code' }, { id: 'notify' }] },
+        sourceYaml: '',
+        parsedAt: new Date(),
+      });
+
+    const result = await new AIBuilderOrchestrator().run({
+      userMessage: 'add notify step',
+      projectId: 'p1',
+      currentYaml: 'adplVersion: 1\nname: x\npipeline:\n  - id: plan\n    type: agent\n    role: planner\n    model: gemini-cli\n  - id: code\n    type: agent\n    role: coder\n    model: claude-code\n',
+    });
+
+    expect(result.steps).toContain('compute_diff');
+    expect(result.diff).toEqual({
+      addedNodes: ['notify'],
+      removedNodes: [],
+      modifiedNodes: [],
+    });
+  });
+
+  it('computeDiff: modify + removedNodes detected', async () => {
+    mockClassify.mockResolvedValueOnce(classified('modify'));
+    mockCreate.mockResolvedValueOnce(llmSdkResponse(modifyResponse));
+    mockParseYaml
+      .mockResolvedValueOnce({
+        raw: { pipeline: [{ id: 'plan' }, { id: 'code' }, { id: 'old-step' }] },
+        sourceYaml: '',
+        parsedAt: new Date(),
+      })
+      .mockResolvedValueOnce({
+        raw: { pipeline: [{ id: 'plan' }, { id: 'code' }, { id: 'notify' }] },
+        sourceYaml: '',
+        parsedAt: new Date(),
+      });
+
+    const result = await new AIBuilderOrchestrator().run({
+      userMessage: 'replace old-step with notify',
+      projectId: 'p1',
+      currentYaml: 'adplVersion: 1\nname: x\npipeline: []\n',
+    });
+
+    expect(result.diff).toEqual({
+      addedNodes: ['notify'],
+      removedNodes: ['old-step'],
+      modifiedNodes: [],
+    });
+  });
+
+  it('computeDiff: new intent → diff undefined, compute_diff still in steps', async () => {
+    mockClassify.mockResolvedValueOnce(classified('new'));
+    const result = await new AIBuilderOrchestrator().run({
+      userMessage: 'build a pipeline',
+      projectId: 'p1',
+    });
+    expect(result.diff).toBeUndefined();
+    expect(result.steps).toContain('compute_diff');
+    expect(mockParseYaml).not.toHaveBeenCalled();
+  });
+
+  it('computeDiff: parseYaml throws → diff undefined, result still succeeds', async () => {
+    mockClassify.mockResolvedValueOnce(classified('modify'));
+    mockCreate.mockResolvedValueOnce(llmSdkResponse(modifyResponse));
+    mockParseYaml.mockRejectedValue(new Error('yaml parse error'));
+
+    const result = await new AIBuilderOrchestrator().run({
+      userMessage: 'add a step',
+      projectId: 'p1',
+      currentYaml: 'adplVersion: 1\nname: x\npipeline: []\n',
+    });
+
+    expect(result.diff).toBeUndefined();
+    expect(result.steps).toContain('compute_diff');
+    expect(result.generatedYaml).toBeDefined();
   });
 });
