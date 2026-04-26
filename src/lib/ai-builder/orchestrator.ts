@@ -11,16 +11,18 @@ import { AIBuilderError, GeneratorResponseSchema } from './types';
 import { classifyIntent, computeCost } from './intent/classifier';
 import { assembleSystemPrompt } from './context/assembler';
 import { extractJson } from '@/lib/utils/json-extractor';
+import { PipelineCompiler } from '@/lib/adpl/engine/compiler';
+import type { CompileError } from '@/lib/adpl/engine/compiler';
 
 /**
- * Stage 7 G6 G20-1 — wire generator LLM call and parse response skeleton.
+ * Stage 7 G6 G20-2 — ADPL Compiler validation + validate-retry loop.
  *
- * callLlm: mirrors the SDK call shape from `src/worker/planning.ts:561-602`.
- * parseResponse: extractJson + GeneratorResponseSchema (4-field minimal Zod).
- * buildErrorResult: unified error handler for call_llm / parse_response steps.
+ * run(): for-loop up to MAX_ATTEMPTS (initial + 2 retries) with retry-message
+ *        feedback when ADPL compiler reports errors.
+ * validate(): wraps PipelineCompiler.compile() — skip if no generated_yaml.
+ * callLlm(): accepts optional retryMessages appended after the user message.
  *
- * G20-2 extends parseResponse with full schema + validate-retry.
- * G20-3 adds computeDiff.
+ * G20-3 wires computeDiff.
  */
 
 const MODEL = 'claude-sonnet-4-20250514';
@@ -28,19 +30,22 @@ const MAX_TOKENS = 8192;
 const TEMPERATURE = 0.3;
 const SYSTEM_PROMPT_SOFT_BUDGET = 12000;
 const SDK_TIMEOUT_MS = 120_000;
+const MAX_ATTEMPTS = 3;
 
 export class AIBuilderOrchestrator {
   async run(req: AIBuilderRequest): Promise<AIBuilderResult> {
     const steps: AIBuilderStep[] = [];
-    const warnings: string[] = [];
+    const preWarnings: string[] = [];
 
+    // Step 1: classify intent
     const classification = await classifyIntent(req);
     steps.push('classify_intent');
     if (classification.fallbackUsed) {
-      warnings.push('intent classification fallback used');
+      preWarnings.push('intent classification fallback used');
     }
     const intent = classification.intent;
 
+    // Step 2: assemble context
     let context: AssembledContext;
     try {
       context = this.assembleContext(req, classification);
@@ -50,53 +55,92 @@ export class AIBuilderOrchestrator {
         intent,
         needsClarification: false,
         explanation: 'AI Builder failed to assemble system prompt context',
-        warnings: [...warnings, `assemble_context failed: ${(err as Error).message}`],
+        warnings: [...preWarnings, `assemble_context failed: ${(err as Error).message}`],
         attempts: 0,
         steps,
       };
     }
 
     if (context.estimatedSystemTokens > SYSTEM_PROMPT_SOFT_BUDGET) {
-      warnings.push(
+      preWarnings.push(
         `system prompt exceeds soft budget: ${context.estimatedSystemTokens} tokens (> ${SYSTEM_PROMPT_SOFT_BUDGET})`,
       );
     }
 
-    let llmResult: { raw: string; costUsd: number; inputTokens: number; outputTokens: number };
-    try {
-      llmResult = await this.callLlm(context);
-      steps.push('call_llm');
-    } catch (err) {
-      return this.buildErrorResult(intent, steps, warnings, 'call_llm', err, classification.costUsd);
+    let totalCostUsd = classification.costUsd;
+    let lastInputTokens = 0;
+    let lastOutputTokens = 0;
+    let lastParsed: GeneratorResponse | null = null;
+    let lastValidationErrors: CompileError[] = [];
+    let retryMessages: Array<{ role: 'user' | 'assistant'; content: string }> | undefined;
+
+    // Steps 3-5: LLM call + parse + validate (with retry)
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      // Step 3: call LLM
+      let llmResult: { raw: string; costUsd: number; inputTokens: number; outputTokens: number };
+      try {
+        llmResult = await this.callLlm(context, retryMessages);
+      } catch (err) {
+        return this.buildErrorResult(intent, steps, preWarnings, 'call_llm', err, totalCostUsd, attempt);
+      }
+
+      totalCostUsd += llmResult.costUsd;
+      lastInputTokens = llmResult.inputTokens;
+      lastOutputTokens = llmResult.outputTokens;
+
+      if (!steps.includes('call_llm')) steps.push('call_llm');
+
+      // Step 4: parse response
+      let parsed: GeneratorResponse;
+      try {
+        parsed = this.parseResponse(llmResult.raw);
+        lastParsed = parsed;
+      } catch (err) {
+        return this.buildErrorResult(intent, steps, preWarnings, 'parse_response', err, totalCostUsd, attempt);
+      }
+
+      if (!steps.includes('parse_response')) steps.push('parse_response');
+
+      // Step 5: validate (ADPL Compiler)
+      const validation = await this.validate(parsed);
+      if (!steps.includes('validate')) steps.push('validate');
+      lastValidationErrors = validation.errors;
+
+      if (validation.ok) {
+        return this.buildSuccessResult(
+          parsed,
+          classification,
+          attempt,
+          steps,
+          preWarnings,
+          validation.warnings,
+          totalCostUsd,
+          lastInputTokens,
+          lastOutputTokens,
+        );
+      }
+
+      // Validation failed — prepare retry message for next attempt
+      if (attempt < MAX_ATTEMPTS) {
+        retryMessages = [
+          { role: 'assistant', content: llmResult.raw },
+          { role: 'user', content: this.buildRetryMessage(validation.errors) },
+        ];
+      }
     }
 
-    let parsed: GeneratorResponse;
-    try {
-      parsed = this.parseResponse(llmResult.raw);
-      steps.push('parse_response');
-    } catch (err) {
-      return this.buildErrorResult(
-        intent,
-        steps,
-        warnings,
-        'parse_response',
-        err,
-        classification.costUsd + llmResult.costUsd,
-      );
-    }
-
-    return {
-      intent: parsed.intent_recognized,
-      needsClarification: parsed.needs_clarification,
-      generatedYaml: parsed.generated_yaml,
-      explanation: parsed.explanation,
-      warnings,
-      attempts: 1,
+    // Max retries exhausted
+    return this.buildMaxRetryResult(
+      lastParsed,
+      intent,
+      MAX_ATTEMPTS,
       steps,
-      totalCostUsd: classification.costUsd + llmResult.costUsd,
-      inputTokens: llmResult.inputTokens,
-      outputTokens: llmResult.outputTokens,
-    };
+      preWarnings,
+      lastValidationErrors,
+      totalCostUsd,
+      lastInputTokens,
+      lastOutputTokens,
+    );
   }
 
   private assembleContext(req: AIBuilderRequest, classification: IntentClassification): AssembledContext {
@@ -105,6 +149,7 @@ export class AIBuilderOrchestrator {
 
   private async callLlm(
     context: AssembledContext,
+    retryMessages?: Array<{ role: 'user' | 'assistant'; content: string }>,
   ): Promise<{ raw: string; costUsd: number; inputTokens: number; outputTokens: number }> {
     const Anthropic = (await import('@anthropic-ai/sdk')).default;
     const anthropic = new Anthropic({ timeout: SDK_TIMEOUT_MS });
@@ -112,6 +157,7 @@ export class AIBuilderOrchestrator {
     const messages = [
       ...context.conversationHistory.map((t) => ({ role: t.role as 'user' | 'assistant', content: t.content })),
       { role: 'user' as const, content: context.userMessage },
+      ...(retryMessages ?? []),
     ];
 
     const response = await anthropic.messages.create({
@@ -149,6 +195,43 @@ export class AIBuilderOrchestrator {
     return validated.data;
   }
 
+  private async validate(parsed: GeneratorResponse): Promise<{
+    ok: boolean;
+    errors: CompileError[];
+    warnings: CompileError[];
+  }> {
+    if (!parsed.generated_yaml) {
+      const warnings: CompileError[] = [];
+      if (parsed.intent_recognized === 'new' || parsed.intent_recognized === 'modify') {
+        warnings.push({
+          code: 'parse_error',
+          message: `intent '${parsed.intent_recognized}' expected generated_yaml but none was provided`,
+        });
+      }
+      return { ok: true, errors: [], warnings };
+    }
+    const compiler = new PipelineCompiler();
+    const result = await compiler.compile(parsed.generated_yaml);
+    if (result.ok) {
+      return { ok: true, errors: [], warnings: result.warnings };
+    }
+    return { ok: false, errors: result.errors, warnings: result.warnings };
+  }
+
+  private buildRetryMessage(errors: CompileError[]): string {
+    const errorList = errors
+      .map((e) => `- [${e.code}]${e.pathId ? ` (${e.pathId})` : ''}: ${e.message}`)
+      .join('\n');
+    return [
+      'The previous response contains ADPL validation errors. Please fix and respond again with the same JSON format.',
+      '',
+      'Errors:',
+      errorList,
+      '',
+      'Output the corrected JSON only, no preamble.',
+    ].join('\n');
+  }
+
   private buildErrorResult(
     intent: Intent,
     steps: AIBuilderStep[],
@@ -156,6 +239,7 @@ export class AIBuilderOrchestrator {
     failedStep: AIBuilderStep,
     err: unknown,
     totalCostUsd = 0,
+    attempts = 1,
   ): AIBuilderResult {
     const message = err instanceof Error ? err.message : String(err);
     return {
@@ -163,17 +247,89 @@ export class AIBuilderOrchestrator {
       needsClarification: false,
       explanation: 'AI Builder encountered an error. Please retry.',
       warnings: [...priorWarnings, `${failedStep} failed: ${message}`],
-      attempts: 1,
+      attempts,
       steps: [...steps],
       totalCostUsd,
     };
   }
 
-  // Placeholders — wired in G20-2 (validate) and G20-3 (computeDiff).
-  private validate(_parsed: unknown): void {
-    throw new AIBuilderError('validate not implemented', 'validate');
+  private buildSuccessResult(
+    parsed: GeneratorResponse,
+    _classification: IntentClassification,
+    attempts: number,
+    steps: AIBuilderStep[],
+    preWarnings: string[],
+    compilerWarnings: CompileError[],
+    totalCostUsd: number,
+    inputTokens: number,
+    outputTokens: number,
+  ): AIBuilderResult {
+    return {
+      intent: parsed.intent_recognized,
+      needsClarification: parsed.needs_clarification,
+      clarificationQuestions: parsed.clarification_questions?.map((q) => ({
+        question: q.question,
+        options: q.options,
+        isRequired: q.is_required,
+      })),
+      generatedYaml: parsed.generated_yaml,
+      explanation: parsed.explanation,
+      warnings: [
+        ...preWarnings,
+        ...parsed.warnings,
+        ...compilerWarnings.map((w) => `[${w.code}] ${w.message}`),
+      ],
+      suggestedNextSteps: parsed.suggested_next_steps,
+      attempts,
+      steps: [...steps],
+      totalCostUsd,
+      inputTokens,
+      outputTokens,
+    };
   }
 
+  private buildMaxRetryResult(
+    lastParsed: GeneratorResponse | null,
+    intent: Intent,
+    attempts: number,
+    steps: AIBuilderStep[],
+    preWarnings: string[],
+    validationErrors: CompileError[],
+    totalCostUsd: number,
+    inputTokens: number,
+    outputTokens: number,
+  ): AIBuilderResult {
+    const errorWarnings = validationErrors.map(
+      (e) => `[${e.code}]${e.pathId ? ` (${e.pathId})` : ''}: ${e.message}`,
+    );
+    return {
+      intent: lastParsed ? lastParsed.intent_recognized : intent,
+      needsClarification: lastParsed?.needs_clarification ?? false,
+      clarificationQuestions: lastParsed?.clarification_questions?.map((q) => ({
+        question: q.question,
+        options: q.options,
+        isRequired: q.is_required,
+      })),
+      generatedYaml: lastParsed?.generated_yaml,
+      explanation:
+        lastParsed?.explanation ??
+        'Max retry attempts reached without successful validation.',
+      warnings: [
+        ...preWarnings,
+        `Max retry attempts (${attempts}) reached. The generated YAML may contain validation errors.`,
+        ...errorWarnings,
+        ...(lastParsed?.warnings ?? []),
+      ],
+      suggestedNextSteps: lastParsed?.suggested_next_steps,
+      attempts,
+      steps: [...steps],
+      totalCostUsd,
+      inputTokens,
+      outputTokens,
+    };
+  }
+
+  // Placeholder — wired in G20-3.
   private computeDiff(_parsed: unknown, _req: AIBuilderRequest): void {
     throw new AIBuilderError('computeDiff not implemented', 'compute_diff');
   }

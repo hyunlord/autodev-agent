@@ -83,21 +83,33 @@ export class AIBuilderError extends Error {
 }
 
 /**
- * Stage 7 G6 G20-1 — Minimal Zod schema for the generator LLM response.
- *
- * Covers only the 4 fields required for G20-1 happy-path result assembly.
- * `.passthrough()` keeps extra fields (warnings, suggested_next_steps, diff)
- * so they're available for G20-2 without re-parsing. G20-2 will add strict
- * validation for every field.
+ * Stage 7 G6 G20-2 — Full strict schema for the generator LLM response.
+ * .passthrough() removed; all expected fields are declared explicitly.
  */
-export const GeneratorResponseSchema = z
-  .object({
-    intent_recognized: z.enum(['new', 'modify', 'clarify', 'explain']),
-    needs_clarification: z.boolean(),
-    generated_yaml: z.string().optional(),
-    explanation: z.string(),
-  })
-  .passthrough();
+export const GeneratorResponseSchema = z.object({
+  intent_recognized: z.enum(['new', 'modify', 'clarify', 'explain']),
+  needs_clarification: z.boolean(),
+  generated_yaml: z.string().optional(),
+  explanation: z.string(),
+  warnings: z.array(z.string()).default([]),
+  clarification_questions: z
+    .array(
+      z.object({
+        question: z.string(),
+        options: z.array(z.string()).optional(),
+        is_required: z.boolean(),
+      }),
+    )
+    .optional(),
+  suggested_next_steps: z.array(z.string()).optional(),
+  diff: z
+    .object({
+      added_nodes: z.array(z.string()),
+      removed_nodes: z.array(z.string()),
+      modified_nodes: z.array(z.string()),
+    })
+    .optional(),
+});
 
 export type GeneratorResponse = z.infer<typeof GeneratorResponseSchema>;
 
