@@ -16,3 +16,4 @@ tsconfig.tsbuildinfo
 .omx/
 .DS_Store
 .autodev/screenshots/.worktrees/
+.worktrees/
