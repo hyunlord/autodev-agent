@@ -15,6 +15,8 @@ export function getNextVersionNumber(projectId: string): number {
 export function createPipelineVersion(input: {
   projectId: string;
   pipelineYaml: string;
+  changeSource?: 'manual' | 'ai_edit' | 'evolve' | 'wizard' | 'preset' | 'rollback';
+  changeDescription?: string;
   changedBy?: string;
 }): { id: string; versionNumber: number } {
   const versionNumber = getNextVersionNumber(input.projectId);
@@ -25,9 +27,9 @@ export function createPipelineVersion(input: {
     versionNumber,
     pipelineYaml: input.pipelineYaml,
     adplVersion: '1.0',
-    changeSource: 'manual',
+    changeSource: input.changeSource ?? 'manual',
     changedBy: input.changedBy ?? null,
-    changeDescription: null,
+    changeDescription: input.changeDescription ?? null,
     createdAt: new Date().toISOString(),
   }).run();
   return { id, versionNumber };
