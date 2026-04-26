@@ -88,6 +88,7 @@ export class AIBuilderOrchestrator {
       lastInputTokens = llmResult.inputTokens;
       lastOutputTokens = llmResult.outputTokens;
 
+      // steps uses set-semantics: each phase recorded once; use `attempts` for retry count.
       if (!steps.includes('call_llm')) steps.push('call_llm');
 
       // Step 4: parse response
