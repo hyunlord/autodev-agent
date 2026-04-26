@@ -121,7 +121,7 @@ Each case has exactly one of `when` / `default: true`, plus `then: [nodes]`. Opt
 ```yaml
 - id: checks
   type: parallel
-  mergeStrategy: all_must_pass   # all_must_pass|any_pass|first_success|best_effort
+  mergeStrategy: all_must_pass   # all_must_pass|any_succeeds|majority|best_score
   maxConcurrent: 3
   branches:
     - id: lint
@@ -194,8 +194,8 @@ Read downstream via `$nodes.<id>.output.data.<key>`.
 - `manual` — `inputSchema` (form fields: `string`/`number`/`boolean`/`select`+`options`), `confirmMessage`. Values at `$trigger.payload.<name>`.
 - `task_created` — `tags[]` (any-match), `filter` (Slot 2).
 - `schedule` — `mode` (`cron`|`interval`|`once`), `cron` (5-field), `interval` (sec), `at` (ISO), `timezone`, `overlap` (`skip`|`queue`|`concurrent`), `validFrom`, `validUntil`, `maxRuns`.
-- `webhook_in` — `path`, `method`, `auth` (`none`|`hmac`|`bearer`), `responseMode`, `responseTemplate`.
-- `git_event` — `eventType` (`pull_request`|`push`|`issues`|...), `branches[]`, `paths[]`, `actions[]`.
+- `webhook_in` — `path`, `method`, `auth` (`none`|`header`|`hmac`|`basic`), `secret`, `responseMode` (`immediate`|`sync`).
+- `git_event` — `events[]` (`pr_opened`|`pr_updated`|`pr_merged`|`pr_closed`|`push`|`tag_created`|`tag_deleted`), `webhookConfig.{provider,secret}`, `filter.{branches,paths,prLabels,ignorePaths}`. Normalized payload at `$trigger.event`.
 
 ## Validation (compile-time)
 
