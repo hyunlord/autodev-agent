@@ -15,4 +15,4 @@ node_modules/
 tsconfig.tsbuildinfo
 .omx/
 .DS_Store
-.autodev/screenshots/
+.autodev/screenshots/.worktrees/
