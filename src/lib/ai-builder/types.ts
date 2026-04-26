@@ -45,6 +45,12 @@ export interface AIBuilderResult {
   suggestedNextSteps?: string[];
   attempts: number;
   steps: AIBuilderStep[];
+  /** classifier cost + generator cost (USD). Absent on early-exit paths. */
+  totalCostUsd?: number;
+  /** Generator input token count (debug). */
+  inputTokens?: number;
+  /** Generator output token count (debug). */
+  outputTokens?: number;
 }
 
 /** LLM response shape for the intent classifier. The classifier wraps this with
@@ -75,6 +81,25 @@ export class AIBuilderError extends Error {
     this.cause = cause;
   }
 }
+
+/**
+ * Stage 7 G6 G20-1 — Minimal Zod schema for the generator LLM response.
+ *
+ * Covers only the 4 fields required for G20-1 happy-path result assembly.
+ * `.passthrough()` keeps extra fields (warnings, suggested_next_steps, diff)
+ * so they're available for G20-2 without re-parsing. G20-2 will add strict
+ * validation for every field.
+ */
+export const GeneratorResponseSchema = z
+  .object({
+    intent_recognized: z.enum(['new', 'modify', 'clarify', 'explain']),
+    needs_clarification: z.boolean(),
+    generated_yaml: z.string().optional(),
+    explanation: z.string(),
+  })
+  .passthrough();
+
+export type GeneratorResponse = z.infer<typeof GeneratorResponseSchema>;
 
 /** Output of `assembleSystemPrompt` — fed to the LLM call step (G20-1+). */
 export interface AssembledContext {

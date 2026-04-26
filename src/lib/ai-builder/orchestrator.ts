@@ -4,21 +4,30 @@ import type {
   AIBuilderStep,
   AssembledContext,
   IntentClassification,
+  Intent,
+  GeneratorResponse,
 } from './types';
-import { AIBuilderError } from './types';
-import { classifyIntent } from './intent/classifier';
+import { AIBuilderError, GeneratorResponseSchema } from './types';
+import { classifyIntent, computeCost } from './intent/classifier';
 import { assembleSystemPrompt } from './context/assembler';
+import { extractJson } from '@/lib/utils/json-extractor';
 
 /**
- * Stage 7 G6 G19-1 / G19-2 / G19-3c — AI Builder orchestrator.
+ * Stage 7 G6 G20-1 — wire generator LLM call and parse response skeleton.
  *
- * Defines the 6-step pipeline contract that subsequent PRs (G20-1 through
- * G20-3) progressively wire up. G19-3c populates assembleContext with the
- * full 5-section system prompt; callLlm is still a placeholder so run()
- * short-circuits with a partial result + warnings.
+ * callLlm: mirrors the SDK call shape from `src/worker/planning.ts:561-602`.
+ * parseResponse: extractJson + GeneratorResponseSchema (4-field minimal Zod).
+ * buildErrorResult: unified error handler for call_llm / parse_response steps.
+ *
+ * G20-2 extends parseResponse with full schema + validate-retry.
+ * G20-3 adds computeDiff.
  */
 
+const MODEL = 'claude-sonnet-4-20250514';
+const MAX_TOKENS = 8192;
+const TEMPERATURE = 0.3;
 const SYSTEM_PROMPT_SOFT_BUDGET = 12000;
+const SDK_TIMEOUT_MS = 120_000;
 
 export class AIBuilderOrchestrator {
   async run(req: AIBuilderRequest): Promise<AIBuilderResult> {
@@ -53,37 +62,40 @@ export class AIBuilderOrchestrator {
       );
     }
 
+    let llmResult: { raw: string; costUsd: number; inputTokens: number; outputTokens: number };
     try {
-      const raw = await this.callLlm(context);
+      llmResult = await this.callLlm(context);
       steps.push('call_llm');
-      // Below is unreachable until G20-1 wires the SDK call.
-      const parsed = this.parseResponse(raw);
-      steps.push('parse_response');
-      this.validate(parsed);
-      steps.push('validate');
-      this.computeDiff(parsed, req);
-      steps.push('compute_diff');
     } catch (err) {
-      if (err instanceof AIBuilderError && err.step === 'call_llm') {
-        return {
-          intent,
-          needsClarification: false,
-          explanation: 'Orchestrator skeleton — LLM not yet wired',
-          warnings: [...warnings, 'G19-1 skeleton: LLM call not implemented'],
-          attempts: 0,
-          steps,
-        };
-      }
-      throw err;
+      return this.buildErrorResult(intent, steps, warnings, 'call_llm', err, classification.costUsd);
+    }
+
+    let parsed: GeneratorResponse;
+    try {
+      parsed = this.parseResponse(llmResult.raw);
+      steps.push('parse_response');
+    } catch (err) {
+      return this.buildErrorResult(
+        intent,
+        steps,
+        warnings,
+        'parse_response',
+        err,
+        classification.costUsd + llmResult.costUsd,
+      );
     }
 
     return {
-      intent,
-      needsClarification: false,
-      explanation: 'Pipeline executed (placeholder)',
+      intent: parsed.intent_recognized,
+      needsClarification: parsed.needs_clarification,
+      generatedYaml: parsed.generated_yaml,
+      explanation: parsed.explanation,
       warnings,
       attempts: 1,
       steps,
+      totalCostUsd: classification.costUsd + llmResult.costUsd,
+      inputTokens: llmResult.inputTokens,
+      outputTokens: llmResult.outputTokens,
     };
   }
 
@@ -91,14 +103,73 @@ export class AIBuilderOrchestrator {
     return assembleSystemPrompt(req, classification);
   }
 
-  private async callLlm(_context: AssembledContext): Promise<string> {
-    throw new AIBuilderError('LLM not yet wired', 'call_llm');
+  private async callLlm(
+    context: AssembledContext,
+  ): Promise<{ raw: string; costUsd: number; inputTokens: number; outputTokens: number }> {
+    const Anthropic = (await import('@anthropic-ai/sdk')).default;
+    const anthropic = new Anthropic({ timeout: SDK_TIMEOUT_MS });
+
+    const messages = [
+      ...context.conversationHistory.map((t) => ({ role: t.role as 'user' | 'assistant', content: t.content })),
+      { role: 'user' as const, content: context.userMessage },
+    ];
+
+    const response = await anthropic.messages.create({
+      model: MODEL,
+      max_tokens: MAX_TOKENS,
+      temperature: TEMPERATURE,
+      system: context.systemPrompt,
+      messages,
+    });
+
+    const raw = response.content[0]?.type === 'text' ? response.content[0].text ?? '' : '';
+    const inputTokens = response.usage?.input_tokens ?? 0;
+    const outputTokens = response.usage?.output_tokens ?? 0;
+
+    return { raw, costUsd: computeCost(inputTokens, outputTokens), inputTokens, outputTokens };
   }
 
-  private parseResponse(_raw: string): unknown {
-    throw new AIBuilderError('parseResponse not implemented', 'parse_response');
+  private parseResponse(raw: string): GeneratorResponse {
+    let obj: unknown;
+    try {
+      obj = extractJson(raw, 'intent_recognized');
+    } catch (err) {
+      throw new AIBuilderError(
+        `parse_response failed: ${(err as Error).message}`,
+        'parse_response',
+        err,
+      );
+    }
+
+    const validated = GeneratorResponseSchema.safeParse(obj);
+    if (!validated.success) {
+      throw new AIBuilderError(`parse_response failed: ${validated.error.message}`, 'parse_response');
+    }
+
+    return validated.data;
   }
 
+  private buildErrorResult(
+    intent: Intent,
+    steps: AIBuilderStep[],
+    priorWarnings: string[],
+    failedStep: AIBuilderStep,
+    err: unknown,
+    totalCostUsd = 0,
+  ): AIBuilderResult {
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      intent,
+      needsClarification: false,
+      explanation: 'AI Builder encountered an error. Please retry.',
+      warnings: [...priorWarnings, `${failedStep} failed: ${message}`],
+      attempts: 1,
+      steps: [...steps],
+      totalCostUsd,
+    };
+  }
+
+  // Placeholders — wired in G20-2 (validate) and G20-3 (computeDiff).
   private validate(_parsed: unknown): void {
     throw new AIBuilderError('validate not implemented', 'validate');
   }
