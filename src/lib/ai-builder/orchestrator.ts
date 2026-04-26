@@ -2,23 +2,23 @@ import type {
   AIBuilderRequest,
   AIBuilderResult,
   AIBuilderStep,
+  AssembledContext,
+  IntentClassification,
 } from './types';
 import { AIBuilderError } from './types';
 import { classifyIntent } from './intent/classifier';
+import { assembleSystemPrompt } from './context/assembler';
 
 /**
- * Stage 7 G6 G19-1 / G19-2 — AI Builder orchestrator.
+ * Stage 7 G6 G19-1 / G19-2 / G19-3c — AI Builder orchestrator.
  *
- * Defines the 6-step pipeline contract that subsequent PRs (G19-3 through
- * G20-3) progressively wire up. G19-2 wires the first real LLM call:
- * `classifyIntent` (with heuristic fallback). The remaining steps still
- * short-circuit at `callLlm` so the run() shape stays observable.
+ * Defines the 6-step pipeline contract that subsequent PRs (G20-1 through
+ * G20-3) progressively wire up. G19-3c populates assembleContext with the
+ * full 5-section system prompt; callLlm is still a placeholder so run()
+ * short-circuits with a partial result + warnings.
  */
 
-interface AssembledContext {
-  // G19-3 will populate: compressed ADPL spec, few-shot examples,
-  // conversation history, current yaml excerpt, project metadata.
-}
+const SYSTEM_PROMPT_SOFT_BUDGET = 12000;
 
 export class AIBuilderOrchestrator {
   async run(req: AIBuilderRequest): Promise<AIBuilderResult> {
@@ -32,14 +32,31 @@ export class AIBuilderOrchestrator {
     }
     const intent = classification.intent;
 
-    const context = this.assembleContext(req);
-    steps.push('assemble_context');
+    let context: AssembledContext;
+    try {
+      context = this.assembleContext(req, classification);
+      steps.push('assemble_context');
+    } catch (err) {
+      return {
+        intent,
+        needsClarification: false,
+        explanation: 'AI Builder failed to assemble system prompt context',
+        warnings: [...warnings, `assemble_context failed: ${(err as Error).message}`],
+        attempts: 0,
+        steps,
+      };
+    }
+
+    if (context.estimatedSystemTokens > SYSTEM_PROMPT_SOFT_BUDGET) {
+      warnings.push(
+        `system prompt exceeds soft budget: ${context.estimatedSystemTokens} tokens (> ${SYSTEM_PROMPT_SOFT_BUDGET})`,
+      );
+    }
 
     try {
       const raw = await this.callLlm(context);
       steps.push('call_llm');
-      // Below is unreachable until G20-1 wires the SDK call. Kept here so
-      // the contract of the pipeline (shape + ordering) is committed.
+      // Below is unreachable until G20-1 wires the SDK call.
       const parsed = this.parseResponse(raw);
       steps.push('parse_response');
       this.validate(parsed);
@@ -70,8 +87,8 @@ export class AIBuilderOrchestrator {
     };
   }
 
-  private assembleContext(_req: AIBuilderRequest): AssembledContext {
-    return {};
+  private assembleContext(req: AIBuilderRequest, classification: IntentClassification): AssembledContext {
+    return assembleSystemPrompt(req, classification);
   }
 
   private async callLlm(_context: AssembledContext): Promise<string> {

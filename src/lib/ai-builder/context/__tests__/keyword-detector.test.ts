@@ -1,8 +1,13 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
 import { detectFragments } from '../keyword-detector';
-import { loadAllFragments } from '../fragment-loader';
+import { loadAllFragments, __resetFragmentCache } from '../fragment-loader';
 
-const FRAGMENTS = loadAllFragments();
+let FRAGMENTS: ReturnType<typeof loadAllFragments>;
+
+beforeAll(() => {
+  __resetFragmentCache();
+  FRAGMENTS = loadAllFragments();
+});
 
 function names(matches: ReturnType<typeof detectFragments>): string[] {
   return matches.map((m) => m.fragmentName);

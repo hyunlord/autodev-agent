@@ -75,3 +75,14 @@ export class AIBuilderError extends Error {
     this.cause = cause;
   }
 }
+
+/** Output of `assembleSystemPrompt` — fed to the LLM call step (G20-1+). */
+export interface AssembledContext {
+  systemPrompt: string;
+  userMessage: string;
+  conversationHistory: ConversationTurn[];
+  /** Fragment names matched by the keyword detector (debug + warning surface). */
+  fragmentsUsed: string[];
+  /** Char-based estimate of the system prompt only. Used for budget warnings. */
+  estimatedSystemTokens: number;
+}

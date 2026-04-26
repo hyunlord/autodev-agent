@@ -38,10 +38,20 @@ export function loadFragment(name: string): Fragment {
   return parseFragmentFile(filePath, name);
 }
 
+let cached: Fragment[] | null = null;
+
 export function loadAllFragments(): Fragment[] {
+  if (cached) return cached;
   if (!existsSync(FRAGMENTS_DIR)) return [];
-  return readdirSync(FRAGMENTS_DIR)
+  const result = readdirSync(FRAGMENTS_DIR)
     .filter((f) => f.endsWith('.md'))
     .sort()
     .map((f) => parseFragmentFile(join(FRAGMENTS_DIR, f), f.replace(/\.md$/, '')));
+  cached = result;
+  return result;
+}
+
+/** Test-only — clears the in-memory fragment cache. */
+export function __resetFragmentCache(): void {
+  cached = null;
 }

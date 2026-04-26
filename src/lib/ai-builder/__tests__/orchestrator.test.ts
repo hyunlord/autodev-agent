@@ -1,10 +1,17 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { AIBuilderOrchestrator } from '../orchestrator';
 
-const { mockClassify } = vi.hoisted(() => ({ mockClassify: vi.fn() }));
+const { mockClassify, mockAssemble } = vi.hoisted(() => ({
+  mockClassify: vi.fn(),
+  mockAssemble: vi.fn(),
+}));
 
 vi.mock('../intent/classifier', () => ({
   classifyIntent: mockClassify,
+}));
+
+vi.mock('../context/assembler', () => ({
+  assembleSystemPrompt: mockAssemble,
 }));
 
 function classified(intent: 'new' | 'modify' | 'clarify' | 'explain', fallbackUsed = false) {
@@ -19,11 +26,23 @@ function classified(intent: 'new' | 'modify' | 'clarify' | 'explain', fallbackUs
   };
 }
 
-describe('AIBuilderOrchestrator (G19-2)', () => {
-  beforeEach(() => {
-    mockClassify.mockReset();
-  });
+function assembled(estimatedSystemTokens = 5000) {
+  return {
+    systemPrompt: 'mocked system prompt',
+    userMessage: 'mocked user message',
+    conversationHistory: [],
+    fragmentsUsed: [] as string[],
+    estimatedSystemTokens,
+  };
+}
 
+beforeEach(() => {
+  mockClassify.mockReset();
+  mockAssemble.mockReset();
+  mockAssemble.mockReturnValue(assembled());
+});
+
+describe('AIBuilderOrchestrator (G19-3c)', () => {
   it('intent="new" when classifier returns new', async () => {
     mockClassify.mockResolvedValueOnce(classified('new'));
     const result = await new AIBuilderOrchestrator().run({
@@ -64,7 +83,29 @@ describe('AIBuilderOrchestrator (G19-2)', () => {
       currentYaml: 'adplVersion: 1\nname: x\npipeline: []\n',
     });
     expect(result.warnings).toContain('intent classification fallback used');
-    // Skeleton's LLM-not-wired warning should still be present alongside.
     expect(result.warnings.some((w) => w.includes('not implemented'))).toBe(true);
+  });
+
+  it('assembler throw → graceful fallback with assemble_context warning', async () => {
+    mockClassify.mockResolvedValueOnce(classified('new'));
+    mockAssemble.mockImplementationOnce(() => {
+      throw new Error('disk read failed');
+    });
+    const result = await new AIBuilderOrchestrator().run({
+      userMessage: 'anything',
+      projectId: 'p1',
+    });
+    expect(result.warnings.some((w) => w.includes('assemble_context failed'))).toBe(true);
+    expect(result.steps).toEqual(['classify_intent']);
+  });
+
+  it('estimatedSystemTokens > soft budget → warnings include budget notice', async () => {
+    mockClassify.mockResolvedValueOnce(classified('new'));
+    mockAssemble.mockReturnValueOnce(assembled(15000));
+    const result = await new AIBuilderOrchestrator().run({
+      userMessage: 'anything',
+      projectId: 'p1',
+    });
+    expect(result.warnings.some((w) => w.includes('soft budget'))).toBe(true);
   });
 });

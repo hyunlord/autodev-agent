@@ -1,5 +1,9 @@
-import { describe, it, expect } from 'vitest';
-import { loadFragment, loadAllFragments } from '../fragment-loader';
+import { describe, it, expect, beforeEach } from 'vitest';
+import { loadFragment, loadAllFragments, __resetFragmentCache } from '../fragment-loader';
+
+beforeEach(() => {
+  __resetFragmentCache();
+});
 
 describe('loadFragment', () => {
   it('loads parallel fragment with name / description / keywords / body', () => {
