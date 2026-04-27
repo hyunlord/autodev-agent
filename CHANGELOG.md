@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+#### Verify Agent Honest Scoring (VR1+VR2+VR4)
+
+- **Fast path (attempt 1)**: dynamic scoring from actual mechanical checks (was hardcoded 70)
+  - All checks pass → score 100 · any check fails → real score (0–20) with issue list
+- **Standard path (attempt 2)**: evidence gating + LLM judgment (was binary 80/50, no LLM)
+  - Evidence fails (acceptance criteria / visual regression) → score 40, early return, $0 LLM cost
+  - Evidence passes → `runLlmJudgment()` called, real LLM score returned (~$0.01–0.06)
+- **Debate threshold**: raised 70 → 80 (pass requires meaningful quality signal)
+- **Verify cost guide**: attempt 1 (fast): $0 · attempt 2 (standard): ~$0.01–0.06 · attempt 3+ (deep): ~$0.02–0.08
+
 ### Added
 
 #### AI Builder (G21 series)

@@ -77,10 +77,11 @@ export class VerifyAgent implements IAgent {
     emit({ type: 'log', level: 'info', message: `[Verify Agent] Using ${this.llm} (depth: ${depth})` } as PipelineEvent);
 
     // ─── Stage 1: Mechanical checks (토큰 0) ──────────
+    let mechanicalResult: VerifyResult | undefined;
     if (!verifyInput.skipMechanical) {
       emit({ type: 'log', level: 'info', message: '[Verify] Stage 1: Mechanical checks...' } as PipelineEvent);
 
-      const mechanicalResult = await this.runMechanicalChecks(verifyInput, emit);
+      mechanicalResult = await this.runMechanicalChecks(verifyInput, emit);
       if (!mechanicalResult.passed) {
         return {
           success: true,
@@ -94,15 +95,16 @@ export class VerifyAgent implements IAgent {
       emit({ type: 'log', level: 'info', message: '[Verify] Stage 1: Skipped (layer 1)' } as PipelineEvent);
     }
 
-    // ─── I2: Fast depth — return after mechanical checks ──
+    // ─── I2: Fast depth — return actual mechanical result ──
     if (depth === 'fast') {
-      emit({ type: 'log', level: 'info', message: '[Verify] Fast depth — skipping evidence collection and LLM' } as PipelineEvent);
+      emit({ type: 'log', level: 'info', message: '[Verify] Fast depth — returning actual mechanical result' } as PipelineEvent);
+      const fastResult: VerifyResult = mechanicalResult ?? {
+        passed: true, score: 70, reason: 'Mechanical checks skipped',
+        issues: [], suggestions: [], verdict: 'pass' as const, evidence: {},
+      };
       return {
         success: true,
-        result: {
-          passed: true, score: 70, reason: 'Fast verification: mechanical checks passed',
-          issues: [], suggestions: [], verdict: 'pass' as const, evidence: {},
-        } satisfies VerifyResult,
+        result: { ...fastResult, reason: `Fast verification: ${fastResult.reason}` } satisfies VerifyResult,
         costUsd: 0,
         tokenUsage: { input: 0, output: 0 },
         durationMs: Date.now() - startTime,
@@ -174,36 +176,63 @@ export class VerifyAgent implements IAgent {
       evidence.hasAcceptanceCriteria = true;
     }
 
-    // ─── I2: Standard depth — return after evidence + VLM ──
+    // ─── I2: Standard depth — evidence gating + LLM judgment ──
     if (depth === 'standard') {
-      emit({ type: 'log', level: 'info', message: '[Verify] Standard depth — skipping SAST/A11y/LLM judgment' } as PipelineEvent);
+      emit({ type: 'log', level: 'info', message: '[Verify] Standard depth — evidence + LLM judgment (skipping SAST/A11y)' } as PipelineEvent);
       const hasFails = (evidence.acceptanceFails as string[] | undefined)?.length;
       const vrMismatch = (evidence.visualRegression as { match: boolean } | undefined)?.match === false;
-      const passed = !hasFails && !vrMismatch;
-      const failReasons: string[] = [];
-      if (hasFails) failReasons.push('acceptance criteria');
-      if (vrMismatch) failReasons.push('visual regression');
+
+      // Step 1: Evidence gating — early fail to save LLM cost
+      if (hasFails || vrMismatch) {
+        const failReasons: string[] = [];
+        if (hasFails) failReasons.push('acceptance criteria');
+        if (vrMismatch) failReasons.push('visual regression');
+        return {
+          success: true,
+          result: {
+            passed: false,
+            score: 40,
+            reason: `Standard verification: evidence gating failed (${failReasons.join(' + ')})`,
+            issues: [
+              ...((evidence.acceptanceFails as string[]) ?? []),
+              ...(vrMismatch ? ['Visual regression detected'] : []),
+            ],
+            suggestions: [],
+            verdict: 're-code',
+            evidence: {
+              screenshots: evidence.screenshotPath ? [evidence.screenshotPath as string] : undefined,
+              consoleErrors: evidence.consoleErrors as string[] | undefined,
+            },
+          } satisfies VerifyResult,
+          costUsd: 0,
+          tokenUsage: { input: 0, output: 0 },
+          durationMs: Date.now() - startTime,
+        };
+      }
+
+      // Step 2: Evidence passed → LLM judgment
+      const llmJudgment = await this.runLlmJudgment(verifyInput, evidence, emit);
+
+      // Step 3: Normalize 'warn' verdict (LLM unavailable fallback)
+      if (llmJudgment.verifyResult.verdict === 'warn') {
+        return {
+          success: true,
+          result: {
+            ...llmJudgment.verifyResult,
+            verdict: llmJudgment.verifyResult.score >= 70 ? 'pass' : 're-code',
+            passed: llmJudgment.verifyResult.score >= 70,
+          } satisfies VerifyResult,
+          costUsd: llmJudgment.costUsd,
+          tokenUsage: llmJudgment.tokenUsage,
+          durationMs: Date.now() - startTime,
+        };
+      }
+
       return {
         success: true,
-        result: {
-          passed,
-          score: passed ? 80 : 50,
-          reason: passed
-            ? 'Standard verification: mechanical + evidence passed'
-            : `Standard verification failed: ${failReasons.join(' + ')}`,
-          issues: [
-            ...((evidence.acceptanceFails as string[]) ?? []),
-            ...(vrMismatch ? ['Visual regression detected'] : []),
-          ],
-          suggestions: [],
-          verdict: passed ? 'pass' : 're-code',
-          evidence: {
-            screenshots: evidence.screenshotPath ? [evidence.screenshotPath as string] : undefined,
-            consoleErrors: evidence.consoleErrors as string[] | undefined,
-          },
-        } satisfies VerifyResult,
-        costUsd: 0,
-        tokenUsage: { input: 0, output: 0 },
+        result: llmJudgment.verifyResult,
+        costUsd: llmJudgment.costUsd,
+        tokenUsage: llmJudgment.tokenUsage,
         durationMs: Date.now() - startTime,
       };
     }
@@ -1545,7 +1574,7 @@ RESPOND WITH ONLY JSON (no markdown, no explanation):
       ...challengerResult.missedIssues,
     ];
 
-    const finalVerdict: VerifyResult['verdict'] = finalScore >= 70 ? 'pass' : finalScore >= 40 ? 're-code' : 'fail';
+    const finalVerdict: VerifyResult['verdict'] = finalScore >= 80 ? 'pass' : finalScore >= 40 ? 're-code' : 'fail';
 
     emit({ type: 'log', level: 'info',
       message: `[Verify Debate] Final: ${finalVerdict} ${finalScore}/100 (${finalIssues.length} issues)` } as PipelineEvent);
