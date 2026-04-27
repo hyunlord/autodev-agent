@@ -16,7 +16,7 @@ export async function POST(req: Request) {
     return Response.json({ error: 'INVALID_BODY' }, { status: 400 });
   }
 
-  const { projectId, yaml } = body;
+  const { projectId, yaml, changeSource } = body;
 
   if (!projectId || typeof projectId !== 'string' || typeof yaml !== 'string') {
     return Response.json({ error: 'INVALID_BODY' }, { status: 400 });
@@ -39,6 +39,10 @@ export async function POST(req: Request) {
     );
   }
 
-  const result = createPipelineVersion({ projectId, pipelineYaml: yaml });
+  const result = createPipelineVersion({
+    projectId,
+    pipelineYaml: yaml,
+    changeSource: changeSource as 'manual' | 'ai_edit' | 'evolve' | 'wizard' | 'preset' | 'rollback' | undefined,
+  });
   return Response.json({ data: result });
 }

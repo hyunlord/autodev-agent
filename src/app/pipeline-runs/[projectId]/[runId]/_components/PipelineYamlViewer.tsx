@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import { CodeBlock } from '@/app/tasks/[id]/components/CodeBlock';
 import { PipelineYamlEditor } from './PipelineYamlEditor';
+import { AIBuilderModal } from '@/app/components/AIBuilderModal';
 
 /**
  * Stage 7 G5 — Adds Edit toggle to the G4 read-only viewer.
@@ -17,6 +18,7 @@ export function PipelineYamlViewer({
   projectId: string;
 }) {
   const [editing, setEditing] = useState(false);
+  const [isAIBuilderOpen, setIsAIBuilderOpen] = useState(false);
   if (!yaml) return null;
   const lineCount = yaml.split('\n').length;
 
@@ -37,16 +39,28 @@ export function PipelineYamlViewer({
             </span>
           )}
           {!editing && (
-            <button
-              onClick={(e) => {
-                e.preventDefault();
-                setEditing(true);
-              }}
-              className="ml-auto text-xs px-2 py-1 border rounded"
-              style={{ color: 'var(--text-secondary)', borderColor: 'var(--border-color)' }}
-            >
-              Edit
-            </button>
+            <span className="ml-auto flex items-center gap-2">
+              <button
+                onClick={(e) => {
+                  e.preventDefault();
+                  setIsAIBuilderOpen(true);
+                }}
+                className="text-xs px-2 py-1 border rounded"
+                style={{ color: '#818cf8', borderColor: '#818cf8' }}
+              >
+                AI Generate
+              </button>
+              <button
+                onClick={(e) => {
+                  e.preventDefault();
+                  setEditing(true);
+                }}
+                className="text-xs px-2 py-1 border rounded"
+                style={{ color: 'var(--text-secondary)', borderColor: 'var(--border-color)' }}
+              >
+                Edit
+              </button>
+            </span>
           )}
         </summary>
         <div className="mt-3">
@@ -65,6 +79,12 @@ export function PipelineYamlViewer({
           )}
         </div>
       </details>
+      <AIBuilderModal
+        isOpen={isAIBuilderOpen}
+        onClose={() => setIsAIBuilderOpen(false)}
+        projectId={projectId}
+        currentYaml={yaml}
+      />
     </section>
   );
 }
