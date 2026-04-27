@@ -229,6 +229,7 @@ export function AIBuilderModal({ isOpen, onClose, projectId, currentYaml, onSave
           {step === 'clarify' && result && (
             <StepClarify
               result={result}
+              conversationHistory={conversationHistory}
               clarifyAnswers={clarifyAnswers}
               setClarifyAnswers={setClarifyAnswers}
               onSubmit={handleClarifySubmit}
@@ -246,6 +247,41 @@ export function AIBuilderModal({ isOpen, onClose, projectId, currentYaml, onSave
             </div>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// --- Helper components ---
+
+function ConversationThread({ history }: { history: ConversationTurn[] }) {
+  if (history.length === 0) return null;
+  return (
+    <div
+      className="mb-2 max-h-48 overflow-y-auto rounded-xl border p-3"
+      style={{ borderColor: 'var(--border-color)', background: 'var(--bg-secondary)' }}
+    >
+      <p className="mb-2 text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>
+        Conversation history
+      </p>
+      <div className="flex flex-col gap-2">
+        {history.map((turn, i) => (
+          <div key={i} className={`flex ${turn.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+            <div
+              className="max-w-[80%] rounded-lg px-3 py-2 text-xs"
+              style={
+                turn.role === 'user'
+                  ? { background: 'rgba(99,102,241,0.12)', color: 'var(--text-primary)' }
+                  : { background: 'var(--bg-primary)', color: 'var(--text-secondary)' }
+              }
+            >
+              <p className="mb-0.5 font-semibold opacity-60">
+                {turn.role === 'user' ? 'You' : 'AI Builder'}
+              </p>
+              <p className="whitespace-pre-wrap">{turn.content}</p>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -451,12 +487,14 @@ function StepResult({
 
 function StepClarify({
   result,
+  conversationHistory,
   clarifyAnswers,
   setClarifyAnswers,
   onSubmit,
   onCancel,
 }: {
   result: AIBuilderResult;
+  conversationHistory: ConversationTurn[];
   clarifyAnswers: Record<number, string>;
   setClarifyAnswers: React.Dispatch<React.SetStateAction<Record<number, string>>>;
   onSubmit: () => void;
@@ -464,9 +502,20 @@ function StepClarify({
 }) {
   const questions: ClarificationQuestion[] = result.clarificationQuestions ?? [];
   const allRequired = questions.every((q, i) => !q.isRequired || !!clarifyAnswers[i]?.trim());
+  const clarifyTurnCount = conversationHistory.filter((t) => t.role === 'assistant').length;
+  const tooManyCycles = clarifyTurnCount >= 5;
 
   return (
     <div className="space-y-6">
+      <ConversationThread history={conversationHistory} />
+      {tooManyCycles && (
+        <div
+          className="rounded border px-3 py-2 text-xs"
+          style={{ borderColor: 'rgba(245,158,11,0.3)', background: 'rgba(245,158,11,0.08)', color: '#fbbf24' }}
+        >
+          요청이 복잡합니다. 입력을 단순화하거나 Cancel 후 다시 시도해 보세요.
+        </div>
+      )}
       <p className="text-sm" style={{ color: 'var(--text-primary)' }}>{result.explanation}</p>
 
       <div className="space-y-4">
