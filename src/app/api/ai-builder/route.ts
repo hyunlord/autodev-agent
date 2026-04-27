@@ -6,14 +6,14 @@ import { AIBuilderOrchestrator } from '@/lib/ai-builder/orchestrator';
 
 const ConversationTurnSchema = z.object({
   role: z.enum(['user', 'assistant']),
-  content: z.string(),
+  content: z.string().max(2000),
 });
 
 const RequestSchema = z.object({
   projectId: z.string().min(1),
-  userMessage: z.string().min(1),
-  currentYaml: z.string().optional(),
-  conversationHistory: z.array(ConversationTurnSchema).optional(),
+  userMessage: z.string().min(1).max(4000),
+  currentYaml: z.string().max(50000).optional(),
+  conversationHistory: z.array(ConversationTurnSchema).max(10).optional(),
 });
 
 export async function POST(req: Request) {
@@ -47,7 +47,7 @@ export async function POST(req: Request) {
     const result = await orchestrator.run(parsed.data);
     return Response.json({ data: result });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return Response.json({ error: 'AI_BUILDER_FAILED', message }, { status: 500 });
+    console.error('[ai-builder] orchestrator failed:', err);
+    return Response.json({ error: 'AI_BUILDER_FAILED' }, { status: 500 });
   }
 }

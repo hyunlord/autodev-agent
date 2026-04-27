@@ -138,12 +138,41 @@ describe('POST /api/ai-builder', () => {
     expect((await res.json() as { error: string }).error).toBe('PROJECT_NOT_FOUND');
   });
 
-  it('orchestrator throws → 500 AI_BUILDER_FAILED', async () => {
+  it('orchestrator throws → 500 AI_BUILDER_FAILED (no message exposed)', async () => {
     mockRun.mockRejectedValueOnce(new Error('LLM timeout'));
     const res = await post({ projectId: PROJECT_ID, userMessage: 'create pipeline' });
     expect(res.status).toBe(500);
-    const body = await res.json() as { error: string; message: string };
+    const body = await res.json() as { error: string; message?: string };
     expect(body.error).toBe('AI_BUILDER_FAILED');
-    expect(body.message).toBe('LLM timeout');
+    expect(body.message).toBeUndefined();
+  });
+
+  it('userMessage too long (4001 chars) → 400 INVALID_BODY', async () => {
+    const res = await post({ projectId: PROJECT_ID, userMessage: 'a'.repeat(4001) });
+    expect(res.status).toBe(400);
+    expect((await res.json() as { error: string }).error).toBe('INVALID_BODY');
+  });
+
+  it('currentYaml too long (50001 chars) → 400 INVALID_BODY', async () => {
+    const res = await post({ projectId: PROJECT_ID, userMessage: 'modify', currentYaml: 'x'.repeat(50001) });
+    expect(res.status).toBe(400);
+    expect((await res.json() as { error: string }).error).toBe('INVALID_BODY');
+  });
+
+  it('conversationHistory too many turns (11) → 400 INVALID_BODY', async () => {
+    const history = Array.from({ length: 11 }, (_, i) => ({ role: i % 2 === 0 ? 'user' : 'assistant', content: 'turn' }));
+    const res = await post({ projectId: PROJECT_ID, userMessage: 'create pipeline', conversationHistory: history });
+    expect(res.status).toBe(400);
+    expect((await res.json() as { error: string }).error).toBe('INVALID_BODY');
+  });
+
+  it('conversationHistory turn content too long (2001 chars) → 400 INVALID_BODY', async () => {
+    const res = await post({
+      projectId: PROJECT_ID,
+      userMessage: 'create pipeline',
+      conversationHistory: [{ role: 'user', content: 'x'.repeat(2001) }],
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json() as { error: string }).error).toBe('INVALID_BODY');
   });
 });
