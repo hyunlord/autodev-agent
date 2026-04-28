@@ -44,6 +44,9 @@ jobs:
           restore-keys: |
             nextjs-${{ hashFiles('pnpm-lock.yaml') }}-
 
+      - name: Initialize database
+        run: mkdir -p .autodev && pnpm db:push
+
       - name: Build
         run: pnpm build
 
@@ -74,6 +77,9 @@ jobs:
           key: nextjs-${{ hashFiles('pnpm-lock.yaml') }}-${{ hashFiles('src/**') }}
           restore-keys: |
             nextjs-${{ hashFiles('pnpm-lock.yaml') }}-
+
+      - name: Initialize database
+        run: mkdir -p .autodev && pnpm db:push
 
       - name: Build (for verify)
         run: pnpm build
