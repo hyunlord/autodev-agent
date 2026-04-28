@@ -12,13 +12,23 @@ echo ""
 
 # Step 1: Node.js 버전 체크
 echo "Checking Node.js version..."
-NODE_VERSION=$(node -v 2>/dev/null | sed 's/v//' || echo "0")
+
+if ! command -v node &> /dev/null; then
+  echo -e "${RED}Error: Node.js not found.${NC}"
+  echo "Install Node 20+ from https://nodejs.org or use nvm:"
+  echo "  nvm install 20"
+  echo "  nvm use 20"
+  exit 1
+fi
+
+NODE_VERSION=$(node -v | sed 's/v//')
 NODE_MAJOR=$(echo "$NODE_VERSION" | cut -d. -f1)
 
 if [ "$NODE_MAJOR" -lt 20 ]; then
   echo -e "${RED}Error: Node.js 20+ required. Current: v$NODE_VERSION${NC}"
-  echo "Install Node 20+ from https://nodejs.org or use nvm:"
-  echo "  nvm install 20 && nvm use 20"
+  echo "Upgrade Node from https://nodejs.org or use nvm:"
+  echo "  nvm install 20"
+  echo "  nvm use 20"
   exit 1
 fi
 echo -e "${GREEN}✓ Node.js v$NODE_VERSION${NC}"
