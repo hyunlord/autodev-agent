@@ -57,10 +57,22 @@ else
   cp .env.example .env
   echo -e "${YELLOW}Created .env from .env.example${NC}"
   echo ""
-  echo "Please enter your ANTHROPIC_API_KEY:"
-  echo "(Get one at https://console.anthropic.com/)"
-  echo ""
-  read -r -p "API Key (press Enter to skip and edit .env later): " API_KEY
+
+  # Claude Code CLI 자동 검출
+  if command -v claude &> /dev/null; then
+    echo -e "${GREEN}✓ Claude Code CLI detected${NC}"
+    echo "AutoDev will use Claude Code automatically — no API key needed."
+    echo ""
+    echo "ANTHROPIC_API_KEY is optional (enter for SDK fallback or other features):"
+    echo ""
+    read -r -p "API Key (press Enter to skip): " API_KEY
+  else
+    echo -e "${YELLOW}Claude Code CLI not found.${NC}"
+    echo "Install from https://claude.ai/download, OR provide ANTHROPIC_API_KEY:"
+    echo "(Get one at https://console.anthropic.com/)"
+    echo ""
+    read -r -p "API Key (press Enter to skip and edit .env later): " API_KEY
+  fi
 
   if [ -n "$API_KEY" ]; then
     if [[ "$OSTYPE" == "darwin"* ]]; then
@@ -70,7 +82,11 @@ else
     fi
     echo -e "${GREEN}✓ ANTHROPIC_API_KEY set in .env${NC}"
   else
-    echo -e "${YELLOW}Skipped. Edit .env and set ANTHROPIC_API_KEY before running pnpm dev${NC}"
+    if command -v claude &> /dev/null; then
+      echo -e "${GREEN}✓ Skipped (Claude Code CLI will be used)${NC}"
+    else
+      echo -e "${YELLOW}Skipped. Install Claude Code CLI or set ANTHROPIC_API_KEY in .env${NC}"
+    fi
   fi
 fi
 
