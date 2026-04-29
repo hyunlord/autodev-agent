@@ -43,7 +43,7 @@ function parseResult(result: unknown): Record<string, unknown> | null {
 }
 
 export default function MissionControl() {
-  const [view, setView] = useState<'kanban' | 'grid' | 'timeline' | 'projects'>('kanban');
+  const [view, setView] = useState<'kanban' | 'grid' | 'timeline' | 'projects'>('projects');
   const [tasks, setTasks] = useState<Task[]>([]);
   const [showNewTask, setShowNewTask] = useState(false);
   const [taskEvents, setTaskEvents] = useState<Record<string, TaskEvent[]>>({});
