@@ -196,6 +196,7 @@ export class AIBuilderOrchestrator {
       '--max-turns', '5',
     ], {
       timeout: CLI_TIMEOUT_MS,
+      extendEnv: false,
       reject: false,
       input: fullPrompt,
       env: envWithoutKey,

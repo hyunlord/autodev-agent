@@ -80,6 +80,7 @@ async function getLlmOutput(
         '--max-turns', '3',
       ], {
         timeout: CLI_TIMEOUT_MS,
+        extendEnv: false,
         reject: false,
         input: fullPrompt,
         env: envWithoutKey,
