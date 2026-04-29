@@ -8,12 +8,14 @@ import {
   missingRequiredField,
 } from '../__fixtures__/generator-response';
 
-const { mockClassify, mockAssemble, mockCreate, mockCompile, mockParseYaml } = vi.hoisted(() => ({
+const { mockClassify, mockAssemble, mockCreate, mockCompile, mockParseYaml, mockResolveCli, mockGetExeca } = vi.hoisted(() => ({
   mockClassify: vi.fn(),
   mockAssemble: vi.fn(),
   mockCreate: vi.fn(),
   mockCompile: vi.fn(),
   mockParseYaml: vi.fn(),
+  mockResolveCli: vi.fn(),
+  mockGetExeca: vi.fn(),
 }));
 
 vi.mock('../intent/classifier', () => ({
@@ -46,6 +48,9 @@ vi.mock('@/lib/adpl/engine/compiler', () => ({
 vi.mock('@/lib/adpl/engine/compiler/yaml-parser', () => ({
   parseYaml: mockParseYaml,
 }));
+
+vi.mock('@/lib/cli-resolver', () => ({ resolveCli: mockResolveCli }));
+vi.mock('@/lib/execa', () => ({ getExeca: mockGetExeca }));
 
 function classified(intent: 'new' | 'modify' | 'clarify' | 'explain', fallbackUsed = false) {
   return {
@@ -89,6 +94,9 @@ beforeEach(() => {
   mockCompile.mockResolvedValue({ ok: true, plan: {}, warnings: [] });
   // 기본: parseYaml throw → computeDiff silent undefined (diff 미검증 테스트용)
   mockParseYaml.mockRejectedValue(new Error('parseYaml not mocked'));
+  // 기본: CLI 없음 → SDK 경로 (기존 테스트 영향 없음)
+  mockResolveCli.mockResolvedValue(null);
+  mockGetExeca.mockResolvedValue(vi.fn());
 });
 
 describe('AIBuilderOrchestrator (G20-1)', () => {
@@ -466,6 +474,56 @@ describe('AIBuilderOrchestrator (G20-1)', () => {
 
     expect(result.diff).toBeUndefined();
     expect(result.steps).toContain('compute_diff');
+    expect(result.generatedYaml).toBeDefined();
+  });
+
+  // ── CLI mode tests ────────────────────────────────────────────────────────
+
+  it('callLlm: uses CLI when claude available, skips SDK', async () => {
+    const mockExecaFn = vi.fn().mockResolvedValue({ stdout: newPipelineResponse, stderr: '', exitCode: 0 });
+    mockResolveCli.mockResolvedValue('/usr/bin/claude');
+    mockGetExeca.mockResolvedValue(mockExecaFn);
+    mockClassify.mockResolvedValueOnce(classified('new'));
+
+    const result = await new AIBuilderOrchestrator().run({
+      userMessage: 'build a pipeline',
+      projectId: 'p1',
+    });
+
+    expect(mockExecaFn).toHaveBeenCalledTimes(1);
+    expect(mockCreate).not.toHaveBeenCalled();
+    expect(result.intent).toBe('new');
+    expect(result.generatedYaml).toBeDefined();
+  });
+
+  it('callLlm: CLI exits non-zero → falls back to SDK', async () => {
+    const mockExecaFn = vi.fn().mockResolvedValue({ stdout: '', stderr: 'permission denied', exitCode: 1 });
+    mockResolveCli.mockResolvedValue('/usr/bin/claude');
+    mockGetExeca.mockResolvedValue(mockExecaFn);
+    mockClassify.mockResolvedValueOnce(classified('new'));
+
+    const result = await new AIBuilderOrchestrator().run({
+      userMessage: 'build a pipeline',
+      projectId: 'p1',
+    });
+
+    expect(mockExecaFn).toHaveBeenCalledTimes(1);
+    expect(mockCreate).toHaveBeenCalledTimes(1);
+    expect(result.intent).toBe('new');
+    expect(result.generatedYaml).toBeDefined();
+  });
+
+  it('callLlm: CLI not found → uses SDK directly', async () => {
+    mockResolveCli.mockResolvedValue(null);
+    mockClassify.mockResolvedValueOnce(classified('new'));
+
+    const result = await new AIBuilderOrchestrator().run({
+      userMessage: 'build a pipeline',
+      projectId: 'p1',
+    });
+
+    expect(mockCreate).toHaveBeenCalledTimes(1);
+    expect(result.intent).toBe('new');
     expect(result.generatedYaml).toBeDefined();
   });
 });

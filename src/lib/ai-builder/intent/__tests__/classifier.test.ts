@@ -1,13 +1,20 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { classifyIntent } from '../classifier';
 
-const { mockCreate } = vi.hoisted(() => ({ mockCreate: vi.fn() }));
+const { mockCreate, mockResolveCli, mockGetExeca } = vi.hoisted(() => ({
+  mockCreate: vi.fn(),
+  mockResolveCli: vi.fn(),
+  mockGetExeca: vi.fn(),
+}));
 
 vi.mock('@anthropic-ai/sdk', () => ({
   default: vi.fn().mockImplementation(function (this: { messages: { create: typeof mockCreate } }) {
     this.messages = { create: mockCreate };
   }),
 }));
+
+vi.mock('@/lib/cli-resolver', () => ({ resolveCli: mockResolveCli }));
+vi.mock('@/lib/execa', () => ({ getExeca: mockGetExeca }));
 
 function llmResponse(text: string, inputTokens = 100, outputTokens = 20) {
   return {
@@ -19,6 +26,8 @@ function llmResponse(text: string, inputTokens = 100, outputTokens = 20) {
 describe('classifyIntent (G19-2)', () => {
   beforeEach(() => {
     mockCreate.mockReset();
+    mockResolveCli.mockResolvedValue(null); // default: no CLI → use SDK
+    mockGetExeca.mockResolvedValue(vi.fn()); // default: unused
   });
 
   it('LLM returns new → intent="new", fallbackUsed=false', async () => {

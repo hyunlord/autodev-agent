@@ -15,6 +15,8 @@ import { extractJson } from '@/lib/utils/json-extractor';
 import { PipelineCompiler } from '@/lib/adpl/engine/compiler';
 import type { CompileError } from '@/lib/adpl/engine/compiler';
 import { parseYaml } from '@/lib/adpl/engine/compiler/yaml-parser';
+import { resolveCli } from '@/lib/cli-resolver';
+import { getExeca } from '@/lib/execa';
 
 /**
  * Stage 7 G6 G20-2 — ADPL Compiler validation + validate-retry loop.
@@ -33,6 +35,7 @@ const TEMPERATURE = 0.3;
 const SYSTEM_PROMPT_SOFT_BUDGET = 12000;
 const SDK_TIMEOUT_MS = 120_000;
 const MAX_ATTEMPTS = 3;
+const CLI_TIMEOUT_MS = 120_000;
 
 export class AIBuilderOrchestrator {
   async run(req: AIBuilderRequest): Promise<AIBuilderResult> {
@@ -157,6 +160,62 @@ export class AIBuilderOrchestrator {
   }
 
   private async callLlm(
+    context: AssembledContext,
+    retryMessages?: Array<{ role: 'user' | 'assistant'; content: string }>,
+  ): Promise<{ raw: string; costUsd: number; inputTokens: number; outputTokens: number }> {
+    const claudePath = await resolveCli('claude');
+    if (claudePath) {
+      try {
+        return await this.callLlmViaCli(claudePath, context, retryMessages);
+      } catch {
+        // CLI failed → fall through to SDK
+      }
+    }
+    return this.callLlmViaSdk(context, retryMessages);
+  }
+
+  private async callLlmViaCli(
+    claudePath: string,
+    context: AssembledContext,
+    retryMessages?: Array<{ role: 'user' | 'assistant'; content: string }>,
+  ): Promise<{ raw: string; costUsd: number; inputTokens: number; outputTokens: number }> {
+    const history = context.conversationHistory
+      .map((t) => `${t.role === 'user' ? 'User' : 'Assistant'}: ${t.content}`)
+      .join('\n\n');
+    const retryText = retryMessages
+      ?.map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
+      .join('\n\n') ?? '';
+    const fullPrompt = [context.systemPrompt, history, `User: ${context.userMessage}`, retryText]
+      .filter(Boolean)
+      .join('\n\n');
+
+    const execa = await getExeca();
+    const result = await execa(claudePath, [
+      '--output-format', 'text',
+      '--max-turns', '5',
+    ], {
+      timeout: CLI_TIMEOUT_MS,
+      reject: false,
+      input: fullPrompt,
+      env: { ...process.env },
+    });
+
+    if (result.exitCode !== 0) {
+      throw new Error(`claude CLI exited ${result.exitCode}: ${result.stderr.slice(0, 500)}`);
+    }
+
+    const raw = result.stdout;
+    const estimatedInputTokens = Math.ceil(fullPrompt.length / 4);
+    const estimatedOutputTokens = Math.ceil(raw.length / 4);
+    return {
+      raw,
+      costUsd: computeCost(estimatedInputTokens, estimatedOutputTokens),
+      inputTokens: estimatedInputTokens,
+      outputTokens: estimatedOutputTokens,
+    };
+  }
+
+  private async callLlmViaSdk(
     context: AssembledContext,
     retryMessages?: Array<{ role: 'user' | 'assistant'; content: string }>,
   ): Promise<{ raw: string; costUsd: number; inputTokens: number; outputTokens: number }> {
