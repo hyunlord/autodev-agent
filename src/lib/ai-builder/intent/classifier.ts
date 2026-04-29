@@ -74,6 +74,7 @@ async function getLlmOutput(
     try {
       const fullPrompt = `${SYSTEM_TAIL}\n\n${promptContent}`;
       const execa = await getExeca();
+      const { ANTHROPIC_API_KEY: _key, ...envWithoutKey } = process.env;
       const result = await execa(claudePath, [
         '--output-format', 'text',
         '--max-turns', '3',
@@ -81,7 +82,7 @@ async function getLlmOutput(
         timeout: CLI_TIMEOUT_MS,
         reject: false,
         input: fullPrompt,
-        env: { ...process.env },
+        env: envWithoutKey,
       });
       if (result.exitCode !== 0) throw new Error(`CLI exited ${result.exitCode}`);
       const text = result.stdout;

@@ -190,6 +190,7 @@ export class AIBuilderOrchestrator {
       .join('\n\n');
 
     const execa = await getExeca();
+    const { ANTHROPIC_API_KEY: _key, ...envWithoutKey } = process.env;
     const result = await execa(claudePath, [
       '--output-format', 'text',
       '--max-turns', '5',
@@ -197,7 +198,7 @@ export class AIBuilderOrchestrator {
       timeout: CLI_TIMEOUT_MS,
       reject: false,
       input: fullPrompt,
-      env: { ...process.env },
+      env: envWithoutKey,
     });
 
     if (result.exitCode !== 0) {
