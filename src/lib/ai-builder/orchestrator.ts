@@ -76,13 +76,14 @@ export class AIBuilderOrchestrator {
     let lastInputTokens = 0;
     let lastOutputTokens = 0;
     let lastParsed: GeneratorResponse | null = null;
+    const modes: Array<'cli' | 'sdk'> = [];
     let lastValidationErrors: CompileError[] = [];
     let retryMessages: Array<{ role: 'user' | 'assistant'; content: string }> | undefined;
 
     // Steps 3-5: LLM call + parse + validate (with retry)
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       // Step 3: call LLM
-      let llmResult: { raw: string; costUsd: number; inputTokens: number; outputTokens: number };
+      let llmResult: { raw: string; costUsd: number; inputTokens: number; outputTokens: number; mode: 'cli' | 'sdk' };
       try {
         llmResult = await this.callLlm(context, retryMessages);
       } catch (err) {
@@ -92,6 +93,7 @@ export class AIBuilderOrchestrator {
       totalCostUsd += llmResult.costUsd;
       lastInputTokens = llmResult.inputTokens;
       lastOutputTokens = llmResult.outputTokens;
+      modes.push(llmResult.mode);
 
       // steps uses set-semantics: each phase recorded once; use `attempts` for retry count.
       if (!steps.includes('call_llm')) steps.push('call_llm');
@@ -126,6 +128,7 @@ export class AIBuilderOrchestrator {
           lastInputTokens,
           lastOutputTokens,
           diff,
+          this.deriveMode(modes),
         );
       }
 
@@ -152,6 +155,7 @@ export class AIBuilderOrchestrator {
       lastInputTokens,
       lastOutputTokens,
       diff,
+      this.deriveMode(modes),
     );
   }
 
@@ -159,10 +163,17 @@ export class AIBuilderOrchestrator {
     return assembleSystemPrompt(req, classification);
   }
 
+  private deriveMode(modes: Array<'cli' | 'sdk'>): 'cli' | 'sdk' | 'mixed' {
+    if (modes.length === 0) return 'sdk';
+    if (modes.every((m) => m === 'cli')) return 'cli';
+    if (modes.every((m) => m === 'sdk')) return 'sdk';
+    return 'mixed';
+  }
+
   private async callLlm(
     context: AssembledContext,
     retryMessages?: Array<{ role: 'user' | 'assistant'; content: string }>,
-  ): Promise<{ raw: string; costUsd: number; inputTokens: number; outputTokens: number }> {
+  ): Promise<{ raw: string; costUsd: number; inputTokens: number; outputTokens: number; mode: 'cli' | 'sdk' }> {
     const claudePath = await resolveCli('claude');
     if (claudePath) {
       try {
@@ -178,7 +189,7 @@ export class AIBuilderOrchestrator {
     claudePath: string,
     context: AssembledContext,
     retryMessages?: Array<{ role: 'user' | 'assistant'; content: string }>,
-  ): Promise<{ raw: string; costUsd: number; inputTokens: number; outputTokens: number }> {
+  ): Promise<{ raw: string; costUsd: number; inputTokens: number; outputTokens: number; mode: 'cli' }> {
     const history = context.conversationHistory
       .map((t) => `${t.role === 'user' ? 'User' : 'Assistant'}: ${t.content}`)
       .join('\n\n');
@@ -214,13 +225,14 @@ export class AIBuilderOrchestrator {
       costUsd: computeCost(estimatedInputTokens, estimatedOutputTokens),
       inputTokens: estimatedInputTokens,
       outputTokens: estimatedOutputTokens,
+      mode: 'cli' as const,
     };
   }
 
   private async callLlmViaSdk(
     context: AssembledContext,
     retryMessages?: Array<{ role: 'user' | 'assistant'; content: string }>,
-  ): Promise<{ raw: string; costUsd: number; inputTokens: number; outputTokens: number }> {
+  ): Promise<{ raw: string; costUsd: number; inputTokens: number; outputTokens: number; mode: 'sdk' }> {
     const Anthropic = (await import('@anthropic-ai/sdk')).default;
     const anthropic = new Anthropic({ timeout: SDK_TIMEOUT_MS });
 
@@ -242,7 +254,7 @@ export class AIBuilderOrchestrator {
     const inputTokens = response.usage?.input_tokens ?? 0;
     const outputTokens = response.usage?.output_tokens ?? 0;
 
-    return { raw, costUsd: computeCost(inputTokens, outputTokens), inputTokens, outputTokens };
+    return { raw, costUsd: computeCost(inputTokens, outputTokens), inputTokens, outputTokens, mode: 'sdk' as const };
   }
 
   private parseResponse(raw: string): GeneratorResponse {
@@ -334,6 +346,7 @@ export class AIBuilderOrchestrator {
     inputTokens: number,
     outputTokens: number,
     diff?: AIBuilderDiff,
+    mode?: 'cli' | 'sdk' | 'mixed',
   ): AIBuilderResult {
     return {
       intent: parsed.intent_recognized,
@@ -357,6 +370,7 @@ export class AIBuilderOrchestrator {
       totalCostUsd,
       inputTokens,
       outputTokens,
+      mode,
     };
   }
 
@@ -371,6 +385,7 @@ export class AIBuilderOrchestrator {
     inputTokens: number,
     outputTokens: number,
     diff?: AIBuilderDiff,
+    mode?: 'cli' | 'sdk' | 'mixed',
   ): AIBuilderResult {
     const errorWarnings = validationErrors.map(
       (e) => `[${e.code}]${e.pathId ? ` (${e.pathId})` : ''}: ${e.message}`,
@@ -400,6 +415,7 @@ export class AIBuilderOrchestrator {
       totalCostUsd,
       inputTokens,
       outputTokens,
+      mode,
     };
   }
 

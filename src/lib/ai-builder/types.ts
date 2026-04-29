@@ -51,6 +51,8 @@ export interface AIBuilderResult {
   inputTokens?: number;
   /** Generator output token count (debug). */
   outputTokens?: number;
+  /** Which execution mode was used for LLM calls. */
+  mode?: 'cli' | 'sdk' | 'mixed';
 }
 
 /** LLM response shape for the intent classifier. The classifier wraps this with
