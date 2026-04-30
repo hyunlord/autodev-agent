@@ -176,6 +176,4 @@ All contributions must pass `pnpm ship` (build + typecheck + API health + UI hea
 
 ## 📜 License
 
-Copyright 2025–2026 Kwan Hyeon Park. All rights reserved.
-
-See [LICENSE](LICENSE) for terms.
+[MIT License](LICENSE) — Copyright 2025–2026 Kwan Hyeon Park.
