@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import MissionHeader from './components/mission/MissionHeader';
 import KanbanView from './components/mission/KanbanView';
 import GridView from './components/mission/GridView';
@@ -8,6 +9,7 @@ import TimelineView from './components/mission/TimelineView';
 import ProjectsView from './components/mission/ProjectsView';
 import KpiBar from './components/mission/KpiBar';
 import NewTaskModal from './components/mission/NewTaskModal';
+import CreateProjectModal from './components/mission/CreateProjectModal';
 
 interface Task {
   id: string;
@@ -43,9 +45,11 @@ function parseResult(result: unknown): Record<string, unknown> | null {
 }
 
 export default function MissionControl() {
+  const router = useRouter();
   const [view, setView] = useState<'kanban' | 'grid' | 'timeline' | 'projects'>('projects');
   const [tasks, setTasks] = useState<Task[]>([]);
   const [showNewTask, setShowNewTask] = useState(false);
+  const [showNewProject, setShowNewProject] = useState(false);
   const [taskEvents, setTaskEvents] = useState<Record<string, TaskEvent[]>>({});
   const [initialProjectDir, setInitialProjectDir] = useState<string | undefined>();
   const [chainTask, setChainTask] = useState<{ id: string; prompt: string } | null>(null);
@@ -160,7 +164,7 @@ export default function MissionControl() {
         {view === 'kanban' && <KanbanView tasks={tasks} />}
         {view === 'grid' && <GridView tasks={tasks} onNewTask={() => setShowNewTask(true)} />}
         {view === 'timeline' && <TimelineView tasks={tasks} events={taskEvents} />}
-        {view === 'projects' && <ProjectsView projects={projects} onNewProject={() => setShowNewTask(true)} />}
+        {view === 'projects' && <ProjectsView projects={projects} onNewProject={() => setShowNewProject(true)} />}
       </div>
 
       <KpiBar
@@ -179,6 +183,16 @@ export default function MissionControl() {
           onCreated={() => { setShowNewTask(false); fetchTasks(); }}
           initialProjectDir={initialProjectDir}
           chainTask={chainTask}
+        />
+      )}
+
+      {showNewProject && (
+        <CreateProjectModal
+          onClose={() => setShowNewProject(false)}
+          onCreated={(project) => {
+            setShowNewProject(false);
+            router.push(`/projects/${encodeURIComponent(btoa(project.path))}`);
+          }}
         />
       )}
     </div>
